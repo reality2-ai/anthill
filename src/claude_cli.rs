@@ -114,7 +114,7 @@ pub async fn claude_cli_worker(
         let mut args = vec![
             "-p".to_string(),
             "--output-format".to_string(),
-            "text".to_string(),
+            "stream-json".to_string(),
         ];
         if config.skip_permissions {
             args.push("--dangerously-skip-permissions".to_string());
@@ -186,23 +186,91 @@ pub async fn claude_cli_worker(
             cmd.stdout(std::process::Stdio::piped());
             cmd.stderr(std::process::Stdio::piped());
 
-            let response_text = match cmd.output().await {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let response_text = match cmd.spawn() {
+                Ok(mut child) => {
+                    let stdout = child.stdout.take();
+                    let mut result_text = String::new();
 
-                    if output.status.success() {
-                        if stdout.trim().is_empty() {
-                            "(no output)".to_string()
-                        } else {
-                            stdout
+                    if let Some(stdout) = stdout {
+                        use tokio::io::{AsyncBufReadExt, BufReader};
+                        let mut reader = BufReader::new(stdout).lines();
+
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            // Parse stream-json line.
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                let msg_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                                match msg_type {
+                                    "assistant" => {
+                                        // Check for tool_use in content.
+                                        if let Some(content) = json.pointer("/message/content") {
+                                            if let Some(arr) = content.as_array() {
+                                                for block in arr {
+                                                    let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                                    if block_type == "tool_use" {
+                                                        let tool = block.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                                                        let detail = match tool {
+                                                            "Bash" => {
+                                                                let cmd = block.pointer("/input/command").and_then(|c| c.as_str()).unwrap_or("");
+                                                                let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                                                                format!("Running: {}", short)
+                                                            }
+                                                            "Read" => {
+                                                                let path = block.pointer("/input/file_path").and_then(|p| p.as_str()).unwrap_or("");
+                                                                format!("Reading: {}", path.rsplit('/').next().unwrap_or(path))
+                                                            }
+                                                            "Edit" | "Write" => {
+                                                                let path = block.pointer("/input/file_path").and_then(|p| p.as_str()).unwrap_or("");
+                                                                format!("Writing: {}", path.rsplit('/').next().unwrap_or(path))
+                                                            }
+                                                            "Glob" | "Grep" => {
+                                                                let pattern = block.pointer("/input/pattern").and_then(|p| p.as_str()).unwrap_or("");
+                                                                format!("Searching: {}", pattern)
+                                                            }
+                                                            "Agent" => {
+                                                                let desc = block.pointer("/input/description").and_then(|d| d.as_str()).unwrap_or("sub-task");
+                                                                format!("Spawned agent: {}", desc)
+                                                            }
+                                                            _ => format!("Using: {}", tool),
+                                                        };
+
+                                                        if let Some(ref tx) = etx {
+                                                            let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                                                bot: bname.clone(),
+                                                                task_id,
+                                                                kind: if tool == "Agent" { "agent_spawn".into() } else { "tool_use".into() },
+                                                                detail,
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    "result" => {
+                                        // Final result — extract the text.
+                                        if let Some(text) = json.get("result").and_then(|r| r.as_str()) {
+                                            result_text = text.to_string();
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
                         }
-                    } else if !stderr.trim().is_empty() {
-                        format!("Error: {}", stderr.trim())
-                    } else if !stdout.trim().is_empty() {
-                        stdout
+                    }
+
+                    // Wait for process to finish.
+                    let status = child.wait().await;
+
+                    if result_text.is_empty() {
+                        // Fallback: read stderr.
+                        match status {
+                            Ok(s) if s.success() => "(no output)".to_string(),
+                            Ok(s) => format!("Process exited with code {}", s),
+                            Err(e) => format!("Error: {}", e),
+                        }
                     } else {
-                        format!("Process exited with code {}", output.status)
+                        result_text
                     }
                 }
                 Err(e) => format!("Failed to run claude: {}", e),

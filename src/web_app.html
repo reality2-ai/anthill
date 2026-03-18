@@ -612,9 +612,23 @@ function handleEvent(msg) {
 
     case 'task_started':
       if (!state.tasks[msg.bot]) state.tasks[msg.bot] = [];
-      state.tasks[msg.bot].push({ id: msg.task_id, preview: msg.preview, startTime: Date.now() });
+      state.tasks[msg.bot].push({ id: msg.task_id, preview: msg.preview, startTime: Date.now(), progress: [] });
       renderTasks();
       renderBotList();
+      break;
+
+    case 'task_progress':
+      if (state.tasks[msg.bot]) {
+        const task = state.tasks[msg.bot].find(t => t.id === msg.task_id);
+        if (task) {
+          task.lastProgress = msg.detail;
+          if (!task.progress) task.progress = [];
+          task.progress.push({ kind: msg.kind, detail: msg.detail, time: Date.now() });
+          // Keep last 20 progress entries.
+          if (task.progress.length > 20) task.progress = task.progress.slice(-20);
+          renderTasks();
+        }
+      }
       break;
 
     case 'task_completed':
@@ -727,10 +741,18 @@ function renderTasks() {
   panel.innerHTML = tasks.map(t => {
     const secs = Math.floor((Date.now() - t.startTime) / 1000);
     const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    return `<div class="task-item">
-      <span class="task-preview">#${t.id} ${escapeHtml(t.preview)}</span>
-      <span class="task-time">${time}</span>
-      <span class="task-cancel" onclick="cancelTask(${t.id})">cancel</span>
+    const progress = t.lastProgress ? `<div style="font-size:12px;color:var(--green);margin-top:2px">${escapeHtml(t.lastProgress)}</div>` : '';
+    const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
+    const agentList = agents.length ? agents.map(a =>
+      `<div style="font-size:11px;color:var(--yellow);margin-top:1px;padding-left:12px">↳ ${escapeHtml(a.detail)}</div>`
+    ).join('') : '';
+    return `<div class="task-item" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="task-preview">#${t.id} ${escapeHtml(t.preview)}</span>
+        <span class="task-time">${time}</span>
+        <span class="task-cancel" onclick="cancelTask(${t.id})">cancel</span>
+      </div>
+      ${progress}${agentList}
     </div>`;
   }).join('');
 }

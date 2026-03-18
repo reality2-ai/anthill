@@ -34,6 +34,16 @@ pub enum WsEvent {
         task_id: u32,
         duration_secs: u64,
     },
+    /// Real-time progress from a running task.
+    #[serde(rename = "task_progress")]
+    TaskProgress {
+        bot: String,
+        task_id: u32,
+        /// What's happening: "tool_use", "agent_spawn", "text"
+        kind: String,
+        /// Human-readable description: "Running: ls -la", "Reading: src/main.rs"
+        detail: String,
+    },
     /// User sent a message (for history and cross-device sync).
     #[serde(rename = "user_message")]
     UserMessage {
