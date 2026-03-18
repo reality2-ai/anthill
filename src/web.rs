@@ -90,17 +90,47 @@ async fn service_worker() -> impl IntoResponse {
     )
 }
 
-/// Generate a PNG icon from an SVG at the given size.
+/// Generate a stylised ant icon as SVG.
 fn render_icon(size: u32) -> Vec<u8> {
-    // Simple SVG → return as SVG disguised as PNG is not ideal.
-    // Instead, generate a minimal valid PNG with the R2 logo.
-    // For now, return an SVG served with PNG content type — browsers handle it.
-    // TODO: proper PNG generation or embedded PNG.
     let svg = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{s}" height="{s}" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="96" fill="#1a1a2e"/>
-  <text x="256" y="300" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="200" fill="#e94560">AH</text>
-  <text x="256" y="420" text-anchor="middle" font-family="Arial,sans-serif" font-size="100" fill="#4ade80">IL</text>
+  <!-- Antennae -->
+  <line x1="220" y1="120" x2="190" y2="60" stroke="#4ade80" stroke-width="8" stroke-linecap="round"/>
+  <line x1="292" y1="120" x2="322" y2="60" stroke="#4ade80" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="186" cy="56" r="10" fill="#4ade80"/>
+  <circle cx="326" cy="56" r="10" fill="#4ade80"/>
+  <!-- Head -->
+  <ellipse cx="256" cy="148" rx="52" ry="44" fill="#e94560"/>
+  <!-- Eyes -->
+  <circle cx="238" cy="140" r="10" fill="#1a1a2e"/>
+  <circle cx="274" cy="140" r="10" fill="#1a1a2e"/>
+  <circle cx="240" cy="138" r="4" fill="#fff"/>
+  <circle cx="276" cy="138" r="4" fill="#fff"/>
+  <!-- Thorax -->
+  <ellipse cx="256" cy="232" rx="42" ry="46" fill="#e94560"/>
+  <!-- Abdomen -->
+  <ellipse cx="256" cy="348" rx="64" ry="72" fill="#e94560"/>
+  <!-- Abdomen stripes -->
+  <ellipse cx="256" cy="320" rx="56" ry="8" fill="#c4314e" opacity="0.5"/>
+  <ellipse cx="256" cy="350" rx="60" ry="8" fill="#c4314e" opacity="0.5"/>
+  <ellipse cx="256" cy="380" rx="52" ry="8" fill="#c4314e" opacity="0.5"/>
+  <!-- Legs left -->
+  <line x1="224" y1="216" x2="150" y2="180" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="150" y1="180" x2="120" y2="220" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="218" y1="240" x2="140" y2="252" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="140" y1="252" x2="108" y2="290" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="220" y1="268" x2="148" y2="310" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="148" y1="310" x2="118" y2="356" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <!-- Legs right -->
+  <line x1="288" y1="216" x2="362" y2="180" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="362" y1="180" x2="392" y2="220" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="294" y1="240" x2="372" y2="252" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="372" y1="252" x2="404" y2="290" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="292" y1="268" x2="364" y2="310" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <line x1="364" y1="310" x2="394" y2="356" stroke="#e94560" stroke-width="8" stroke-linecap="round"/>
+  <!-- Label -->
+  <text x="256" y="478" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="48" fill="#4ade80">ANTHILL</text>
 </svg>"##,
         s = size
     );
