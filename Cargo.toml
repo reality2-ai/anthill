@@ -45,6 +45,10 @@ toml = "0.8"
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
 
+# WebSocket client (for Slack Socket Mode)
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+
 # Error handling
 anyhow = "1"
 

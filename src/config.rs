@@ -13,6 +13,7 @@ pub struct Config {
     pub mode: String,
 
     pub telegram: TelegramConfig,
+    pub slack: SlackConfig,
     pub raw: RawConfig,
     pub ai: AiConfig,
     pub claude: ClaudeConfig,
@@ -25,6 +26,15 @@ pub struct TelegramConfig {
     pub token: Option<String>,
     /// Allowed chat IDs. Empty = allow all.
     pub allow: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct SlackConfig {
+    /// Slack bot token (xoxb-...).
+    pub bot_token: Option<String>,
+    /// Slack app-level token for Socket Mode (xapp-...).
+    pub app_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

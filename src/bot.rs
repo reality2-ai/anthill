@@ -59,6 +59,15 @@ pub async fn run_bot(
         (tx, None)
     };
 
+    // Slack plugin (optional — only if both tokens are configured).
+    if let (Some(bot_token), Some(app_token)) = (&cfg.slack.bot_token, &cfg.slack.app_token) {
+        let slack_plugin = plugins::slack::SlackPlugin::new(
+            4, &rt, bot_token.clone(), app_token.clone(), use_ai_routing, message_queue.clone(),
+        );
+        bus.register_plugin(Box::new(slack_plugin));
+        log::info!("[{}] Slack enabled", bot_name);
+    }
+
     match mode {
         "claude" => {
             let response_queue = Arc::new(Mutex::new(VecDeque::new()));
