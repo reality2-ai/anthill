@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" width="800" height="280">
-  <rect width="800" height="280" rx="24" fill="#1a1a2e"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 280" width="680" height="280">
+  <rect width="680" height="280" rx="24" fill="#1a1a2e"/>
 
   <!-- Simple mound -->
   <path d="M30,195 Q100,70 170,195" fill="#e94560"/>
