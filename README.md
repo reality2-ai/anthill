@@ -1,6 +1,12 @@
-# Anthill
+<p align="center">
+  <img src="docs/logo.svg" alt="Anthill" width="600">
+</p>
 
-A colony for **ANTS** — Autonomous iNTelligenceS.
+<p align="center">
+  <em>A colony for <strong>ANTS</strong> — Autonomous iNTelligenceS</em>
+</p>
+
+---
 
 Anthill uses [Reality2](https://reality2.ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage connections to AI backends (such as [Claude](https://www.anthropic.com/), [ChatGPT](https://openai.com/), or local models via [Ollama](https://ollama.com/)), messaging platforms ([Telegram](https://telegram.org/), [Slack](https://slack.com/)), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
 
