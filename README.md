@@ -1,79 +1,43 @@
 # Anthill
 
-AI-powered Telegram bots backed by Claude Code, built on the Reality2 (R2) sentant engine.
+A colony for **ANTS** — Autonomous iNTelligenceS.
 
-## What is Anthill?
-
-Anthill lets you interact with Claude Code from your phone via Telegram. Send a message, get intelligent responses with full Claude Code capabilities — file editing, shell commands, code generation, git operations — all from a chat interface.
-
-It supports multiple bots running simultaneously, each with their own personality, working directory, per-user memory, and conversation context. A built-in supervisor manages all bots and restarts them if they crash.
+Anthill lets you run AI agents (powered by Claude Code) on a server and interact with them from anywhere — your phone, laptop, tablet — via Telegram or a built-in web dashboard. Each ANT has its own personality, workspace, persistent memory, and conversation context.
 
 ## Features
 
-- **Claude Code via Telegram** — full tool use (file editing, shell commands, git) from your phone
-- **Per-user memory** — each user gets a persistent memory file that Claude reads and updates
-- **Conversation continuity** — uses `claude -p --continue` to maintain context across messages
-- **Multiple bots** — supervisor manages any number of bots, each with their own config
-- **Auto-restart** — crashed bots are restarted with exponential backoff
+- **Multiple ANTS** — run any number of AI agents, each with their own config, personality, and workspace
+- **Telegram interface** — talk to your ANTS from your phone with typing indicators, markdown rendering, and code blocks
+- **Web dashboard** — responsive UI accessible from any device on your network (PWA installable on mobile/desktop)
+- **Concurrent tasks** — send messages while others are running; check progress with `/ants`, cancel with `/cancel`
+- **Per-user memory** — each user gets a persistent memory file that the ANT reads and updates across conversations
+- **Conversation continuity** — sessions survive restarts via `claude -p --continue`
+- **Git-backed workspace** — working directory auto-committed on a schedule, with optional push to GitHub
+- **Supervisor** — manages all ANTS, auto-restarts crashed ones with exponential backoff
 - **Systemd integration** — starts on boot, logs to journalctl
-- **Typing indicator** — shows the Telegram "typing..." bubble while Claude is working
-- **Markdown rendering** — headings, code blocks, bold, italic, links all render natively in Telegram
-- **Git backups** — working directory auto-committed on a schedule
-- **Access control** — restrict bots to specific Telegram chat IDs
-- **Custom personalities** — each bot gets its own system prompt
+- **Access control** — restrict each ANT to specific Telegram chat IDs
+- **Tailscale support** — access the web dashboard from any device on your Tailscale network
 
-## How it uses Reality2
+## How It Works
 
-Anthill is built on the R2 sentant engine — the same event-driven architecture used for IoT sensor networks. Every component is either a **sentant** (a deterministic state machine) or a **plugin** (a hardware/service adapter):
+Each ANT runs Claude Code in print mode (`claude -p`) per message. This gives full Claude Code capabilities — file editing, shell commands, code generation, git operations — with clean text output suitable for chat interfaces. No TUI, no ANSI escape codes.
 
-**Sentants** — pure FSMs that receive events and emit events. No I/O, no side effects:
-
-| Sentant | States | Role |
-|---|---|---|
-| ClaudeCliSentant | Idle → Running → Idle | Coordinates the Claude Code conversation flow |
-| AiSentant | Idle → Translating → Executing → Summarising → Idle | Coordinates NL→command→summary pipeline |
-
-**Plugins** — service adapters that bridge external I/O into the event bus:
-
-| Plugin | Role |
-|---|---|
-| TelegramPlugin | Bridges Telegram Bot API ↔ R2 events; handles message formatting, output batching, session routing |
-| PtyPlugin | Manages pseudo-terminal lifecycle, input/output, chunking |
-| ClaudeCliPlugin | Polls for completed Claude CLI responses |
-| AiPlugin | Polls for Claude API responses (ai mode) |
-
-Sentants only see events — they don't know about Telegram, PTY, or Claude. They make decisions (which state to enter, which events to emit) and the plugins handle the actual I/O. This separation keeps sentant logic testable and deterministic.
-
-All communication flows through **R2 events** (CBOR-encoded, FNV-hashed names) on the **EventBus**. Sentants never perform I/O directly — they push **Actions** (send event, call plugin, delayed send) and the engine executes them.
-
-**Side-channels** bypass the engine's 256-byte PayloadBuf limit for large data (Claude responses, terminal output). These use `tokio::mpsc` channels shared between plugins and sentants.
-
-**Delayed sends** with replacement semantics (R2-SENTANT §3.1.5) implement debounce timers — one timer per (sentant, event_hash) pair. Setting a new timer replaces the pending one.
-
-## Operating Modes
-
-| Mode | Description | Use case |
-|---|---|---|
-| `claude` | Runs `claude -p` per message | Full Claude Code capabilities via Telegram |
-| `ai` | NL → shell command → summarised output | Lightweight shell assistant (needs API key) |
-| `raw` | Persistent PTY with raw terminal output | Direct shell access from Telegram |
+The architecture uses the Reality2 (R2) sentant engine:
+- **Sentants** (pure state machines) make decisions — which messages to dispatch, when to cancel, how to route responses
+- **Plugins** handle I/O — Telegram API, Claude CLI processes, WebSocket connections
+- Events carry decisions (small, < 256 bytes). Plugins carry data (unlimited). This separation keeps the logic testable and deterministic.
 
 ## Prerequisites
 
-### 1. Install Rust
+### 1. [Rust](https://www.rust-lang.org/tools/install)
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
-```
-
-Verify:
-
-```bash
 cargo --version
 ```
 
-### 2. Install Node.js (required for Claude Code)
+### 2. [Node.js](https://nodejs.org/) (required for Claude Code)
 
 ```bash
 # Arch/Manjaro
@@ -86,16 +50,20 @@ sudo apt install nodejs npm
 brew install node
 ```
 
-### 3. Install Claude Code
+### 3. [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+
+You need an [Anthropic account](https://console.anthropic.com/) or a Claude Pro/Team subscription.
+
+Install the CLI:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
 ```
 
-Authenticate Claude Code — you need to do this once interactively before the bot can use it:
+**Authenticate Claude Code** — this must be done once interactively on the machine where Anthill will run:
 
 ```bash
-cd /tmp    # or any directory
+cd /tmp
 claude
 ```
 
@@ -105,33 +73,55 @@ Follow the prompts to:
 3. Verify it works — type "hello" and wait for a response
 4. Exit with `/exit`
 
-Then verify print mode works (this is how the bot runs Claude):
+**Verify print mode** — this is how Anthill runs Claude:
 
 ```bash
 claude -p "Say hello"
 ```
 
-You should see a plain text response with no TUI formatting. If this works, the bot will work.
+You should see a plain text response. If this works, Anthill will work.
 
-### 4. Create a Telegram Bot
+**Important:** Claude Code must be authenticated as the same user that will run Anthill. If you install as a systemd service running as `roycdavies`, Claude Code must be authenticated under that user account.
 
-1. Open Telegram on your phone or desktop
-2. Search for **@BotFather** and start a chat
+### 4. [Telegram](https://telegram.org/) bot token
+
+1. Install [Telegram](https://telegram.org/apps) on your phone or desktop
+2. Message [**@BotFather**](https://t.me/BotFather)
 3. Send `/newbot`
-4. Choose a display name (e.g. "My Dev Assistant")
-5. Choose a username — must end in `bot` (e.g. `my_dev_assistant_bot`)
-6. BotFather replies with a **bot token** like `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`
-7. Save this token — you'll need it for the config file
+4. Choose a display name (e.g. "My Dev ANT")
+5. Choose a username ending in `bot` (e.g. `my_dev_ant_bot`)
+6. BotFather replies with a **bot token** — save it for the config file
+7. Each ANT needs its own bot token (create multiple via @BotFather)
 
-**Find your chat ID** (recommended, for access control):
-
-1. Search for **@userinfobot** on Telegram and start a chat
+**Find your chat ID** (recommended for access control):
+1. Message [**@userinfobot**](https://t.me/userinfobot) on Telegram
 2. It replies with your numeric chat ID (e.g. `123456789`)
-3. Use this in the `allow` config to restrict who can talk to the bot
 
-### 5. Install GitHub CLI (optional)
+### 5. [Tailscale](https://tailscale.com/) (recommended for web dashboard)
 
-Only needed if you want Claude to clone private repos, create PRs, etc.
+[Tailscale](https://tailscale.com/) creates a private encrypted network between your devices. Install it on both the server running Anthill and the devices you want to access it from.
+
+```bash
+# Arch/Manjaro
+sudo pacman -S tailscale
+sudo systemctl enable --now tailscaled
+sudo tailscale up
+
+# Ubuntu/Debian
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# Android/iOS — install from your app store:
+# https://tailscale.com/download
+```
+
+After setup, your server gets a Tailscale IP (e.g. `100.91.6.128`). The Anthill web dashboard is accessible at `http://<tailscale-ip>:3000` from any device on your Tailscale network — phone, laptop, tablet.
+
+**Why Tailscale?** The web dashboard doesn't require a login — if you can reach the URL, you're trusted. Tailscale ensures only your devices can reach it. No port forwarding, no public exposure.
+
+### 6. [GitHub CLI](https://cli.github.com/) (optional)
+
+Only needed if you want your ANT to clone private repos, create PRs, etc.
 
 ```bash
 # Arch/Manjaro
@@ -147,549 +137,391 @@ brew install gh
 gh auth login
 ```
 
-Follow the prompts to authenticate via browser or token.
+## Quick Start (Single ANT)
 
-### 6. Clone the R2 repository
-
-```bash
-mkdir -p ~/Development/R2
-cd ~/Development/R2
-git clone https://github.com/reality2-ai/r2-core.git
-cd r2-core
-```
-
-## Quick Start (Single Bot)
-
-For testing or running a single bot without the supervisor.
-
-### 1. Build
+For testing or running a single ANT without the supervisor.
 
 ```bash
-cd r2-core/tools/anthill
-cargo build -p anthill --release
-```
+# Clone
+git clone https://github.com/reality2-ai/anthill.git
+cd anthill
 
-### 2. Configure
-
-```bash
+# Configure
 cp anthill-example.toml anthill.toml
+# Edit anthill.toml — set telegram.token, mode = "claude", claude.skip_permissions = true
+
+# Build and run
+cargo run --release
 ```
 
-Edit `anthill.toml`:
+Send a message to your bot on Telegram. You should see a typing indicator, "Thinking...", then Claude's response.
 
-```toml
-mode = "claude"
+## Production Setup
 
-[telegram]
-token = "YOUR_BOT_TOKEN_HERE"
-allow = [YOUR_CHAT_ID]     # optional but recommended
+For running one or more ANTS as a system service that starts on boot.
 
-[claude]
-skip_permissions = true     # required for non-interactive mode
-system_prompt = """\
-You are a helpful programming assistant."""
-```
-
-### 3. Run
-
-```bash
-cargo run -p anthill --release
-```
-
-### 4. Test
-
-Open Telegram, find your bot, and send a message. You should see:
-
-1. A typing indicator ("..." bubble)
-2. A "Thinking..." message
-3. Claude's response with proper formatting
-
-Try: "What's 2+2?" or "Write a Python hello world".
-
-## Production Setup (Multi-Bot with Supervisor)
-
-For running one or more bots as a system service that starts on boot.
-
-### Directory Structure
+### Directory layout
 
 ```
 ~/.config/anthill/
-├── supervisor.toml               # Supervisor settings
-└── bots/
-    ├── dev-assistant/
-    │   └── bot.toml              # Bot config
-    ├── ops-bot/
-    │   └── bot.toml
-    └── ...
+├── supervisor.toml               # Supervisor settings (port, restart policy)
+├── history/                      # Chat history (auto-created)
+│   ├── alfred.jsonl              # Per-ANT, loaded by web dashboard
+│   └── hine.jsonl
+└── ants/                         # One subdirectory per ANT
+    ├── alfred/
+    │   └── ant.toml              # ANT config
+    └── hine/
+        └── ant.toml
 ```
 
-Each bot also gets an auto-created working directory:
+Each ANT also has a **working directory** (set in `ant.toml`):
 
 ```
-<working_dir>/                    # Set in bot.toml [claude] section
+<working_dir>/                    # e.g. ~/Development/anthill-alfred
 ├── .git/                         # Auto-initialised for backups
+├── .gitignore                    # Auto-created: excludes repos/
 ├── memory/                       # Per-user memory files
 │   ├── 123456789.md              # One file per Telegram chat ID
-│   └── 987654321.md
-└── repos/                        # Cloned git repositories
+│   └── 0.md                     # Web dashboard user (chat_id 0)
+└── repos/                        # Cloned git repositories (excluded from backup)
 ```
 
-### Step-by-step Setup
+### Step-by-step setup
 
-#### 1. Install
+#### 1. Clone and install
 
 ```bash
-cd ~/Development/R2/r2-core/tools/anthill
+git clone https://github.com/reality2-ai/anthill.git
+cd anthill
 ./install.sh
 ```
 
 This will:
 - Build a release binary
 - Copy it to `/usr/local/bin/anthill`
-- Create `~/.config/anthill/bots/`
+- Create `~/.config/anthill/ants/`
 - Generate a systemd service file for your user
-- Install the service (requires sudo)
+- Install the service
 
-#### 2. Create your first bot
+#### 2. Create your first ANT
 
 ```bash
-mkdir -p ~/.config/anthill/bots/dev-assistant
-cp config-example/bots/dev-assistant/bot.toml \
-   ~/.config/anthill/bots/dev-assistant/bot.toml
+mkdir -p ~/.config/anthill/ants/my-ant
+cp config-example/ants/dev-assistant/ant.toml ~/.config/anthill/ants/my-ant/ant.toml
 ```
 
-#### 3. Configure the bot
+#### 3. Configure the ANT
 
-Edit `~/.config/anthill/bots/dev-assistant/bot.toml`:
+Edit `~/.config/anthill/ants/my-ant/ant.toml`:
 
 ```toml
+# Display name shown in the web dashboard.
+name = "My Dev ANT"
+
 mode = "claude"
 
 [telegram]
-# Your bot token from @BotFather
+# Bot token from @BotFather
 token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 
-# Restrict access to your chat ID (strongly recommended for production)
+# Restrict to your chat ID (strongly recommended)
 allow = [123456789]
 
 [claude]
-# Where Claude works — files created here, memory stored here
-working_dir = "/home/youruser/.config/anthill/bots/dev-assistant/working"
+# Where the ANT works — all files, memory, repos go here
+working_dir = "/home/youruser/Development/anthill-my-ant"
 
-# Per-user memory and git repos (relative to working_dir)
+# Per-user memory and repos (relative to working_dir)
 memory_dir = "memory"
 repos_dir = "repos"
 
-# REQUIRED for non-interactive mode — lets Claude run commands
+# REQUIRED — lets Claude run commands without interactive approval
 skip_permissions = true
 
-# Auto-commit working directory changes every 6 hours
+# Auto-commit workspace changes every 6 hours
 backup_interval_hours = 6
 
-# Bot personality
+# ANT personality
 system_prompt = """\
 You are a helpful programming assistant. Always carefully consider what is \
 being instructed and push back when appropriate. Be a devil's advocate — \
-everything is a conjecture and should be subject to refutation. \
-If you think an approach is wrong, say so and explain why. \
-If you agree, explain your reasoning. Never just comply blindly."""
+everything is a conjecture and should be subject to refutation."""
 ```
 
-**Important notes:**
+**Key points:**
+- `skip_permissions = true` is required — without it, Claude can't run commands non-interactively
+- Each ANT needs its own Telegram bot token
+- The `name` field is what shows in the web dashboard sidebar (falls back to directory name)
+- `working_dir` should be a dedicated directory for this ANT — it becomes a git repo
 
-- Replace `token` with your actual bot token from @BotFather
-- Replace `allow` with your actual Telegram chat ID
-- Replace `/home/youruser/` with your actual home directory
-- `skip_permissions = true` is required — without it, Claude will ask for permission to run commands but there's no way to approve them non-interactively
-- Each bot needs its **own** Telegram bot token (create another via @BotFather)
+#### 4. Configure the supervisor (optional)
 
-#### 4. Add more bots (optional)
+Edit `~/.config/anthill/supervisor.toml`:
 
-Repeat steps 2–3 for each bot:
+```toml
+ants_dir = "ants"
+restart_on_crash = true
+restart_delay_secs = 5
+max_restarts = 10
 
-```bash
-# Create a second bot
-mkdir -p ~/.config/anthill/bots/ops-bot
-cp config-example/bots/dev-assistant/bot.toml \
-   ~/.config/anthill/bots/ops-bot/bot.toml
-
-# Edit with a different token, working_dir, and system_prompt
-$EDITOR ~/.config/anthill/bots/ops-bot/bot.toml
+# Web dashboard
+http_port = 3000
+http_bind = "0.0.0.0"
 ```
 
-Each bot can have a completely different personality, working directory, and access control.
-
-#### 5. Start the supervisor
+#### 5. Add more ANTS (optional)
 
 ```bash
-# Start now and enable on boot
+mkdir -p ~/.config/anthill/ants/another-ant
+cp config-example/ants/dev-assistant/ant.toml ~/.config/anthill/ants/another-ant/ant.toml
+# Edit ant.toml — different token, working_dir, personality
+```
+
+#### 6. Start
+
+```bash
+# Via systemd (auto-starts on boot)
 sudo systemctl enable --now anthill
-```
 
-Or run manually without systemd:
-
-```bash
+# Or manually
 anthill --supervise ~/.config/anthill
 ```
 
-#### 6. Check status and logs
+#### 7. Access the web dashboard
+
+Open `http://<your-tailscale-ip>:3000` in any browser on your Tailscale network. You'll see:
+- Sidebar listing all ANTS with status indicators
+- Chat interface with markdown rendering and code blocks
+- Live task panel showing running workers
+- Full conversation history (persists across devices and restarts)
+
+On mobile, you can install it as a PWA:
+- **Android:** Chrome menu → "Add to Home screen"
+- **iOS:** Safari share → "Add to Home Screen"
+- **Linux:** Chrome menu → "Install Anthill"
+
+#### 8. Updating
 
 ```bash
-# Service status
-sudo systemctl status anthill
-
-# Live logs
-journalctl -u anthill -f
-
-# Recent logs
-journalctl -u anthill --since "10 minutes ago"
-```
-
-#### 7. Restart after config changes
-
-```bash
-sudo systemctl restart anthill
-```
-
-#### 8. Update to a new version
-
-```bash
-cd ~/Development/R2/r2-core
+cd ~/path/to/anthill
 git pull
-cd tools/anthill
 sudo systemctl stop anthill
 ./install.sh
 sudo systemctl start anthill
 ```
 
-**Note:** You must stop the service before installing because the binary can't be overwritten while it's running.
+Stop the service before installing — the binary can't be overwritten while running.
 
-## Configuration Reference
+## Commands
 
-### supervisor.toml
-
-Controls how the supervisor manages bot processes.
-
-```toml
-# Directory containing bot configs (relative to supervisor.toml)
-bots_dir = "bots"
-
-# Auto-restart crashed bots
-restart_on_crash = true
-
-# Base delay in seconds before restarting (multiplied by consecutive failure count)
-# 1st crash: 5s, 2nd: 10s, 3rd: 15s, etc.
-restart_delay_secs = 5
-
-# Give up after this many consecutive restarts (0 = never give up)
-max_restarts = 10
-
-# Override the anthill binary path (default: the running binary)
-# relay_binary = "/usr/local/bin/anthill"
-```
-
-### bot.toml
-
-Full configuration for a single bot instance.
-
-```toml
-# Operating mode: "raw", "ai", or "claude"
-mode = "claude"
-
-[telegram]
-# Bot token from @BotFather (REQUIRED)
-token = "123456:ABC-DEF..."
-
-# Restrict to these Telegram chat IDs. Empty list = allow everyone.
-# Strongly recommended for production to prevent unauthorised access.
-# allow = [123456789, 987654321]
-
-[claude]
-# Working directory for Claude Code (REQUIRED for claude mode)
-# Claude operates in this directory — all file operations happen here.
-# Auto-created if it doesn't exist. Auto-initialised as a git repo.
-working_dir = "/path/to/working/dir"
-
-# Per-user memory files, relative to working_dir (default: "memory")
-memory_dir = "memory"
-
-# Directory for cloned repos, relative to working_dir (default: "repos")
-repos_dir = "repos"
-
-# Allow Claude to run shell commands without interactive approval (default: false)
-# REQUIRED for claude mode — without this, Claude can't execute anything.
-skip_permissions = true
-
-# Auto-commit working directory changes to git (default: 0 = disabled)
-# Set to number of hours between commits.
-backup_interval_hours = 6
-
-# Push backups to a git remote (default: "" = local only)
-# backup_remote = "origin"
-
-# System prompt injected into every Claude invocation (default: none)
-# This defines the bot's personality and behaviour.
-# system_prompt = "You are a helpful assistant."
-
-[raw]
-# Shell to spawn in raw mode (default: /bin/bash)
-shell = "/bin/bash"
-
-[ai]
-# Claude model for AI mediation mode (default: claude-sonnet-4-20250514)
-model = "claude-sonnet-4-20250514"
-
-# Anthropic API key for AI mode. Or set ANTHROPIC_API_KEY env var.
-# Not needed for claude mode (uses Claude Code's own auth).
-# anthropic_api_key = "sk-ant-..."
-```
-
-## Telegram Commands
-
-### Bot commands (handled locally, always available)
+### Anthill commands (handled locally)
 
 | Command | Description |
 |---|---|
 | `/help` or `/start` | Show available commands |
-| `/usage` | Show session statistics (messages, chars, uptime, running tasks) |
-| `/status` | Show all running tasks with IDs, message previews, and duration |
-| `/cancel` | Cancel the most recent running task |
-| `/cancel <id>` | Cancel a specific task by ID (shown in `/status`) |
-| `/cancel all` | Cancel all running tasks |
-| `/new` | Start a fresh conversation (resets Claude session context) |
+| `/ants` | Show running workers and what they're working on |
+| `/usage` | Show session statistics |
+| `/cancel` | Cancel the most recent worker |
+| `/cancel <id>` | Cancel a specific worker by ID |
+| `/cancel all` | Cancel all running workers |
+| `/new` | Start a fresh conversation |
 
-### Claude Code commands (passed through to Claude)
-
-These are Claude Code's own slash commands. They're sent as input to `claude -p` and Claude handles them:
+### Claude Code commands (passed through)
 
 | Command | Description |
 |---|---|
 | `/compact` | Condense conversation context |
-| `/cost` | Show token/cost usage for the session |
+| `/cost` | Show token/cost usage |
 | `/model` | Show or change the AI model |
 | `/memory` | Manage Claude's memory files |
 | `/clear` | Clear conversation history |
 
 ### Raw mode special keys
 
-When running in `raw` mode (persistent PTY), these commands send control characters for navigating TUI applications:
+For `mode = "raw"` (persistent PTY):
 
-| Send | Sends to PTY | Use case |
-|---|---|---|
-| `/enter` | `\r` | Confirm prompts |
-| `/esc` | `\x1b` | Cancel/back |
-| `/up` `/down` | Arrow keys | Navigate menus |
-| `/left` `/right` | Arrow keys | Cursor movement |
-| `/tab` | `\t` | Tab completion |
-| `/ctrl-c` | `\x03` | Interrupt running command |
-| `/ctrl-d` | `\x04` | EOF / exit shell |
-| `/ctrl-z` | `\x1a` | Suspend process |
-| `/space` | ` ` | Toggle selections |
-
-Everything else in raw mode is sent as text followed by Enter.
-
-## Conversation Persistence
-
-Claude Code sessions are preserved across bot restarts. The bot always uses `claude -p --continue` which resumes the most recent session in the working directory. This means:
-
-- **Within a session:** Full context of all previous messages
-- **After a restart:** The previous session is resumed — Claude remembers what you were working on
-- **After `/new`:** Starts a fresh session (previous sessions can still be resumed manually via Claude Code)
-
-### Workspace awareness
-
-On every invocation, Claude is automatically told about:
-- The working directory structure (`memory/`, `repos/`)
-- Where to clone repositories (always into `repos/`)
-- That `repos/` is excluded from git backups
-- The path to the current user's memory file
-
-This means you don't need to explain the setup — Claude already knows where things go from the first message.
-
-## Concurrent Tasks
-
-The bot uses a **conductor/worker** architecture:
-
-- **Conductor sentant** — always responsive. Receives your Telegram messages, dispatches work to concurrent Claude Code invocations, relays responses back. Handles `/help`, `/status`, `/cancel` locally without blocking.
-- **Worker tasks** — each message spawns an independent `claude -p` process. Multiple tasks run in parallel.
-
-This means you can:
-
-- **Send a new message while another is running** — both execute concurrently
-- **Check progress** with `/status` — see all running tasks, their IDs, and how long they've been running
-- **Cancel tasks** with `/cancel` — abort the latest, a specific ID, or all at once
-- **Ask Claude to spawn sub-agents** — Claude Code's built-in Agent tool works normally within each task
-
-Example workflow:
-
-```
-You:    "Clone the repo github.com/example/project into repos/"
-Bot:    Thinking...
-You:    /status
-Bot:    Running tasks (1):
-        #1 — Clone the repo github.com/example/project... (45s)
-You:    "While that's running, what's in my memory file?"
-Bot:    Thinking...
-Bot:    [response to memory question]
-Bot:    [response to clone task]
-```
+| Send | Does |
+|---|---|
+| `/enter` | Confirm |
+| `/esc` | Cancel |
+| `/up` `/down` `/left` `/right` | Arrow keys |
+| `/tab` | Tab completion |
+| `/ctrl-c` | Interrupt |
+| `/ctrl-d` | EOF/exit |
+| `/space` | Space/toggle |
 
 ## Per-User Memory
 
-Each Telegram user gets a persistent memory file at `{working_dir}/memory/{chat_id}.md`.
+Each user (identified by Telegram chat ID, or `0` for web dashboard) gets a persistent memory file at `{working_dir}/memory/{chat_id}.md`.
 
 Claude is instructed via the system prompt to:
-- **Read** the memory file at the start of each conversation
-- **Update** it when learning something worth remembering (preferences, project context, key decisions)
-- **Clean up** outdated entries when noticed
+- **Read** the file at the start of each conversation
+- **Update** it when learning something worth remembering
+- **Clean up** outdated entries
 
-Memory persists across:
-- Individual messages within a session
-- Bot restarts
-- Conversation resets (`/new`)
+Memory persists across messages, restarts, and conversation resets (`/new`). If you tell the ANT "I prefer Python over JavaScript" today, it will remember next week.
 
-This means if you tell the bot "I prefer Python over JavaScript" in one conversation, it will remember that in future conversations.
+The memory files are included in the git-backed workspace, so they're version-controlled and backed up.
 
-## Typing Indicator
+## Workspace and Backups
 
-While Claude is processing, the bot shows the Telegram "typing..." bubble (the animated dots that appear when someone is composing a message). This is sent every 4 seconds until the response is ready, so the user knows the bot is working even on long-running tasks.
+Each ANT's working directory is automatically initialised as a git repository. This provides version history for everything the ANT creates or modifies.
 
-A "Thinking..." text message is also sent immediately when a request is received.
+### Automatic backups
 
-## Backups
-
-The working directory is a git repository that is automatically committed on a schedule. The `repos/` subdirectory is excluded from backups (cloned repos have their own git history).
-
-### How it works
-
-- **On first run:** The working directory is `git init`'d automatically with a `.gitignore` that excludes `repos/`
-- **On schedule:** Every `backup_interval_hours`, all changes in the working directory (memory files, any files Claude creates) are staged and committed with a timestamped message
-- **Optionally:** Pushed to a remote git repository
-
-### Local-only backups
-
-Just set the interval in `bot.toml`:
+Set `backup_interval_hours` in `ant.toml`:
 
 ```toml
 [claude]
-backup_interval_hours = 6
+backup_interval_hours = 6      # commit every 6 hours (0 = disabled)
 ```
-
-This gives you local version history — you can `git log` and `git checkout` to see or roll back changes.
 
 ### Remote backups (GitHub)
 
-To push backups to a private GitHub repository:
-
-#### 1. Create a private repo on GitHub
+To push backups to a private repo:
 
 ```bash
-# Using GitHub CLI (must be authenticated: gh auth login)
-gh repo create your-org/anthill-mybot --private
-```
+# Create the repo
+gh repo create your-org/anthill-my-ant --private
 
-#### 2. Add the remote to the bot's working directory
-
-```bash
-cd /path/to/your/working_dir    # e.g. ~/.config/anthill/bots/dev-assistant/working
-git remote add origin https://github.com/your-org/anthill-mybot.git
-```
-
-#### 3. Do an initial push
-
-```bash
-git add -A
-git commit -m "Initial commit"
+# Add remote to the working directory
+cd /path/to/working_dir
+git remote add origin https://github.com/your-org/anthill-my-ant.git
+git add -A && git commit -m "Initial commit"
 git push -u origin master
+
+# Enable in ant.toml
+# backup_remote = "origin"
 ```
-
-#### 4. Configure the bot to push automatically
-
-In `bot.toml`:
-
-```toml
-[claude]
-backup_interval_hours = 6
-backup_remote = "origin"
-```
-
-The backup task will now auto-push every 6 hours.
 
 ### What gets backed up
 
-| Directory | Backed up? | Reason |
+| Path | Backed up | Reason |
 |---|---|---|
 | `memory/` | Yes | Per-user persistent memory |
-| Any files Claude creates | Yes | Working artifacts |
-| `repos/` | No | Cloned repos have their own git history |
-| `.gitignore` | Yes | Tracks backup exclusions |
+| Files Claude creates | Yes | Working artifacts, code, configs |
+| `repos/` | **No** | Cloned repos have their own git history |
 
-### Viewing backup history
+### Viewing history
 
 ```bash
 cd /path/to/working_dir
-git log --oneline                # list all backup commits
-git diff HEAD~1                  # see what changed in the last backup
-git show HEAD:memory/12345.md    # view a specific file at last backup
+git log --oneline                # all backup commits
+git diff HEAD~1                  # last changes
+git show HEAD:memory/12345.md    # specific file at last backup
 ```
 
-## Markdown Rendering
+## Conversation Persistence
 
-Claude's markdown output is automatically converted to Telegram-compatible HTML:
+Sessions survive restarts. The ANT always uses `claude -p --continue` to resume the most recent Claude Code session in its working directory.
 
-| Markdown | Telegram rendering |
-|---|---|
-| `# Heading` | **BOLD UPPERCASE** (with spacing) |
-| `## Heading` | **Bold** (with spacing) |
-| `### Heading` | ***Bold italic*** |
-| `#### Heading` | *Italic* |
-| `**bold**` | **Bold** |
-| `*italic*` | *Italic* |
-| `` `inline code` `` | `Monospace` |
-| ```` ```code block``` ```` | Selectable/copyable pre-formatted block |
-| `- bullet` or `* bullet` | • Bullet point |
-| `[text](url)` | Clickable link |
-| `~~strikethrough~~` | ~~Strikethrough~~ |
-| `---` | —————————— (em dash line) |
+On every invocation, Claude is automatically told about:
+- The workspace structure (`memory/`, `repos/`)
+- Where to clone repositories (always into `repos/`)
+- That `repos/` is excluded from git backups
+- The current user's memory file path
 
-If HTML rendering fails (malformed output), the bot falls back to plain text.
+You don't need to explain the setup — the ANT already knows from the first message.
+
+## Concurrent Tasks
+
+Each ANT uses a **conductor/worker** architecture:
+
+- **Conductor** — always responsive, dispatches messages, handles `/ants` and `/cancel`
+- **Workers** — each message spawns an independent Claude Code process running in parallel
+
+Send multiple messages — they all execute concurrently. Use `/ants` to see what's running, `/cancel` to stop tasks.
+
+## Web Dashboard
+
+The built-in web dashboard runs alongside the supervisor on port 3000 (configurable in `supervisor.toml`).
+
+**Access:** `http://<server-ip>:3000` — best over Tailscale for security.
+
+**Features:**
+- Sidebar listing all ANTS with live status
+- Chat interface with full markdown rendering (headings, code blocks with copy buttons, tables, lists, links)
+- Live task panel with cancel buttons and timers
+- Chat history loaded from disk (persists across sessions and devices)
+- Auto-reconnecting WebSocket
+- Responsive layout (mobile and desktop)
+- PWA installable as a home screen app
+
+**Chat history** is stored as JSONL files at `~/.config/anthill/history/{ant-id}.jsonl`. Messages from all sources (Telegram, web UI) are recorded centrally, so opening the dashboard from a new device shows the full conversation history.
+
+## Configuration Reference
+
+### supervisor.toml
+
+```toml
+ants_dir = "ants"              # Where ANT configs live
+restart_on_crash = true         # Auto-restart crashed ANTS
+restart_delay_secs = 5          # Base delay (× restart count for backoff)
+max_restarts = 10               # Max consecutive restarts (0 = unlimited)
+http_port = 3000                # Web dashboard port
+http_bind = "0.0.0.0"          # Bind address (0.0.0.0 = all interfaces)
+```
+
+### ant.toml
+
+```toml
+name = "My ANT"                 # Display name (default: directory name)
+mode = "claude"                 # "raw" | "ai" | "claude"
+
+[telegram]
+token = "BOT_TOKEN"             # From @BotFather (REQUIRED)
+# allow = [123456789]           # Restrict to specific chat IDs
+
+[claude]
+working_dir = "/path/to/work"   # ANT's workspace (REQUIRED)
+memory_dir = "memory"           # Per-user memory (relative)
+repos_dir = "repos"             # Git repos (relative, excluded from backup)
+skip_permissions = true          # REQUIRED for claude mode
+# backup_interval_hours = 6     # Auto-commit interval (0 = disabled)
+# backup_remote = "origin"      # Push backups to remote
+# system_prompt = "..."         # ANT personality
+
+[raw]
+shell = "/bin/bash"
+
+[ai]
+model = "claude-sonnet-4-20250514"
+# anthropic_api_key = "sk-ant-..."
+```
 
 ## Troubleshooting
 
-### Bot doesn't respond
+### ANT doesn't respond to Telegram messages
 
-1. Check the service is running: `sudo systemctl status anthill`
-2. Check logs: `journalctl -u anthill -f`
-3. Verify the bot token is correct in `bot.toml`
-4. Make sure your chat ID is in the `allow` list (or remove `allow` to allow everyone)
+1. `sudo systemctl status anthill` — is it running?
+2. `journalctl -u anthill -f` — check logs
+3. Verify the bot token in `ant.toml`
+4. Check your chat ID is in the `allow` list (or remove `allow`)
 
 ### "Failed to run claude" error
 
-1. Verify Claude Code is installed: `which claude`
-2. Verify it works: `claude -p "hello"`
-3. Check the PATH in the systemd service includes Claude's location
-4. Make sure Claude Code is authenticated (run `claude` interactively once)
+1. `which claude` — is Claude Code installed?
+2. `claude -p "hello"` — does it work directly?
+3. Check PATH in the systemd service includes `~/.local/bin` (where `claude` typically lives)
+4. Run `claude` interactively once to authenticate
 
-### "Permission denied" or Claude asking for approval
+### Claude asks for permission (can't execute)
 
-Set `skip_permissions = true` in `[claude]` section of `bot.toml`. Without this, `claude -p` can't run commands non-interactively.
+Set `skip_permissions = true` in `[claude]` section of `ant.toml`.
 
-### Systemd service fails to start
+### Web dashboard not loading
 
-Check the journal for details:
+1. Check the supervisor is running and the web server started (look for "Web server listening on" in logs)
+2. Verify you can reach the server IP (try `ping <ip>`)
+3. If using Tailscale, verify both devices are connected: `tailscale status`
+4. Check the port isn't blocked: `curl http://<ip>:3000`
 
-```bash
-journalctl -u anthill -n 50 --no-pager
-```
+### Chat history missing after rename
 
-Common issues:
-- Binary not found: re-run `./install.sh`
-- Config directory missing: `mkdir -p ~/.config/anthill/bots`
-- No bots configured: create at least one bot directory with a `bot.toml`
+History is keyed by directory name (the ANT's stable ID), not the display name. If you renamed the directory under `ants/`, the history file won't match. Rename `~/.config/anthill/history/<old-name>.jsonl` to match.
 
 ### Binary can't be overwritten during install
-
-Stop the service first:
 
 ```bash
 sudo systemctl stop anthill
@@ -697,14 +529,10 @@ sudo systemctl stop anthill
 sudo systemctl start anthill
 ```
 
-### Long responses get cut off
+## Security
 
-Telegram has a 4096-character message limit. The bot automatically splits long responses into multiple messages. If a message is still missing content, check the logs for errors.
-
-## Security Considerations
-
-- **Bot tokens are secrets** — store them in `bot.toml` which is not committed to git (`.gitignore` excludes config files with tokens)
-- **`skip_permissions = true` gives Claude full shell access** — restrict who can talk to the bot using the `allow` list
-- **The bot runs commands as your user** — it has the same permissions as your login. Don't run it as root.
-- **Use `allow` in production** — without it, anyone who discovers your bot username can execute commands on your machine
-- **Memory files may contain sensitive context** — they're stored in the working directory, not encrypted
+- **Bot tokens are secrets** — `ant.toml` files contain tokens and should not be committed to git
+- **`skip_permissions = true`** gives Claude full shell access as your user — restrict access via the `allow` list
+- **The web dashboard has no authentication** — rely on Tailscale (or a firewall) to restrict who can reach port 3000
+- **Don't run as root** — Anthill runs commands as whatever user the service runs under
+- **Memory files** may accumulate sensitive context — they're stored in the working directory, backed up to git, but not encrypted
