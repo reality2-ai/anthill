@@ -61,7 +61,7 @@ struct Args {
     supervise: Option<PathBuf>,
 
     /// Generate a join code for a new device to join the colony.
-    #[arg(long)]
+    #[arg(long, default_missing_value = "~/.config/anthill", num_args = 0..=1)]
     join_code: Option<PathBuf>,
 }
 
@@ -71,8 +71,14 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // Generate join code.
-    if let Some(ref config_dir) = args.join_code {
-        let mut trust = trust::ColonyTrust::load(config_dir)?;
+    if let Some(ref raw_dir) = args.join_code {
+        let config_dir = if raw_dir.starts_with("~") {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            PathBuf::from(raw_dir.to_string_lossy().replacen("~", &home, 1))
+        } else {
+            raw_dir.clone()
+        };
+        let mut trust = trust::ColonyTrust::load(&config_dir)?;
         let code = trust.generate_join_code();
         println!();
         println!("  Join code:  {}", code);
