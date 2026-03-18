@@ -20,6 +20,13 @@ cargo build -p anthill --release
 
 BINARY="target/release/anthill"
 
+# Stop the service if running (binary can't be overwritten while running).
+if systemctl is-active --quiet anthill 2>/dev/null; then
+    echo "Stopping anthill service..."
+    sudo systemctl stop anthill
+    sleep 1
+fi
+
 echo "Installing binary to $INSTALL_DIR/anthill..."
 sudo cp "$BINARY" "$INSTALL_DIR/anthill"
 sudo chmod 755 "$INSTALL_DIR/anthill"
@@ -69,14 +76,23 @@ else
     echo ""
 fi
 
-echo "  Start the service:"
-echo "    sudo systemctl enable --now anthill"
+# Start/restart the service.
+if systemctl is-enabled --quiet anthill 2>/dev/null; then
+    echo "  Starting anthill service..."
+    sudo systemctl start anthill
+    echo "  Service started."
+else
+    echo "  Enabling and starting anthill service..."
+    sudo systemctl enable --now anthill
+    echo "  Service enabled and started."
+fi
 echo ""
-echo "  Set up HTTPS (recommended):"
+
+echo "  Set up HTTPS (first time only):"
 echo "    sudo tailscale serve --bg http://localhost:3000"
 echo ""
-echo "  Generate a join code for your first device:"
-echo "    anthill --join-code $CONFIG_DIR"
+echo "  Generate a join code:"
+echo "    anthill --join-code"
 echo ""
 echo "  Check logs:"
 echo "    journalctl -u anthill -f"
