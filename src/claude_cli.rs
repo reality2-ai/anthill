@@ -115,6 +115,7 @@ pub async fn claude_cli_worker(
         // Build the command.
         let mut args = vec![
             "-p".to_string(),
+            "--verbose".to_string(),
             "--output-format".to_string(),
             "stream-json".to_string(),
         ];
