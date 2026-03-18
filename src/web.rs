@@ -276,15 +276,18 @@ async fn put_config(
         }
     }
 
+    let mode_str = req.mode.as_deref().unwrap_or("claude");
+    let skip_perms = mode_str == "claude" || mode_str == "ai";
+
     toml.push_str("\n[claude]\n");
     if let Some(ref wd) = req.working_dir {
         if !wd.is_empty() {
             toml.push_str(&format!("working_dir = \"{}\"\n", wd));
         }
     }
-    toml.push_str(&format!("memory_dir = \"{}\"\n", req.memory_dir.as_deref().unwrap_or("memory")));
-    toml.push_str(&format!("repos_dir = \"{}\"\n", req.repos_dir.as_deref().unwrap_or("repos")));
-    toml.push_str(&format!("skip_permissions = {}\n", req.skip_permissions.unwrap_or(true)));
+    toml.push_str("memory_dir = \"memory\"\n");
+    toml.push_str("repos_dir = \"repos\"\n");
+    toml.push_str(&format!("skip_permissions = {}\n", skip_perms));
     toml.push_str(&format!("backup_interval_hours = {}\n", req.backup_interval_hours.unwrap_or(0)));
     let remote = req.backup_remote.as_deref().unwrap_or("");
     if !remote.is_empty() {

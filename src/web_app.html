@@ -445,25 +445,9 @@
 
     <h3 class="section-title">Workspace</h3>
     <div class="field">
-      <span class="field-label">Working Directory</span>
-      <input id="c-workdir" class="field-input mono" placeholder="/home/user/anthill-my-ant">
+      <span class="field-label">Working Directory <span style="color:var(--text-dim)">(defaults to ~/.config/anthill/ants/&lt;id&gt;/working)</span></span>
+      <input id="c-workdir" class="field-input mono" placeholder="">
     </div>
-    <div class="field" style="display:flex;gap:12px">
-      <div style="flex:1">
-        <span class="field-label">Memory Dir</span>
-        <input id="c-memdir" class="field-input" value="memory">
-      </div>
-      <div style="flex:1">
-        <span class="field-label">Repos Dir</span>
-        <input id="c-repodir" class="field-input" value="repos">
-      </div>
-    </div>
-
-    <h3 class="section-title">Permissions</h3>
-    <label class="toggle-row">
-      <input type="checkbox" id="c-skip-perms" checked>
-      <span>Skip permission prompts <span style="color:var(--text-dim)">(required for claude mode)</span></span>
-    </label>
 
     <h3 class="section-title">Backups</h3>
     <div class="field" style="display:flex;gap:12px">
@@ -851,9 +835,6 @@ async function showConfigModal(antId) {
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
-      document.getElementById('c-memdir').value = cfg.memory_dir || 'memory';
-      document.getElementById('c-repodir').value = cfg.repos_dir || 'repos';
-      document.getElementById('c-skip-perms').checked = cfg.skip_permissions !== false;
       document.getElementById('c-backup-hrs').value = cfg.backup_interval_hours || 0;
       document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
       document.getElementById('c-prompt').value = cfg.system_prompt || '';
@@ -878,15 +859,14 @@ async function saveConfig() {
   const allowStr = document.getElementById('c-allow').value.trim();
   const allow = allowStr ? allowStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
 
+  const mode = document.getElementById('c-mode').value;
   const body = {
     name: document.getElementById('c-name').value.trim(),
-    mode: document.getElementById('c-mode').value,
+    mode,
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),
-    memory_dir: document.getElementById('c-memdir').value.trim() || 'memory',
-    repos_dir: document.getElementById('c-repodir').value.trim() || 'repos',
-    skip_permissions: document.getElementById('c-skip-perms').checked,
+    skip_permissions: mode === 'claude' || mode === 'ai',
     backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
     backup_remote: document.getElementById('c-backup-remote').value.trim(),
     system_prompt: document.getElementById('c-prompt').value.trim(),
