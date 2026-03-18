@@ -318,9 +318,9 @@ async fn put_config(
 #[derive(Deserialize)]
 struct CreateAnt {
     id: String,
-    name: String,
-    token: String,
-    working_dir: String,
+    name: Option<String>,
+    token: Option<String>,
+    working_dir: Option<String>,
     system_prompt: Option<String>,
 }
 
@@ -340,30 +340,34 @@ async fn create_ant(
         return (StatusCode::CONFLICT, "ANT already exists").into_response();
     }
 
-    // Generate ant.toml.
-    let prompt = req.system_prompt.unwrap_or_else(|| "You are a helpful assistant.".into());
-    let config = format!(
-        r#"name = "{name}"
-mode = "claude"
+    // Generate ant.toml — only include fields that have values.
+    let mut config = String::new();
 
-[telegram]
-token = "{token}"
+    let name = req.name.filter(|s| !s.is_empty()).unwrap_or_else(|| req.id.clone());
+    config.push_str(&format!("name = \"{}\"\n", name));
+    config.push_str("mode = \"claude\"\n");
 
-[claude]
-working_dir = "{working_dir}"
-memory_dir = "memory"
-repos_dir = "repos"
-skip_permissions = true
-backup_interval_hours = 6
+    if let Some(ref token) = req.token {
+        if !token.is_empty() {
+            config.push_str("\n[telegram]\n");
+            config.push_str(&format!("token = \"{}\"\n", token));
+        }
+    }
 
-system_prompt = """\
-{prompt}"""
-"#,
-        name = req.name,
-        token = req.token,
-        working_dir = req.working_dir,
-        prompt = prompt,
-    );
+    config.push_str("\n[claude]\n");
+    if let Some(ref wd) = req.working_dir {
+        if !wd.is_empty() {
+            config.push_str(&format!("working_dir = \"{}\"\n", wd));
+        }
+    }
+    config.push_str("skip_permissions = true\n");
+
+    if let Some(ref prompt) = req.system_prompt {
+        if !prompt.is_empty() {
+            config.push_str(&format!("system_prompt = \"\"\"\\\n{}\"\"\"", prompt));
+        }
+    }
+    config.push('\n');
 
     match state.registry.write_config(&req.id, &config) {
         Ok(()) => (StatusCode::CREATED, "ANT created. Restart Anthill to start it.").into_response(),

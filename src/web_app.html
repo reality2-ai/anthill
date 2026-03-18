@@ -380,26 +380,32 @@
   <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:480px;max-height:90vh;overflow-y:auto">
     <h2 style="margin-bottom:16px" id="modal-title">New ANT</h2>
     <div id="modal-fields">
-      <label style="display:block;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-dim)">ID (directory name, no spaces)</span>
-        <input id="f-id" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px" placeholder="my-ant">
-      </label>
-      <label style="display:block;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-dim)">Display Name</span>
-        <input id="f-name" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px" placeholder="My Dev ANT">
-      </label>
-      <label style="display:block;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-dim)">Telegram Bot Token</span>
-        <input id="f-token" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px;font-family:var(--mono)" placeholder="123456:ABC-DEF...">
-      </label>
-      <label style="display:block;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-dim)">Working Directory</span>
-        <input id="f-workdir" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px" placeholder="/home/user/anthill-my-ant">
-      </label>
-      <label style="display:block;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-dim)">System Prompt (personality)</span>
-        <textarea id="f-prompt" rows="3" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px;resize:vertical" placeholder="You are a helpful assistant."></textarea>
-      </label>
+      <div class="field">
+        <span class="field-label">ID <span style="color:var(--accent)">*</span> <span style="color:var(--text-dim)">(directory name, no spaces)</span></span>
+        <input id="f-id" class="field-input" placeholder="my-ant">
+      </div>
+      <div class="field">
+        <span class="field-label">Display Name <span style="color:var(--text-dim)">(optional — defaults to ID)</span></span>
+        <input id="f-name" class="field-input" placeholder="My Dev ANT">
+      </div>
+
+      <h3 class="section-title">Telegram (optional)</h3>
+      <div class="field">
+        <span class="field-label">Bot Token <span style="color:var(--text-dim)">(leave empty for web-only)</span></span>
+        <input id="f-token" class="field-input mono" placeholder="123456:ABC-DEF...">
+      </div>
+
+      <h3 class="section-title">Workspace (optional)</h3>
+      <div class="field">
+        <span class="field-label">Working Directory <span style="color:var(--text-dim)">(defaults to ~/.config/anthill/ants/&lt;id&gt;/working)</span></span>
+        <input id="f-workdir" class="field-input mono" placeholder="">
+      </div>
+
+      <h3 class="section-title">Personality (optional)</h3>
+      <div class="field">
+        <span class="field-label">System Prompt</span>
+        <textarea id="f-prompt" class="field-input" rows="3" style="resize:vertical" placeholder="You are a helpful assistant."></textarea>
+      </div>
     </div>
     <div id="modal-error" style="color:var(--red);font-size:13px;margin-bottom:8px;display:none"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
@@ -798,17 +804,23 @@ async function submitCreate() {
   const prompt = document.getElementById('f-prompt').value.trim();
   const errEl = document.getElementById('modal-error');
 
-  if (!id || !name || !token) {
-    errEl.textContent = 'ID, Name, and Token are required.';
+  if (!id) {
+    errEl.textContent = 'ID is required.';
     errEl.style.display = 'block';
     return;
   }
 
   try {
+    const body = { id };
+    if (name) body.name = name;
+    if (token) body.token = token;
+    if (workdir) body.working_dir = workdir;
+    if (prompt) body.system_prompt = prompt;
+
     const resp = await fetch('/api/ants/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, name, token, working_dir: workdir || `/tmp/anthill-${id}`, system_prompt: prompt || undefined }),
+      body: JSON.stringify(body),
     });
     if (resp.ok) {
       hideModal();
