@@ -114,6 +114,7 @@ impl BotRegistry {
     }
 
     /// List ANT directory names on disk (may include ones not running).
+    #[allow(dead_code)]
     pub fn list_config_dirs(&self) -> Vec<String> {
         let mut dirs = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&self.ants_dir) {
