@@ -439,7 +439,10 @@
   <div style="padding:8px 12px;border-top:1px solid #333">
     <button onclick="showDevicesModal()" style="width:100%;background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px;cursor:pointer;font-size:13px">Manage Devices</button>
   </div>
-  <div style="padding:8px 12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">ANTS: Autonomous iNTelligenceS</div>
+  <div style="padding:8px 12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">
+    <div id="device-name-display" style="margin-bottom:4px"></div>
+    ANTS: Autonomous iNTelligenceS
+  </div>
 </div>
 
 <!-- Create ANT modal -->
@@ -1334,6 +1337,10 @@ function showJoinScreen() {
 function showApp() {
   document.getElementById('join-screen').style.display = 'none';
   document.getElementById('app-container').style.display = 'flex';
+  const deviceName = localStorage.getItem('anthill_device_name') || '';
+  if (deviceName) {
+    document.getElementById('device-name-display').textContent = '🔑 ' + deviceName;
+  }
   connect();
 }
 
