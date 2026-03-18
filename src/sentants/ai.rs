@@ -24,6 +24,7 @@ pub struct AiSentant {
     state: StateId,
     chat_id: i64,
     ai_plugin_id: PluginId,
+    #[allow(dead_code)]
     pty_plugin_id: PluginId,
 }
 

@@ -262,6 +262,7 @@ async fn get_config(
 
 /// PUT /api/ants/:id/config — update an ANT's config from structured fields.
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct ConfigUpdate {
     name: Option<String>,
     mode: Option<String>,
