@@ -122,6 +122,7 @@ pub async fn run_bot(
                 Arc::clone(&tasks),
                 Arc::clone(&stats),
                 message_queue.clone(),
+                cfg.claude.sync_channels,
             );
             let cli_plugin_id = bus.register_plugin(Box::new(cli_plugin));
 

@@ -69,6 +69,8 @@ pub struct ClaudeCliPlugin {
     stats: StatsMap,
     /// Next task ID counter.
     next_task_id: u32,
+    /// Whether to forward user messages across channels.
+    sync_channels: bool,
 }
 
 impl ClaudeCliPlugin {
@@ -80,6 +82,7 @@ impl ClaudeCliPlugin {
         tasks: TaskMap,
         stats: StatsMap,
         message_queue: crate::plugins::telegram_bot::MessageQueue,
+        sync_channels: bool,
     ) -> Self {
         Self {
             id,
@@ -91,6 +94,7 @@ impl ClaudeCliPlugin {
             tasks,
             stats,
             next_task_id: 1,
+            sync_channels,
         }
     }
 
@@ -125,6 +129,16 @@ impl ClaudeCliPlugin {
             Some(msg) => msg,
             None => return,
         };
+
+        // Forward user message to other channels if sync is enabled.
+        if self.sync_channels && source != "telegram" {
+            let label = match source.as_str() {
+                "web" => "🌐 web",
+                "slack" => "💬 slack",
+                _ => &source,
+            };
+            self.send_telegram(chat_id, &format!("_{} says:_ {}", label, text));
+        }
 
         let task_id = self.next_task_id;
         self.next_task_id += 1;
