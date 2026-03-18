@@ -332,7 +332,29 @@ tailscale serve status
 - **iOS:** Safari share → "Add to Home Screen"
 - **Linux:** Chrome menu → "Install Anthill"
 
-#### 8. Updating
+#### 8. Auto-start on boot
+
+Both Anthill and the HTTPS proxy survive reboots with no extra configuration:
+
+```bash
+# Anthill — enabled via systemd (done by install.sh step 6)
+sudo systemctl enable anthill
+
+# HTTPS proxy — persists inside the Tailscale daemon (done in step 7 with --bg)
+tailscale serve --bg https / http://localhost:3000
+```
+
+After a reboot, Anthill starts automatically, Tailscale reconnects, and the HTTPS proxy resumes. The dashboard is accessible immediately once the machine is up.
+
+Verify everything is set up:
+
+```bash
+systemctl is-enabled anthill          # should show "enabled"
+sudo systemctl status anthill         # should show "active (running)"
+tailscale serve status                # should show the HTTPS proxy
+```
+
+#### 9. Updating
 
 ```bash
 cd ~/path/to/anthill
