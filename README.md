@@ -4,7 +4,7 @@ A colony for **ANTS** — Autonomous iNTelligenceS.
 
 Anthill uses [Reality2](https://reality2.ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage connections to AI backends (such as [Claude](https://www.anthropic.com/), [ChatGPT](https://openai.com/), or local models via [Ollama](https://ollama.com/)), messaging platforms ([Telegram](https://telegram.org/), [Slack](https://slack.com/)), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
 
-Anthill runs AI agents on a Linux server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard, Telegram, or Slack.
+Anthill runs AI agents on a Linux server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard, [Telegram](https://telegram.org/), or [Slack](https://slack.com/). The web dashboard is accessed securely over [Tailscale](https://tailscale.com/) — a private network that connects your devices without exposing anything to the public internet. HTTPS is provided automatically via Tailscale's built-in certificate provisioning.
 
 Each ANT has its own personality, workspace, persistent memory, and can run multiple tasks concurrently. Access is controlled by a trust group — devices join the colony via one-time join codes.
 
