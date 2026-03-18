@@ -4,58 +4,61 @@
       <stop offset="0%" style="stop-color:#1a1a2e"/>
       <stop offset="100%" style="stop-color:#16213e"/>
     </linearGradient>
+    <linearGradient id="hill" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#e94560"/>
+      <stop offset="100%" style="stop-color:#a3213e"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#2a1a1a"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
   </defs>
 
   <!-- Background -->
   <rect width="800" height="280" rx="24" fill="url(#bg)"/>
 
-  <!-- Ant icon (left side) -->
-  <g transform="translate(80,140) scale(0.45)">
-    <!-- Antennae -->
-    <line x1="-36" y1="-80" x2="-66" y2="-140" stroke="#4ade80" stroke-width="8" stroke-linecap="round"/>
-    <line x1="36" y1="-80" x2="66" y2="-140" stroke="#4ade80" stroke-width="8" stroke-linecap="round"/>
-    <circle cx="-70" cy="-144" r="10" fill="#4ade80"/>
-    <circle cx="70" cy="-144" r="10" fill="#4ade80"/>
+  <!-- Ground line -->
+  <rect x="20" y="178" width="160" height="82" rx="4" fill="url(#ground)"/>
 
-    <!-- Head -->
-    <ellipse cx="0" cy="-52" rx="48" ry="40" fill="#e94560"/>
-    <circle cx="-16" cy="-60" r="9" fill="#1a1a2e"/>
-    <circle cx="16" cy="-60" r="9" fill="#1a1a2e"/>
-    <circle cx="-14" cy="-62" r="3.5" fill="#fff"/>
-    <circle cx="18" cy="-62" r="3.5" fill="#fff"/>
+  <!-- Hill mound -->
+  <path d="M30,178 Q100,60 170,178" fill="url(#hill)"/>
 
-    <!-- Thorax -->
-    <ellipse cx="0" cy="32" rx="38" ry="42" fill="#e94560"/>
+  <!-- Entrance -->
+  <ellipse cx="100" cy="176" rx="18" ry="12" fill="#0a0a1a"/>
 
-    <!-- Abdomen -->
-    <ellipse cx="0" cy="140" rx="58" ry="66" fill="#e94560"/>
-    <ellipse cx="0" cy="115" rx="50" ry="7" fill="#c4314e" opacity="0.5"/>
-    <ellipse cx="0" cy="140" rx="54" ry="7" fill="#c4314e" opacity="0.5"/>
-    <ellipse cx="0" cy="165" rx="46" ry="7" fill="#c4314e" opacity="0.5"/>
+  <!-- Underground chambers (cross-section) -->
+  <!-- Tunnel from entrance -->
+  <line x1="100" y1="186" x2="100" y2="210" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+  <line x1="100" y1="210" x2="65" y2="225" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+  <line x1="100" y1="210" x2="135" y2="230" stroke="#444" stroke-width="3" stroke-linecap="round"/>
 
-    <!-- Legs left -->
-    <line x1="-30" y1="16" x2="-96" y2="-20" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="-96" y1="-20" x2="-120" y2="16" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="-34" y1="40" x2="-106" y2="48" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="-106" y1="48" x2="-130" y2="84" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="-32" y1="64" x2="-100" y2="104" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="-100" y1="104" x2="-124" y2="146" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
+  <!-- Chamber 1 (left) -->
+  <ellipse cx="55" cy="235" rx="20" ry="12" fill="#1e3a2e" stroke="#4ade80" stroke-width="1.5"/>
+  <!-- Chamber 2 (right) -->
+  <ellipse cx="145" cy="240" rx="20" ry="12" fill="#1e3a2e" stroke="#4ade80" stroke-width="1.5"/>
+  <!-- Chamber 3 (center deep) -->
+  <line x1="100" y1="210" x2="100" y2="245" stroke="#444" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="100" cy="252" rx="16" ry="10" fill="#2e1a1a" stroke="#e94560" stroke-width="1.5"/>
 
-    <!-- Legs right -->
-    <line x1="30" y1="16" x2="96" y2="-20" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="96" y1="-20" x2="120" y2="16" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="34" y1="40" x2="106" y2="48" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="106" y1="48" x2="130" y2="84" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="32" y1="64" x2="100" y2="104" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-    <line x1="100" y1="104" x2="124" y2="146" stroke="#e94560" stroke-width="7" stroke-linecap="round"/>
-  </g>
+  <!-- Small ants on the mound -->
+  <circle cx="75" cy="140" r="3" fill="#e94560"/>
+  <circle cx="72" cy="137" r="2" fill="#e94560"/>
+  <circle cx="120" cy="125" r="3" fill="#e94560"/>
+  <circle cx="117" cy="122" r="2" fill="#e94560"/>
+  <circle cx="95" cy="108" r="3" fill="#e94560"/>
+  <circle cx="92" cy="105" r="2" fill="#e94560"/>
+
+  <!-- Signal waves from top -->
+  <path d="M85,72 Q100,62 115,72" fill="none" stroke="#4ade80" stroke-width="1.5" opacity="0.7"/>
+  <path d="M76,62 Q100,48 124,62" fill="none" stroke="#4ade80" stroke-width="1.5" opacity="0.5"/>
+  <path d="M67,52 Q100,34 133,52" fill="none" stroke="#4ade80" stroke-width="1.5" opacity="0.3"/>
 
   <!-- Text -->
-  <text x="220" y="155" font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="96" fill="#e94560" letter-spacing="4">ANTHILL</text>
+  <text x="220" y="145" font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="90" fill="#e94560" letter-spacing="3">ANTHILL</text>
 
   <!-- Tagline -->
-  <text x="224" y="200" font-family="Arial,Helvetica,sans-serif" font-size="22" fill="#4ade80" letter-spacing="6">AUTONOMOUS INTELLIGENCES</text>
+  <text x="224" y="190" font-family="Arial,Helvetica,sans-serif" font-size="21" fill="#4ade80" letter-spacing="5">AUTONOMOUS INTELLIGENCES</text>
 
-  <!-- Subtle R2 badge -->
-  <text x="224" y="235" font-family="Arial,Helvetica,sans-serif" font-size="14" fill="#666" letter-spacing="2">POWERED BY REALITY2</text>
+  <!-- R2 badge -->
+  <text x="224" y="225" font-family="Arial,Helvetica,sans-serif" font-size="13" fill="#666" letter-spacing="2">POWERED BY REALITY2</text>
 </svg>
