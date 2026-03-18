@@ -2,7 +2,7 @@
 # Install anthill binary and systemd service.
 #
 # Usage:
-#   cd r2-core/tools/anthill
+#   cd anthill
 #   ./install.sh
 
 set -e
@@ -44,17 +44,43 @@ rm /tmp/anthill.service
 sudo systemctl daemon-reload
 
 echo ""
-echo "Done! Next steps:"
+echo "============================================"
+echo "  Anthill installed successfully!"
+echo "============================================"
 echo ""
-echo "  1. Create an ant:"
-echo "     mkdir -p $CONFIG_DIR/ants/my-ant"
-echo "     cp config-example/ants/dev-assistant/ant.toml $CONFIG_DIR/ants/my-ant/ant.toml"
+echo "  Config: $CONFIG_DIR"
+echo "  Binary: $INSTALL_DIR/anthill"
 echo ""
-echo "  2. Edit the config:"
-echo "     \$EDITOR $CONFIG_DIR/ants/my-ant/ant.toml"
+
+# Check if any ants exist.
+ANT_COUNT=$(find "$CONFIG_DIR/ants" -name "ant.toml" 2>/dev/null | wc -l)
+
+if [ "$ANT_COUNT" -eq 0 ]; then
+    echo "  No ANTS configured yet. Create your first:"
+    echo ""
+    echo "    mkdir -p $CONFIG_DIR/ants/my-ant"
+    echo "    cp config-example/ants/dev-assistant/ant.toml $CONFIG_DIR/ants/my-ant/ant.toml"
+    echo "    \$EDITOR $CONFIG_DIR/ants/my-ant/ant.toml"
+    echo ""
+    echo "  Or create one from the web dashboard after starting."
+    echo ""
+else
+    echo "  Found $ANT_COUNT ANT(s) configured."
+    echo ""
+fi
+
+echo "  Start the service:"
+echo "    sudo systemctl enable --now anthill"
 echo ""
-echo "  3. Start the service:"
-echo "     sudo systemctl enable --now anthill"
+echo "  Set up HTTPS (recommended):"
+echo "    sudo tailscale serve --bg http://localhost:3000"
 echo ""
-echo "  4. Check logs:"
-echo "     journalctl -u anthill -f"
+echo "  Generate a join code for your first device:"
+echo "    anthill --join-code $CONFIG_DIR"
+echo ""
+echo "  Check logs:"
+echo "    journalctl -u anthill -f"
+echo ""
+echo "  Web dashboard:"
+echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
+echo ""
