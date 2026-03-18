@@ -30,24 +30,30 @@ pub async fn run_bot(
     global_event_tx: Option<broadcast::Sender<registry::WsEvent>>,
     bot_registry: Option<Arc<registry::BotRegistry>>,
 ) -> anyhow::Result<()> {
-    // Resolve Telegram token.
-    if let Some(token) = cfg.telegram.token.as_ref() {
-        std::env::set_var("TELOXIDE_TOKEN", token);
-    } else if std::env::var("TELOXIDE_TOKEN").is_err() {
-        anyhow::bail!("No Telegram bot token configured for bot '{}'", bot_name);
-    }
-
     let mode = if cfg.mode.is_empty() { "raw" } else { cfg.mode.as_str() };
     let use_ai_routing = mode == "ai" || mode == "claude";
     let rt = tokio::runtime::Handle::current();
 
-    // Telegram plugin.
-    let telegram_plugin =
-        plugins::telegram_bot::TelegramPlugin::new(0, &rt, cfg.telegram.allow.clone(), use_ai_routing);
-    let tg_sender = telegram_plugin.outgoing_sender();
-
     let mut bus = EventBus::new();
-    let tg_id = bus.register_plugin(Box::new(telegram_plugin));
+
+    // Telegram plugin (optional — only if token is configured).
+    let has_telegram = cfg.telegram.token.is_some() || std::env::var("TELOXIDE_TOKEN").is_ok();
+    let (tg_sender, tg_id) = if has_telegram {
+        if let Some(token) = cfg.telegram.token.as_ref() {
+            std::env::set_var("TELOXIDE_TOKEN", token);
+        }
+        let telegram_plugin =
+            plugins::telegram_bot::TelegramPlugin::new(0, &rt, cfg.telegram.allow.clone(), use_ai_routing);
+        let sender = telegram_plugin.outgoing_sender();
+        let id = bus.register_plugin(Box::new(telegram_plugin));
+        log::info!("[{}] Telegram enabled", bot_name);
+        (sender, Some(id))
+    } else {
+        // No Telegram — create a dummy sender that drops messages.
+        let (tx, _rx) = mpsc::unbounded_channel();
+        log::info!("[{}] Telegram disabled (no token) — web dashboard only", bot_name);
+        (tx, None)
+    };
 
     match mode {
         "claude" => {
@@ -86,16 +92,22 @@ pub async fn run_bot(
                 Arc::clone(&stats),
                 Arc::clone(&tasks),
             );
-            let telegram = sentants::telegram::TelegramSentant::new(tg_id);
-
             bus.register_sentant(Box::new(cli_sentant));
-            bus.register_sentant(Box::new(telegram));
+
+            if let Some(id) = tg_id {
+                let telegram = sentants::telegram::TelegramSentant::new(id);
+                bus.register_sentant(Box::new(telegram));
+            }
 
             let working_dir = cfg
                 .claude
                 .working_dir
                 .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap().display().to_string());
+                .unwrap_or_else(|| {
+                    // Default: ~/.config/anthill/ants/<bot_name>/working
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                    format!("{}/.config/anthill/ants/{}/working", home, bot_name)
+                });
 
             let memory_dir = std::path::Path::new(&working_dir).join(&cfg.claude.memory_dir);
             let repos_dir = std::path::Path::new(&working_dir).join(&cfg.claude.repos_dir);
@@ -160,11 +172,12 @@ pub async fn run_bot(
                 tg_sender,
             );
             let terminal = sentants::terminal::TerminalSentant::new(pty_id);
-            let telegram = sentants::telegram::TelegramSentant::new(tg_id);
 
             bus.register_sentant(Box::new(ai_sentant));
             bus.register_sentant(Box::new(terminal));
-            bus.register_sentant(Box::new(telegram));
+            if let Some(id) = tg_id {
+                bus.register_sentant(Box::new(sentants::telegram::TelegramSentant::new(id)));
+            }
 
             let model = cfg.ai.model.clone();
             tokio::spawn(crate::claude_worker::claude_worker(
@@ -181,11 +194,12 @@ pub async fn run_bot(
 
             let terminal = sentants::terminal::TerminalSentant::new(pty_id);
             let chunker = sentants::chunker::ChunkerSentant::new(tg_sender);
-            let telegram = sentants::telegram::TelegramSentant::new(tg_id);
 
             bus.register_sentant(Box::new(terminal));
             bus.register_sentant(Box::new(chunker));
-            bus.register_sentant(Box::new(telegram));
+            if let Some(id) = tg_id {
+                bus.register_sentant(Box::new(sentants::telegram::TelegramSentant::new(id)));
+            }
         }
     }
 
