@@ -12,11 +12,13 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 git clone https://github.com/reality2-ai/anthill.git
 cd anthill
 cp anthill-example.toml anthill.toml
-# Edit anthill.toml — add your Telegram bot token
+# Edit anthill.toml — set mode = "claude" and skip_permissions = true
 cargo run --release
 ```
 
-Send a message to your bot on Telegram. Done.
+Open `http://localhost:3000` in your browser. Done.
+
+Optionally add a Telegram bot token to also chat via Telegram.
 
 For the full setup with multiple ANTS, web dashboard, and auto-start on boot, see the guides below.
 

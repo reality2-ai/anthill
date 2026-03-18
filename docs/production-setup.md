@@ -38,30 +38,41 @@ cp config-example/ants/dev-assistant/ant.toml ~/.config/anthill/ants/my-ant/ant.
 
 Edit `~/.config/anthill/ants/my-ant/ant.toml`:
 
+Minimal config (web dashboard only, no Telegram):
+
 ```toml
 name = "My Dev ANT"
 mode = "claude"
 
-[telegram]
-token = "YOUR_BOT_TOKEN"
-allow = [YOUR_CHAT_ID]
-
 [claude]
-working_dir = "/home/youruser/Development/anthill-my-ant"
-memory_dir = "memory"
-repos_dir = "repos"
 skip_permissions = true
-backup_interval_hours = 6
 
 system_prompt = """\
 You are a helpful programming assistant."""
+```
+
+The working directory defaults to `~/.config/anthill/ants/my-ant/working`.
+
+To also enable Telegram access, add:
+
+```toml
+[telegram]
+token = "YOUR_BOT_TOKEN"         # from @BotFather
+allow = [YOUR_CHAT_ID]           # recommended
+```
+
+To set a custom working directory:
+
+```toml
+[claude]
+working_dir = "/home/youruser/Development/anthill-my-ant"
 ```
 
 See [Configuration](configuration.md) for all options.
 
 ### 4. Add more ANTS (optional)
 
-Each ANT needs its own directory, `ant.toml`, and Telegram bot token:
+Each ANT needs its own directory and `ant.toml`. Telegram is optional per ANT:
 
 ```bash
 mkdir -p ~/.config/anthill/ants/another-ant

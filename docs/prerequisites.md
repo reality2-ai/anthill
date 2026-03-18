@@ -55,7 +55,9 @@ You should see plain text output. If this works, Anthill will work.
 
 **Important:** Authenticate as the same user that will run Anthill. If your systemd service runs as `youruser`, Claude Code must be authenticated under that account.
 
-## 4. [Telegram](https://telegram.org/) bot token
+## 4. [Telegram](https://telegram.org/) bot token (optional)
+
+Telegram is optional — ANTS can run with the web dashboard only. Skip this if you don't need Telegram access.
 
 1. Install [Telegram](https://telegram.org/apps) on your phone or desktop
 2. Message [**@BotFather**](https://t.me/BotFather)
@@ -63,7 +65,7 @@ You should see plain text output. If this works, Anthill will work.
 4. Choose a display name (e.g. "My Dev ANT")
 5. Choose a username ending in `bot` (e.g. `my_dev_ant_bot`)
 6. BotFather replies with a **bot token** — save it
-7. Each ANT needs its own token (create multiple via @BotFather)
+7. Each ANT that uses Telegram needs its own token (create multiple via @BotFather)
 
 **Find your chat ID** (recommended for access control):
 

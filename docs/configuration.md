@@ -27,6 +27,27 @@ http_bind = "0.0.0.0"
 
 Located at `~/.config/anthill/ants/<name>/ant.toml`. One per ANT.
 
+### Minimal config
+
+The only required fields are `mode` and `skip_permissions`:
+
+```toml
+name = "My ANT"
+mode = "claude"
+
+[claude]
+skip_permissions = true
+```
+
+Everything else has sensible defaults:
+- **Telegram** — disabled (web dashboard only)
+- **working_dir** — defaults to `~/.config/anthill/ants/<id>/working`
+- **memory_dir** — `memory` (relative to working_dir)
+- **repos_dir** — `repos` (relative to working_dir)
+- **backup** — disabled
+
+### Full config
+
 ```toml
 # Display name shown in the web dashboard (default: directory name)
 name = "My ANT"
@@ -35,15 +56,18 @@ name = "My ANT"
 mode = "claude"     # "claude" | "ai" | "raw"
 ```
 
-### [telegram]
+### [telegram] (optional)
+
+Omit this entire section for web-dashboard-only ANTS.
 
 ```toml
 [telegram]
-# Bot token from @BotFather (REQUIRED)
+# Bot token from @BotFather
+# If omitted, the ANT is only accessible via the web dashboard.
 token = "123456:ABC-DEF..."
 
 # Restrict to specific Telegram chat IDs
-# Empty or omitted = allow everyone
+# Empty or omitted = allow everyone with the bot link
 allow = [123456789, 987654321]
 ```
 
@@ -55,6 +79,7 @@ For `mode = "claude"` (the main mode).
 [claude]
 # Working directory — where the ANT operates
 # Auto-created if missing. Auto-initialised as a git repo.
+# Default: ~/.config/anthill/ants/<id>/working
 working_dir = "/path/to/workspace"
 
 # Per-user memory files (relative to working_dir)
