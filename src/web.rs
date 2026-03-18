@@ -839,7 +839,7 @@ async fn handle_ws(
     mut socket: WebSocket,
     state: AppState,
     credential: String,
-    device_id: String,
+    _device_id: String,
 ) {
     let registry = &state.registry;
 
@@ -857,7 +857,6 @@ async fn handle_ws(
     };
 
     // Helper: wrap outgoing message in a signed envelope.
-    let server_device_id = "server".to_string();
     let send_signed = |payload: &str, cred: &str| -> String {
         let (sig, ts) = crate::trust::sign_message(cred, "server", payload);
         serde_json::json!({

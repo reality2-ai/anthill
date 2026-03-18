@@ -8,7 +8,7 @@
 
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -68,6 +68,7 @@ pub fn verify_signature(
 }
 
 /// Derive an encryption key from a credential (32 bytes for AES-256).
+#[allow(dead_code)]
 pub fn derive_encryption_key(credential: &str) -> Vec<u8> {
     let key = hex::decode(credential).unwrap_or_default();
     hmac_sha256(&key, b"anthill:encrypt:v1")
@@ -75,6 +76,7 @@ pub fn derive_encryption_key(credential: &str) -> Vec<u8> {
 
 /// Encrypt a payload with AES-256-GCM.
 /// Returns base64(nonce + ciphertext).
+#[allow(dead_code)]
 pub fn encrypt_payload(credential: &str, plaintext: &[u8]) -> Result<String, String> {
     use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
     use aes_gcm::aead::Aead;
@@ -99,6 +101,7 @@ pub fn encrypt_payload(credential: &str, plaintext: &[u8]) -> Result<String, Str
 
 /// Decrypt an AES-256-GCM payload.
 /// Input is base64(nonce + ciphertext).
+#[allow(dead_code)]
 pub fn decrypt_payload(credential: &str, encrypted: &str) -> Result<Vec<u8>, String> {
     use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
     use aes_gcm::aead::Aead;
@@ -120,6 +123,7 @@ pub fn decrypt_payload(credential: &str, encrypted: &str) -> Result<Vec<u8>, Str
         .map_err(|e| format!("decrypt error: {}", e))
 }
 
+#[allow(dead_code)]
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -144,6 +148,7 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+#[allow(dead_code)]
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim_end_matches('=');
     let mut result = Vec::new();
