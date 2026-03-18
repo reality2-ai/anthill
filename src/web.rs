@@ -12,27 +12,36 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::history::SharedHistory;
 use crate::registry::BotRegistry;
+use crate::trust::SharedTrust;
 
 /// Shared state for Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub registry: Arc<BotRegistry>,
     pub history: SharedHistory,
+    pub trust: SharedTrust,
 }
 
 /// Embedded web app HTML.
 const WEB_APP_HTML: &str = include_str!("web_app.html");
 
 /// Start the web server.
-pub async fn run_web_server(registry: Arc<BotRegistry>, history: SharedHistory, bind: SocketAddr) {
+pub async fn run_web_server(
+    registry: Arc<BotRegistry>,
+    history: SharedHistory,
+    trust: SharedTrust,
+    bind: SocketAddr,
+) {
     let state = AppState {
         registry,
         history,
+        trust,
     };
 
     let app = axum::Router::new()
@@ -54,6 +63,11 @@ pub async fn run_web_server(registry: Arc<BotRegistry>, history: SharedHistory, 
         .route("/api/ants/{id}/files/*path", get(get_file).delete(delete_file))
         .route("/api/ants/{id}/upload/*path", post(upload_file))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
+        .route("/api/auth/verify", post(auth_verify))
+        .route("/api/auth/join", post(auth_join))
+        .route("/api/auth/devices", get(auth_list_devices))
+        .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
+        .route("/api/auth/join-code", post(auth_generate_join_code))
         .with_state(state);
 
     log::info!("Web server listening on {}", bind);
@@ -408,6 +422,146 @@ async fn delete_ant(
     }
 }
 
+// --- Authentication ---
+
+/// Helper: check if a request is authenticated. Returns device name or error.
+fn check_auth(state: &AppState, credential: &str) -> Result<String, StatusCode> {
+    if credential.is_empty() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let mut trust = state.trust.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    match trust.authenticate(credential) {
+        Some(device) => Ok(device.name),
+        None => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+/// POST /api/auth/verify — check if a credential is valid.
+#[derive(Deserialize)]
+struct AuthVerify {
+    credential: String,
+}
+
+async fn auth_verify(
+    State(state): State<AppState>,
+    Json(req): Json<AuthVerify>,
+) -> impl IntoResponse {
+    match check_auth(&state, &req.credential) {
+        Ok(name) => Json(serde_json::json!({
+            "authenticated": true,
+            "device_name": name,
+        })).into_response(),
+        Err(_) => Json(serde_json::json!({
+            "authenticated": false,
+        })).into_response(),
+    }
+}
+
+/// POST /api/auth/join — join the colony with a join code.
+#[derive(Deserialize)]
+struct AuthJoin {
+    code: String,
+    device_name: String,
+}
+
+async fn auth_join(
+    State(state): State<AppState>,
+    Json(req): Json<AuthJoin>,
+) -> impl IntoResponse {
+    let mut trust = match state.trust.lock() {
+        Ok(t) => t,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    if !trust.verify_join_code(&req.code) {
+        return (StatusCode::FORBIDDEN, "Invalid or expired join code").into_response();
+    }
+
+    let name = if req.device_name.is_empty() { "unnamed device" } else { &req.device_name };
+    let device = trust.provision_device(name);
+    log::info!("New device joined colony: '{}' ({})", device.name, &device.id[..8]);
+
+    Json(serde_json::json!({
+        "device_id": device.id,
+        "credential": device.credential,
+        "name": device.name,
+    })).into_response()
+}
+
+/// GET /api/auth/devices — list all provisioned devices (requires auth).
+async fn auth_list_devices(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let credential = params.get("credential").map(|s| s.as_str()).unwrap_or("");
+    if check_auth(&state, credential).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let trust = match state.trust.lock() {
+        Ok(t) => t,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let devices: Vec<_> = trust.list_devices().iter().map(|d| {
+        serde_json::json!({
+            "id": d.id,
+            "name": d.name,
+            "joined_at": d.joined_at,
+            "last_seen": d.last_seen,
+        })
+    }).collect();
+
+    Json(devices).into_response()
+}
+
+/// DELETE /api/auth/devices/:id — revoke a device (requires auth).
+async fn auth_revoke_device(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let credential = params.get("credential").map(|s| s.as_str()).unwrap_or("");
+    if check_auth(&state, credential).is_err() {
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    let mut trust = match state.trust.lock() {
+        Ok(t) => t,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    if trust.revoke_device(&device_id) {
+        log::info!("Device revoked: {}", &device_id[..8.min(device_id.len())]);
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+/// POST /api/auth/join-code — generate a join code (requires auth).
+async fn auth_generate_join_code(
+    State(state): State<AppState>,
+    Json(req): Json<AuthVerify>,
+) -> impl IntoResponse {
+    if check_auth(&state, &req.credential).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    let mut trust = match state.trust.lock() {
+        Ok(t) => t,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let code = trust.generate_join_code();
+    log::info!("Join code generated: {}", code);
+
+    Json(serde_json::json!({
+        "code": code,
+        "expires_in_seconds": 300,
+    })).into_response()
+}
+
 // --- File management ---
 
 #[derive(Serialize)]
@@ -574,12 +728,20 @@ fn guess_content_type(path: &std::path::Path) -> &'static str {
     }
 }
 
-/// GET /ws — WebSocket upgrade.
+/// GET /ws — WebSocket upgrade (with credential in query string).
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws(socket, state))
+    let credential = params.get("credential").cloned().unwrap_or_default();
+
+    // Verify credential.
+    if check_auth(&state, &credential).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    ws.on_upgrade(move |socket| handle_ws(socket, state)).into_response()
 }
 
 /// Handle a WebSocket connection.

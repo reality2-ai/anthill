@@ -194,12 +194,17 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
         }
     });
 
+    // Load colony trust.
+    let trust = crate::trust::load_colony_trust(config_dir)?;
+    log::info!("Colony trust loaded — {} device(s) provisioned",
+        trust.lock().map(|t| t.list_devices().len()).unwrap_or(0));
+
     // Start the web server.
     let bind: SocketAddr = format!("{}:{}", sup_cfg.http_bind, sup_cfg.http_port)
         .parse()
         .unwrap();
     let web_registry = Arc::clone(&registry);
-    tokio::spawn(crate::web::run_web_server(web_registry, history, bind));
+    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), bind));
 
     log::info!("Web dashboard at http://{}", bind);
 

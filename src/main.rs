@@ -14,6 +14,7 @@ mod history;
 mod plugins;
 mod registry;
 mod sentants;
+mod trust;
 mod supervisor;
 mod web;
 
@@ -58,12 +59,29 @@ struct Args {
     /// Run as supervisor — manage multiple bots + web dashboard.
     #[arg(long)]
     supervise: Option<PathBuf>,
+
+    /// Generate a join code for a new device to join the colony.
+    #[arg(long)]
+    join_code: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
+
+    // Generate join code.
+    if let Some(ref config_dir) = args.join_code {
+        let mut trust = trust::ColonyTrust::load(config_dir)?;
+        let code = trust.generate_join_code();
+        println!("\n  Join code: {}\n", code);
+        println!("  Expires in 5 minutes.");
+        println!("  Enter this code in the Anthill web dashboard to join the colony.\n");
+        // Keep the process alive so the code stays valid.
+        println!("  Press Ctrl+C when done.");
+        tokio::signal::ctrl_c().await?;
+        return Ok(());
+    }
 
     // Supervisor mode.
     if let Some(ref config_dir) = args.supervise {
