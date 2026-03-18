@@ -4,13 +4,14 @@
 //! real-time bot events. REST API for bot listing and message sending.
 //! Chat history persisted to disk, loaded on connect.
 
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -49,6 +50,9 @@ pub async fn run_web_server(registry: Arc<BotRegistry>, history: SharedHistory, 
         .route("/api/ants/{id}/cancel/{task_id}", post(cancel_task))
         .route("/api/ants/{id}/config", get(get_config).put(put_config))
         .route("/api/ants/create", post(create_ant))
+        .route("/api/ants/{id}/files", get(list_files))
+        .route("/api/ants/{id}/files/*path", get(get_file).delete(delete_file))
+        .route("/api/ants/{id}/upload/*path", post(upload_file))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .with_state(state);
 
@@ -401,6 +405,172 @@ async fn delete_ant(
     match state.registry.delete_config(&id) {
         Ok(()) => (StatusCode::OK, "ANT deleted").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+// --- File management ---
+
+#[derive(Serialize)]
+struct FileEntry {
+    name: String,
+    is_dir: bool,
+    size: u64,
+}
+
+/// Resolve a safe path within an ANT's working directory. Prevents traversal.
+async fn resolve_ant_path(
+    registry: &crate::registry::BotRegistry,
+    ant_id: &str,
+    subpath: &str,
+) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let bots = registry.bots.read().await;
+    let handle = bots.get(ant_id)?;
+    let base = handle.working_dir.clone();
+    drop(bots);
+
+    // Sanitise: no .. traversal.
+    let clean = subpath.replace("..", "").trim_start_matches('/').to_string();
+    let full = base.join(&clean);
+
+    // Ensure it's still within the working dir.
+    if !full.starts_with(&base) {
+        return None;
+    }
+    Some((base, full))
+}
+
+/// GET /api/ants/:id/files — list root workspace directories.
+async fn list_files(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let bots = state.registry.bots.read().await;
+    let handle = match bots.get(&id) {
+        Some(h) => h,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let base = handle.working_dir.clone();
+    drop(bots);
+
+    match read_dir_entries(&base) {
+        Some(entries) => Json(entries).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// GET /api/ants/:id/files/*path — list directory or serve file.
+async fn get_file(
+    State(state): State<AppState>,
+    Path((id, subpath)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let (_, full) = match resolve_ant_path(&state.registry, &id, &subpath).await {
+        Some(p) => p,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    if full.is_dir() {
+        match read_dir_entries(&full) {
+            Some(entries) => Json(entries).into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        }
+    } else if full.is_file() {
+        match std::fs::read(&full) {
+            Ok(data) => {
+                let content_type = guess_content_type(&full);
+                ([(axum::http::header::CONTENT_TYPE, content_type)], data).into_response()
+            }
+            Err(_) => StatusCode::NOT_FOUND.into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+/// POST /api/ants/:id/upload/*path — upload a file.
+async fn upload_file(
+    State(state): State<AppState>,
+    Path((id, subpath)): Path<(String, String)>,
+    body: Bytes,
+) -> impl IntoResponse {
+    let (_, full) = match resolve_ant_path(&state.registry, &id, &subpath).await {
+        Some(p) => p,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    // Create parent directories.
+    if let Some(parent) = full.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    match std::fs::write(&full, &body) {
+        Ok(()) => {
+            log::info!("[{}] uploaded: {}", id, subpath);
+            StatusCode::CREATED.into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /api/ants/:id/files/*path — delete a file or empty directory.
+async fn delete_file(
+    State(state): State<AppState>,
+    Path((id, subpath)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let (_, full) = match resolve_ant_path(&state.registry, &id, &subpath).await {
+        Some(p) => p,
+        None => return StatusCode::NOT_FOUND,
+    };
+
+    if full.is_file() {
+        std::fs::remove_file(&full).map(|_| StatusCode::OK).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    } else if full.is_dir() {
+        std::fs::remove_dir(&full).map(|_| StatusCode::OK).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+    } else {
+        StatusCode::NOT_FOUND
+    }
+}
+
+fn read_dir_entries(dir: &std::path::Path) -> Option<Vec<FileEntry>> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut result: Vec<FileEntry> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            // Hide .git directory.
+            e.file_name().to_string_lossy() != ".git" && e.file_name().to_string_lossy() != ".gitignore"
+        })
+        .map(|e| {
+            let meta = e.metadata().ok();
+            FileEntry {
+                name: e.file_name().to_string_lossy().to_string(),
+                is_dir: meta.as_ref().map(|m| m.is_dir()).unwrap_or(false),
+                size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
+            }
+        })
+        .collect();
+    result.sort_by(|a, b| {
+        b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name))
+    });
+    Some(result)
+}
+
+fn guess_content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("html") | Some("htm") => "text/html",
+        Some("css") => "text/css",
+        Some("js") => "application/javascript",
+        Some("json") => "application/json",
+        Some("toml") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("txt") | Some("log") => "text/plain",
+        Some("rs") | Some("py") | Some("sh") | Some("rb") | Some("go") | Some("ts") | Some("c") | Some("h") => "text/plain",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("pdf") => "application/pdf",
+        Some("zip") => "application/zip",
+        Some("tar") => "application/x-tar",
+        _ => "application/octet-stream",
     }
 }
 

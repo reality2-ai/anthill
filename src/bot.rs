@@ -65,12 +65,34 @@ pub async fn run_bot(
             // Create event broadcast channel.
             let (event_tx, _) = broadcast::channel::<registry::WsEvent>(256);
 
+            // Compute working directory early (needed for registry and worker).
+            let working_dir = cfg
+                .claude
+                .working_dir
+                .clone()
+                .unwrap_or_else(|| {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                    format!("{}/.config/anthill/ants/{}/working", home, bot_name)
+                });
+
+            let memory_dir = std::path::Path::new(&working_dir).join(&cfg.claude.memory_dir);
+            let repos_dir = std::path::Path::new(&working_dir).join(&cfg.claude.repos_dir);
+            let files_dir = std::path::Path::new(&working_dir).join("files");
+
+            std::fs::create_dir_all(&working_dir)?;
+            std::fs::create_dir_all(&memory_dir)?;
+            std::fs::create_dir_all(&repos_dir)?;
+            std::fs::create_dir_all(&files_dir)?;
+
+            log::info!("[{}] working dir: {}", bot_name, working_dir);
+
             // Register with the bot registry (for web dashboard access).
             if let Some(ref reg) = bot_registry {
                 let display_name = cfg.name.clone().unwrap_or_else(|| bot_name.clone());
                 let handle = registry::BotHandle {
                     name: bot_name.clone(),
                     display_name,
+                    working_dir: std::path::PathBuf::from(&working_dir),
                     request_tx: request_tx.clone(),
                     stats: Arc::clone(&stats),
                     tasks: Arc::clone(&tasks),
@@ -98,25 +120,6 @@ pub async fn run_bot(
                 let telegram = sentants::telegram::TelegramSentant::new(id);
                 bus.register_sentant(Box::new(telegram));
             }
-
-            let working_dir = cfg
-                .claude
-                .working_dir
-                .clone()
-                .unwrap_or_else(|| {
-                    // Default: ~/.config/anthill/ants/<bot_name>/working
-                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-                    format!("{}/.config/anthill/ants/{}/working", home, bot_name)
-                });
-
-            let memory_dir = std::path::Path::new(&working_dir).join(&cfg.claude.memory_dir);
-            let repos_dir = std::path::Path::new(&working_dir).join(&cfg.claude.repos_dir);
-
-            std::fs::create_dir_all(&working_dir)?;
-            std::fs::create_dir_all(&memory_dir)?;
-            std::fs::create_dir_all(&repos_dir)?;
-
-            log::info!("[{}] working dir: {}", bot_name, working_dir);
 
             backup::ensure_git_repo(std::path::Path::new(&working_dir))?;
 

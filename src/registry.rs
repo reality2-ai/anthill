@@ -63,6 +63,7 @@ pub enum BotStatusKind {
 pub struct BotHandle {
     pub name: String,
     pub display_name: String,
+    pub working_dir: std::path::PathBuf,
     pub request_tx: mpsc::UnboundedSender<CliRequest>,
     pub stats: StatsMap,
     pub tasks: TaskMap,
