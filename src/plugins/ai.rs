@@ -91,7 +91,7 @@ impl Plugin for AiMediationPlugin {
                 // Pop message text from data plane.
                 let text = self.message_queue.lock().ok()
                     .and_then(|mut q| q.pop_front())
-                    .map(|(_, t)| t)
+                    .map(|(_, t, _source)| t)
                     .unwrap_or_default();
 
                 if text.is_empty() {

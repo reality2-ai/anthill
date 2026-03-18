@@ -121,7 +121,7 @@ impl ClaudeCliPlugin {
         let chat_id = Self::decode_chat_id(data);
 
         // Pop the stored message from the shared data plane queue.
-        let (_, text) = match self.message_queue.lock().ok().and_then(|mut q| q.pop_front()) {
+        let (_, text, source) = match self.message_queue.lock().ok().and_then(|mut q| q.pop_front()) {
             Some(msg) => msg,
             None => return,
         };
@@ -139,6 +139,7 @@ impl ClaudeCliPlugin {
             message: text,
             new_session: false,
             task_id,
+            source,
         });
     }
 
@@ -155,6 +156,7 @@ impl ClaudeCliPlugin {
             message: "Summarise our conversation so far in a few bullet points, then say 'Ready for a new conversation.'".into(),
             new_session: true,
             task_id,
+            source: "system".into(),
         });
     }
 

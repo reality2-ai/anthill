@@ -26,7 +26,7 @@ Generate a join code and open the dashboard:
 
 ```bash
 anthill --join-code              # prints a code (expires in 5 min)
-# Open http://localhost:3000 → enter the code → you're in
+# Open http://localhost:3000 (or your Tailscale IP/hostname) → enter the code → you're in
 ```
 
 ## What is Reality2?

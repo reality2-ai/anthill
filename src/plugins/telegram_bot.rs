@@ -26,7 +26,8 @@ struct IncomingMessage {
 
 /// Shared message queue — data plane between Telegram and Claude plugins.
 /// Full message text stored here; events carry only IDs.
-pub type MessageQueue = Arc<Mutex<VecDeque<(i64, String)>>>;
+/// (chat_id, text, source) — source is "telegram", "slack", "web"
+pub type MessageQueue = Arc<Mutex<VecDeque<(i64, String, String)>>>;
 
 pub struct TelegramPlugin {
     id: PluginId,
@@ -189,7 +190,7 @@ impl Plugin for TelegramPlugin {
 
                     // Store full text in the shared message queue (data plane).
                     if let Ok(mut q) = self.message_queue.lock() {
-                        q.push_back((msg.chat_id, msg.text));
+                        q.push_back((msg.chat_id, msg.text, "telegram".into()));
                     }
 
                     // Emit small event: { 0: uint(cmd_type), 1: uint(chat_id), 2: uint(cancel_task_id) }

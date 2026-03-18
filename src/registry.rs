@@ -44,12 +44,14 @@ pub enum WsEvent {
         /// Human-readable description: "Running: ls -la", "Reading: src/main.rs"
         detail: String,
     },
-    /// User sent a message (for history and cross-device sync).
+    /// User sent a message (for history and cross-channel sync).
     #[serde(rename = "user_message")]
     UserMessage {
         bot: String,
         chat_id: i64,
         text: String,
+        /// Where the message came from: "telegram", "slack", "web"
+        source: String,
     },
     /// Typing indicator.
     #[serde(rename = "typing")]
@@ -177,6 +179,7 @@ impl BotRegistry {
                 message,
                 new_session: false,
                 task_id,
+                source: "web".into(),
             }).is_ok()
         } else {
             false

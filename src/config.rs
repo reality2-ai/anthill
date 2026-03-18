@@ -86,6 +86,10 @@ pub struct ClaudeConfig {
     /// Skip permission prompts (allows Claude to run commands without approval).
     /// Only enable if access is restricted via telegram.allow.
     pub skip_permissions: bool,
+    /// Sync user messages across channels (telegram, slack, web).
+    /// When true, a message sent via Telegram also appears in Slack and the web dashboard.
+    /// Default: false (security — don't leak messages across channels).
+    pub sync_channels: bool,
     /// Auto-backup: commit working dir changes to git periodically.
     /// Set to 0 to disable. Default: 0 (disabled).
     pub backup_interval_hours: u32,
@@ -101,6 +105,7 @@ impl Default for ClaudeConfig {
             repos_dir: "repos".into(),
             system_prompt: None,
             skip_permissions: false,
+            sync_channels: false,
             backup_interval_hours: 0,
             backup_remote: String::new(),
         }

@@ -19,6 +19,8 @@ pub struct CliRequest {
     pub new_session: bool,
     /// Unique task ID for tracking.
     pub task_id: u32,
+    /// Where this message came from: "telegram", "slack", "web"
+    pub source: String,
 }
 
 /// A response from claude CLI.
@@ -150,6 +152,7 @@ pub async fn claude_cli_worker(
                 bot: bname.clone(),
                 chat_id,
                 text: req.message.clone(),
+                source: req.source.clone(),
             });
         }
 

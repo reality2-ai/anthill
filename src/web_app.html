@@ -541,6 +541,12 @@
       </div>
     </div>
 
+    <h3 class="section-title">Cross-channel sync</h3>
+    <label class="toggle-row">
+      <input type="checkbox" id="c-sync-channels">
+      <span>Show user messages from other channels <span style="color:var(--text-dim)">(e.g. Telegram messages appear in Slack and web)</span></span>
+    </label>
+
     <h3 class="section-title">Personality</h3>
     <div class="field">
       <span class="field-label">System Prompt</span>
@@ -1123,6 +1129,7 @@ async function showConfigModal(antId) {
       document.getElementById('c-slack-bot').value = cfg.slack_bot_token || '';
       document.getElementById('c-slack-app').value = cfg.slack_app_token || '';
       document.getElementById('c-backup-hrs').value = cfg.backup_interval_hours || 0;
+      document.getElementById('c-sync-channels').checked = cfg.sync_channels || false;
       document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
       document.getElementById('c-prompt').value = cfg.system_prompt || '';
       document.getElementById('config-modal').style.display = 'flex';
@@ -1156,6 +1163,7 @@ async function saveConfig() {
     slack_bot_token: document.getElementById('c-slack-bot').value.trim(),
     slack_app_token: document.getElementById('c-slack-app').value.trim(),
     skip_permissions: mode === 'claude' || mode === 'ai',
+    sync_channels: document.getElementById('c-sync-channels').checked,
     backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
     backup_remote: document.getElementById('c-backup-remote').value.trim(),
     system_prompt: document.getElementById('c-prompt').value.trim(),

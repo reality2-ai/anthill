@@ -110,7 +110,7 @@ impl Plugin for SlackPlugin {
                     let cmd_type = classify_command(&msg.text);
 
                     if let Ok(mut q) = self.message_queue.lock() {
-                        q.push_back((channel_hash as i64, msg.text));
+                        q.push_back((channel_hash as i64, msg.text, "slack".into()));
                     }
 
                     // Emit small event: { 0: uint(cmd_type), 1: uint(channel_hash) }

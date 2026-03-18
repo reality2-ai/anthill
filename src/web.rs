@@ -247,6 +247,7 @@ async fn get_config(
                     "memory_dir": cfg.claude.memory_dir,
                     "repos_dir": cfg.claude.repos_dir,
                     "skip_permissions": cfg.claude.skip_permissions,
+                    "sync_channels": cfg.claude.sync_channels,
                     "backup_interval_hours": cfg.claude.backup_interval_hours,
                     "backup_remote": cfg.claude.backup_remote,
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
@@ -276,6 +277,7 @@ struct ConfigUpdate {
     memory_dir: Option<String>,
     repos_dir: Option<String>,
     skip_permissions: Option<bool>,
+    sync_channels: Option<bool>,
     backup_interval_hours: Option<u32>,
     backup_remote: Option<String>,
     system_prompt: Option<String>,
@@ -334,6 +336,7 @@ async fn put_config(
     toml.push_str("memory_dir = \"memory\"\n");
     toml.push_str("repos_dir = \"repos\"\n");
     toml.push_str(&format!("skip_permissions = {}\n", skip_perms));
+    toml.push_str(&format!("sync_channels = {}\n", req.sync_channels.unwrap_or(false)));
     toml.push_str(&format!("backup_interval_hours = {}\n", req.backup_interval_hours.unwrap_or(0)));
     let remote = req.backup_remote.as_deref().unwrap_or("");
     if !remote.is_empty() {
