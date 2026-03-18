@@ -47,17 +47,17 @@ Anthill is the first production application of R2 outside sensor networks. The s
 
 ### How Anthill uses R2
 
-![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBQbHVnaW5zW1BsdWdpbnMgLSBhbGwgSS9PXQogICAgICAgICAgICBXUFtXZWJQbHVnaW5dCiAgICAgICAgICAgIFRQW1RlbGVncmFtUGx1Z2luXQogICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgQ1BbQ2xhdWRlQ2xpUGx1Z2luXQogICAgICAgIGVuZAogICAgICAgIHN1YmdyYXBoIEZTTXNbU2VudGFudHMgLSBwdXJlIEZTTXNdCiAgICAgICAgICAgIENTW0NsYXVkZUNsaVNlbnRhbnRdCiAgICAgICAgZW5kCiAgICAgICAgQ1dbQ2xhdWRlIENvZGVdCiAgICBlbmQKCiAgICBQaG9uZSA8LS0+fHRydXN0IGdyb3VwIGF1dGh8IFdQCiAgICBMYXB0b3AgPC0tPnx0cnVzdCBncm91cCBhdXRofCBXUAogICAgVEcgPC0tPiBUUAogICAgU0wgPC0tPiBTUAogICAgV1AgPC0tPnxldmVudHN8IENTCiAgICBUUCA8LS0+fGV2ZW50c3wgQ1MKICAgIFNQIDwtLT58ZXZlbnRzfCBDUwogICAgQ1MgPC0tPnxwbHVnaW5fY2FsbHwgQ1AKICAgIENQIDwtLT58ZGF0YSBwbGFuZXwgVFAKICAgIENQIDwtLT58ZGF0YSBwbGFuZXwgU1AKICAgIENQIDwtLT58ZGF0YSBwbGFuZXwgV1AKICAgIENQIDwtLT4gQ1c=)
+![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBQbHVnaW5zW1BsdWdpbnMgLSBhbGwgSS9PXQogICAgICAgICAgICBXUFtXZWJQbHVnaW5dCiAgICAgICAgICAgIFRQW1RlbGVncmFtUGx1Z2luXQogICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgQVBbQUlQbHVnaW5dCiAgICAgICAgZW5kCiAgICAgICAgc3ViZ3JhcGggRlNNc1tTZW50YW50cyAtIHB1cmUgRlNNc10KICAgICAgICAgICAgQ1NbQ29uZHVjdG9yXQogICAgICAgIGVuZAogICAgZW5kCgogICAgc3ViZ3JhcGggQUlbQUkgQmFja2VuZHNdCiAgICAgICAgQ2xhdWRlW0NsYXVkZV0KICAgICAgICBPQUlbT3BlbkFJXTo6OmZ1dHVyZQogICAgICAgIE9MW09sbGFtYV06OjpmdXR1cmUKICAgIGVuZAoKICAgIFBob25lIDwtLT58dHJ1c3QgZ3JvdXAgYXV0aHwgV1AKICAgIExhcHRvcCA8LS0+fHRydXN0IGdyb3VwIGF1dGh8IFdQCiAgICBURyA8LS0+IFRQCiAgICBTTCA8LS0+IFNQCiAgICBXUCA8LS0+fGV2ZW50c3wgQ1MKICAgIFRQIDwtLT58ZXZlbnRzfCBDUwogICAgU1AgPC0tPnxldmVudHN8IENTCiAgICBDUyA8LS0+fHBsdWdpbl9jYWxsfCBBUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBTUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBXUAogICAgQVAgPC0tPiBDbGF1ZGUKICAgIEFQIC0uLXxjb21pbmcgc29vbnwgT0FJCiAgICBBUCAtLi18Y29taW5nIHNvb258IE9MCgogICAgY2xhc3NEZWYgZnV0dXJlIHN0cm9rZS1kYXNoYXJyYXk6IDUgNSxvcGFjaXR5OjAuNQ==)
 
 **Sentants** make decisions. **Plugins** handle data. Events are tiny. Data flows plugin-to-plugin.
 
 | Sentants (pure FSMs — zero I/O) | Plugins (all I/O) |
 |---|---|
-| ClaudeCliSentant — dispatches, routes, commands | ClaudeCliPlugin — Claude Code, tasks, stats, sends |
-| AiSentant — NL→command→summary pipeline | AiMediationPlugin — API calls, buffering, history |
-| ChunkerSentant — output batching decisions | ChunkerPlugin — ANSI stripping, chunking, sends |
-| TerminalSentant — PTY lifecycle | TelegramPlugin — Bot API, classification, data plane |
-| TelegramSentant — session routing | PtyPlugin — pseudo-terminal management |
+| Conductor — dispatches, routes, commands | AIPlugin — Claude (+ OpenAI, Ollama coming) |
+| AiSentant — NL→command→summary pipeline | TelegramPlugin — Bot API, message classification |
+| ChunkerSentant — output batching decisions | SlackPlugin — Socket Mode, message routing |
+| TerminalSentant — PTY lifecycle | WebPlugin — dashboard, WebSocket, file browser |
+| TelegramSentant — session routing | ChunkerPlugin, PtyPlugin — raw mode I/O |
 
 ## Features
 
