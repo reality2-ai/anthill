@@ -63,28 +63,33 @@ The server is the **queen** — it exists the moment Anthill starts. Browsers an
 
 ## Event flow (claude mode)
 
-```
-Telegram message arrives
-    → TelegramPlugin.poll()
-    → Stores full text in MessageQueue (data plane)
-    → Emits RELAY_COMMAND { cmd_type: 0, chat_id: 123 } (12 bytes)
-    → ClaudeCliSentant receives event
-    → Decides: dispatch to Claude
-    → Emits Action::plugin_call(CMD_DISPATCH, { chat_id: 123 })
-    → ClaudeCliPlugin.execute(CMD_DISPATCH)
-    → Pops message from MessageQueue (data plane)
-    → Sends "Thinking..." to Telegram (plugin-to-plugin)
-    → Spawns claude -p task
-    → ... Claude works ...
-    → ClaudeCliPlugin.poll()
-    → Emits RELAY_AI_READY { chat_id: 123 } (12 bytes)
-    → ClaudeCliSentant receives event
-    → Decides: send reply
-    → Emits Action::plugin_call(CMD_REPLY, { chat_id: 123 })
-    → ClaudeCliPlugin.execute(CMD_REPLY)
-    → Pops response from queue (data plane)
-    → Sends to Telegram (plugin-to-plugin)
-    → Broadcasts to WebSocket clients
+```mermaid
+sequenceDiagram
+    participant User as User (Telegram/Web)
+    participant TP as TelegramPlugin
+    participant MQ as MessageQueue<br/>(data plane)
+    participant Bus as Event Bus<br/>(< 256 bytes)
+    participant S as ClaudeCliSentant<br/>(pure FSM)
+    participant CP as ClaudeCliPlugin
+    participant C as Claude Code
+
+    User->>TP: "explain this code"
+    TP->>MQ: store full text
+    TP->>Bus: RELAY_COMMAND {cmd:0, chat:123}
+    Bus->>S: event (12 bytes)
+    S->>Bus: Action::plugin_call(CMD_DISPATCH)
+    Bus->>CP: execute(CMD_DISPATCH, {chat:123})
+    CP->>MQ: pop full text
+    CP->>TP: "Thinking..." (data plane)
+    CP->>C: claude -p "explain this code"
+    Note over C: Working...
+    C->>CP: response text
+    CP->>Bus: RELAY_AI_READY {chat:123}
+    Bus->>S: event (12 bytes)
+    S->>Bus: Action::plugin_call(CMD_REPLY)
+    Bus->>CP: execute(CMD_REPLY, {chat:123})
+    CP->>TP: response (data plane)
+    TP->>User: formatted response
 ```
 
 The sentant touches zero bytes of message text. It only routes IDs.

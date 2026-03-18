@@ -45,42 +45,48 @@ Anthill is the first production application of R2 outside sensor networks. The s
 
 ### How Anthill uses R2
 
-```
-Your phone (browser)                    Server (the queen)
-┌─────────────────┐                    ┌─────────────────────────┐
-│ Web dashboard    │◄── WebSocket ───► │ WebPlugin               │
-│ (authenticated   │    (trust group)  │                         │
-│  viewer)         │                   │ ClaudeCliPlugin          │
-└─────────────────┘                    │  ├─ worker channels     │
-                                       │  ├─ task map            │
-┌─────────────────┐                    │  ├─ stats               │
-│ Telegram app     │◄── Bot API ────► │  └─ message queue       │
-└─────────────────┘                    │                         │
-                                       │ TelegramPlugin          │
-                                       │  └─ incoming/outgoing   │
-                                       │                         │
-                                       │ ClaudeCliSentant (FSM)  │
-                                       │  └─ decisions only      │
-                                       └─────────────────────────┘
+```mermaid
+graph LR
+    subgraph Viewers
+        Phone["📱 Phone<br/>(browser)"]
+        Laptop["💻 Laptop<br/>(browser)"]
+        TG["📨 Telegram"]
+    end
+
+    subgraph Queen["🐜 Server (the Queen)"]
+        subgraph Plugins["Plugins (I/O)"]
+            WP["WebPlugin<br/>WebSocket + API"]
+            TP["TelegramPlugin<br/>Bot API + data plane"]
+            CP["ClaudeCliPlugin<br/>worker · tasks · stats"]
+        end
+        subgraph Sentants["Sentants (pure FSMs)"]
+            CS["ClaudeCliSentant<br/>decisions only"]
+        end
+        subgraph Worker["Claude Code"]
+            CW["claude -p<br/>(concurrent tasks)"]
+        end
+    end
+
+    Phone -- "trust group<br/>auth" --> WP
+    Laptop -- "trust group<br/>auth" --> WP
+    TG --> TP
+    WP -- "events<br/>(< 256 bytes)" --> CS
+    TP -- "events<br/>(< 256 bytes)" --> CS
+    CS -- "Action::plugin_call" --> CP
+    CP -- "data plane<br/>(full text)" --> TP
+    CP -- "data plane" --> WP
+    CP --> CW
 ```
 
-**Sentants** (pure FSMs — zero I/O):
-| Sentant | Role |
-|---|---|
-| ClaudeCliSentant | Dispatches messages, routes responses, handles commands |
-| AiSentant | NL→command→summary pipeline (ai mode) |
-| ChunkerSentant | Output batching decisions (raw mode) |
-| TerminalSentant | PTY lifecycle coordination |
-| TelegramSentant | Session event routing |
+**Sentants** make decisions. **Plugins** handle data. Events are tiny. Data flows plugin-to-plugin.
 
-**Plugins** (all I/O):
-| Plugin | Role |
+| Sentants (pure FSMs — zero I/O) | Plugins (all I/O) |
 |---|---|
-| ClaudeCliPlugin | Claude Code invocations, task tracking, stats, Telegram sends |
-| AiMediationPlugin | Claude API calls, output buffering, history (ai mode) |
-| ChunkerPlugin | ANSI stripping, chunking, Telegram sends (raw mode) |
-| TelegramPlugin | Telegram Bot API, message classification, data plane |
-| PtyPlugin | Pseudo-terminal management |
+| ClaudeCliSentant — dispatches, routes, commands | ClaudeCliPlugin — Claude Code, tasks, stats, sends |
+| AiSentant — NL→command→summary pipeline | AiMediationPlugin — API calls, buffering, history |
+| ChunkerSentant — output batching decisions | ChunkerPlugin — ANSI stripping, chunking, sends |
+| TerminalSentant — PTY lifecycle | TelegramPlugin — Bot API, classification, data plane |
+| TelegramSentant — session routing | PtyPlugin — pseudo-terminal management |
 
 ## Features
 

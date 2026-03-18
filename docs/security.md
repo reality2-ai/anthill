@@ -4,6 +4,22 @@
 
 Anthill implements R2-TRUST — the same provisioning model designed for IoT sensor networks. The colony is a **trust group**. The server is the **queen**. Browsers and phones are **viewers** that must be provisioned to join.
 
+```mermaid
+graph TD
+    subgraph TG["Trust Group (colony)"]
+        Queen["🐜 Server<br/>(the Queen)<br/>colony.key"]
+        D1["📱 Phone<br/>credential in localStorage"]
+        D2["💻 Laptop<br/>credential in localStorage"]
+    end
+
+    Admin["Admin terminal"] -- "anthill --join-code" --> Queen
+    Queen -- "join code<br/>(5 min, one-use)" --> D1
+    D1 -- "X-Credential header<br/>on every request" --> Queen
+    D2 -- "X-Credential header" --> Queen
+
+    Outside["🚫 Unauthenticated<br/>browser"] -. "401 Unauthorized" .-> Queen
+```
+
 ### How it works
 
 1. **Colony root secret** — generated automatically on first run (`colony.key`). This is the trust group's key material.
