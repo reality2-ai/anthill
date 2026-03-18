@@ -44,6 +44,26 @@ pub async fn run_web_server(
         trust,
     };
 
+    // Protected API routes — require credential in X-Credential header.
+    let protected_api = axum::Router::new()
+        .route("/api/ants", get(list_ants))
+        .route("/api/ants/{id}/chat", post(send_chat))
+        .route("/api/ants/{id}/cancel/{task_id}", post(cancel_task))
+        .route("/api/ants/{id}/config", get(get_config).put(put_config))
+        .route("/api/ants/create", post(create_ant))
+        .route("/api/ants/{id}/files", get(list_files))
+        .route("/api/ants/{id}/files/{*path}", get(get_file).delete(delete_file))
+        .route("/api/ants/{id}/upload/{*path}", post(upload_file))
+        .route("/api/ants/{id}", axum::routing::delete(delete_ant))
+        .route("/api/auth/devices", get(auth_list_devices))
+        .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
+        .route("/api/auth/join-code", post(auth_generate_join_code))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    // Public routes — no auth required.
     let app = axum::Router::new()
         .route("/", get(index))
         .route("/ws", get(ws_handler))
@@ -54,21 +74,10 @@ pub async fn run_web_server(
         .route("/icon-512.svg", get(icon_512))
         .route("/icon-192.png", get(icon_192))
         .route("/icon-512.png", get(icon_512))
-        .route("/api/ants", get(list_ants))
-        .route("/api/ants/{id}/chat", post(send_chat))
-        .route("/api/ants/{id}/cancel/{task_id}", post(cancel_task))
-        .route("/api/ants/{id}/config", get(get_config).put(put_config))
-        .route("/api/ants/create", post(create_ant))
-        .route("/api/ants/{id}/files", get(list_files))
-        .route("/api/ants/{id}/files/{*path}", get(get_file).delete(delete_file))
-        .route("/api/ants/{id}/upload/{*path}", post(upload_file))
-        .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/auth/verify", post(auth_verify))
         .route("/api/auth/join", post(auth_join))
-        .route("/api/auth/devices", get(auth_list_devices))
-        .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
-        .route("/api/auth/join-code", post(auth_generate_join_code))
         .route("/api/auth/status", get(auth_status))
+        .merge(protected_api)
         .with_state(state);
 
     log::info!("Web server listening on {}", bind);
@@ -423,6 +432,67 @@ async fn delete_ant(
     }
 }
 
+// --- Auth middleware ---
+
+/// Middleware that checks the X-Credential header on protected routes.
+async fn auth_middleware(
+    State(state): State<AppState>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> impl IntoResponse {
+    // Check X-Credential header first, then ?credential query param.
+    let credential = req
+        .headers()
+        .get("x-credential")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find_map(|pair| {
+                        let mut parts = pair.splitn(2, '=');
+                        let key = parts.next()?;
+                        let val = parts.next()?;
+                        if key == "credential" {
+                            Some(urlencoding::decode(val).ok()?.to_string())
+                        } else {
+                            None
+                        }
+                    })
+            })
+        })
+        .unwrap_or_default();
+
+    if check_auth(&state, &credential).is_err() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    next.run(req).await.into_response()
+}
+
+/// Simple URL decoding (just for the credential parameter).
+mod urlencoding {
+    pub fn decode(s: &str) -> Result<String, ()> {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.bytes();
+        while let Some(b) = chars.next() {
+            if b == b'%' {
+                let h1 = chars.next().ok_or(())?;
+                let h2 = chars.next().ok_or(())?;
+                let hex = [h1, h2];
+                let s = std::str::from_utf8(&hex).map_err(|_| ())?;
+                let byte = u8::from_str_radix(s, 16).map_err(|_| ())?;
+                result.push(byte as char);
+            } else if b == b'+' {
+                result.push(' ');
+            } else {
+                result.push(b as char);
+            }
+        }
+        Ok(result)
+    }
+}
+
 // --- Authentication ---
 
 /// Helper: check if a request is authenticated. Returns device name or error.
@@ -489,16 +559,10 @@ async fn auth_join(
     })).into_response()
 }
 
-/// GET /api/auth/devices — list all provisioned devices (requires auth).
+/// GET /api/auth/devices — list all provisioned devices (auth via middleware).
 async fn auth_list_devices(
     State(state): State<AppState>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let credential = params.get("credential").map(|s| s.as_str()).unwrap_or("");
-    if check_auth(&state, credential).is_err() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-
     let trust = match state.trust.lock() {
         Ok(t) => t,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -516,17 +580,11 @@ async fn auth_list_devices(
     Json(devices).into_response()
 }
 
-/// DELETE /api/auth/devices/:id — revoke a device (requires auth).
+/// DELETE /api/auth/devices/:id — revoke a device (auth via middleware).
 async fn auth_revoke_device(
     State(state): State<AppState>,
     Path(device_id): Path<String>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let credential = params.get("credential").map(|s| s.as_str()).unwrap_or("");
-    if check_auth(&state, credential).is_err() {
-        return StatusCode::UNAUTHORIZED;
-    }
-
     let mut trust = match state.trust.lock() {
         Ok(t) => t,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
@@ -540,15 +598,10 @@ async fn auth_revoke_device(
     }
 }
 
-/// POST /api/auth/join-code — generate a join code (requires auth).
+/// POST /api/auth/join-code — generate a join code (auth via middleware).
 async fn auth_generate_join_code(
     State(state): State<AppState>,
-    Json(req): Json<AuthVerify>,
 ) -> impl IntoResponse {
-    if check_auth(&state, &req.credential).is_err() {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-
     let mut trust = match state.trust.lock() {
         Ok(t) => t,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),

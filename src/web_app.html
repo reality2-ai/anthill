@@ -910,7 +910,7 @@ async function loadFiles(path) {
   document.getElementById('files-list').style.display = 'block';
 
   try {
-    const resp = await fetch(url);
+    const resp = await authFetch(url);
     if (!resp.ok) {
       document.getElementById('files-list').innerHTML = '<div style="color:var(--text-dim);padding:20px">Could not load files.</div>';
       return;
@@ -1002,7 +1002,7 @@ async function handleUpload(files) {
   for (const file of files) {
     const path = dir + file.name;
     const data = await file.arrayBuffer();
-    await fetch(`/api/ants/${state.activeBot}/upload/${path}`, {
+    await authFetch(`/api/ants/${state.activeBot}/upload/${path}`, {
       method: 'POST',
       body: data,
     });
@@ -1016,7 +1016,7 @@ async function handleUpload(files) {
 async function deleteFileItem(path) {
   if (!state.activeBot) return;
   if (!confirm(`Delete ${path.split('/').pop()}?`)) return;
-  await fetch(`/api/ants/${state.activeBot}/files/${path}`, { method: 'DELETE' });
+  await authFetch(`/api/ants/${state.activeBot}/files/${path}`, { method: 'DELETE' });
   loadFiles(currentFilePath);
 }
 
@@ -1076,7 +1076,7 @@ async function submitCreate() {
     if (workdir) body.working_dir = workdir;
     if (prompt) body.system_prompt = prompt;
 
-    const resp = await fetch('/api/ants/create', {
+    const resp = await authFetch('/api/ants/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1102,7 +1102,7 @@ async function showConfigModal(antId) {
   document.getElementById('config-title').textContent = `Settings: ${bot ? bot.name : antId}`;
 
   try {
-    const resp = await fetch(`/api/ants/${antId}/config`);
+    const resp = await authFetch(`/api/ants/${antId}/config`);
     if (resp.ok) {
       const cfg = await resp.json();
       document.getElementById('c-name').value = cfg.name || '';
@@ -1148,7 +1148,7 @@ async function saveConfig() {
   };
 
   try {
-    const resp = await fetch(`/api/ants/${editingAntId}/config`, {
+    const resp = await authFetch(`/api/ants/${editingAntId}/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -1178,7 +1178,7 @@ async function deleteAnt() {
   if (!confirm(`Delete ANT "${editingAntId}"? This removes its config but not the working directory.`)) return;
 
   try {
-    const resp = await fetch(`/api/ants/${editingAntId}`, { method: 'DELETE' });
+    const resp = await authFetch(`/api/ants/${editingAntId}`, { method: 'DELETE' });
     if (resp.ok) {
       hideConfigModal();
       delete state.bots[editingAntId];
@@ -1199,6 +1199,18 @@ async function deleteAnt() {
   }
 }
 
+// --- Authenticated fetch ---
+function authFetch(url, options = {}) {
+  const credential = getCredential();
+  if (!options.headers) options.headers = {};
+  if (typeof options.headers.set === 'function') {
+    options.headers.set('X-Credential', credential);
+  } else {
+    options.headers['X-Credential'] = credential;
+  }
+  return fetch(url, options);
+}
+
 // --- Device management ---
 async function showDevicesModal() {
   document.getElementById('devices-modal').style.display = 'flex';
@@ -1213,7 +1225,7 @@ function hideDevicesModal() {
 async function loadDevices() {
   const credential = getCredential();
   try {
-    const resp = await fetch(`/api/auth/devices?credential=${encodeURIComponent(credential)}`);
+    const resp = await authFetch('/api/auth/devices');
     if (!resp.ok) {
       document.getElementById('devices-list').innerHTML = '<div style="color:var(--red)">Failed to load devices</div>';
       return;
@@ -1248,7 +1260,7 @@ async function revokeDevice(deviceId, deviceName) {
   if (!confirm(`Revoke "${deviceName}"? They will need a new join code to reconnect.`)) return;
   const credential = getCredential();
   try {
-    const resp = await fetch(`/api/auth/devices/${deviceId}?credential=${encodeURIComponent(credential)}`, { method: 'DELETE' });
+    const resp = await authFetch(`/api/auth/devices/${deviceId}`, { method: 'DELETE' });
     if (resp.ok) {
       await loadDevices();
     } else {
@@ -1271,10 +1283,8 @@ function timeSince(unixSecs) {
 async function generateJoinCode() {
   const credential = getCredential();
   try {
-    const resp = await fetch('/api/auth/join-code', {
+    const resp = await authFetch('/api/auth/join-code', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credential }),
     });
     if (resp.ok) {
       const data = await resp.json();
