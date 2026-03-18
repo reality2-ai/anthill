@@ -8,7 +8,7 @@ Anthill runs AI agents on a Linux server and lets you interact with them from an
 
 Each ANT has its own personality, workspace, persistent memory, and can run multiple tasks concurrently. Access is controlled by a trust group — devices join the colony via one-time join codes.
 
-Built on the [Reality2](https://reality2.ai) (R2) sentant engine — the same event-driven architecture used for IoT sensor networks, now proven for AI agents.
+Built on the [Reality2](https://reality2.ai) (R2) sentant engine — a software stack for wearables and IoT, now proven for AI agents.
 
 > **Note:** Anthill currently runs on **Linux only** and requires some technical setup (Rust toolchain, AI CLI tools, systemd). See [Prerequisites](docs/prerequisites.md) for what's needed. macOS and Windows support may come in future.
 
@@ -31,7 +31,7 @@ anthill --join-code              # prints a code (expires in 5 min)
 
 ## What is Reality2?
 
-[Reality2](https://reality2.ai) (R2) is an event-driven architecture for autonomous agents — originally designed for IoT sensor networks on ESP32 microcontrollers, now proven to work for AI agents too.
+[Reality2](https://reality2.ai) (R2) is a new software stack for wearables and IoT devices — an event-driven architecture for autonomous agents. Now proven to work for AI agents too.
 
 The core principles:
 
