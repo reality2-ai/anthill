@@ -290,13 +290,44 @@ anthill --supervise ~/.config/anthill
 
 #### 7. Access the web dashboard
 
-Open `http://<your-tailscale-ip>:3000` in any browser on your Tailscale network. You'll see:
+**Option A — HTTP (simple):**
+
+Open `http://<your-tailscale-ip>:3000` in any browser on your Tailscale network.
+
+**Option B — HTTPS via Tailscale (recommended):**
+
+Tailscale can provision a valid HTTPS certificate and proxy to Anthill automatically:
+
+```bash
+# Find your machine's Tailscale domain
+tailscale status --self
+# e.g. alfred.tail12345.ts.net
+
+# Set up HTTPS proxy to Anthill
+tailscale serve https / http://localhost:3000
+```
+
+Now access the dashboard at `https://alfred.tail12345.ts.net` with a valid certificate. This is required for PWA installation on some browsers and enables secure WebSocket (`wss://`).
+
+To make this permanent (survives reboots):
+
+```bash
+tailscale serve --bg https / http://localhost:3000
+```
+
+To check what's being served:
+
+```bash
+tailscale serve status
+```
+
+**Features:**
 - Sidebar listing all ANTS with status indicators
 - Chat interface with markdown rendering and code blocks
 - Live task panel showing running workers
 - Full conversation history (persists across devices and restarts)
 
-On mobile, you can install it as a PWA:
+**Install as a PWA** (works best over HTTPS):
 - **Android:** Chrome menu → "Add to Home screen"
 - **iOS:** Safari share → "Add to Home Screen"
 - **Linux:** Chrome menu → "Install Anthill"
