@@ -44,9 +44,12 @@ pub async fn run_web_server(registry: Arc<BotRegistry>, history: SharedHistory, 
         .route("/icon-512.svg", get(icon_512))
         .route("/icon-192.png", get(icon_192))
         .route("/icon-512.png", get(icon_512))
-        .route("/api/bots", get(list_bots))
-        .route("/api/bots/{name}/chat", post(send_chat))
-        .route("/api/bots/{name}/cancel/{task_id}", post(cancel_task))
+        .route("/api/ants", get(list_ants))
+        .route("/api/ants/{id}/chat", post(send_chat))
+        .route("/api/ants/{id}/cancel/{task_id}", post(cancel_task))
+        .route("/api/ants/{id}/config", get(get_config).put(put_config))
+        .route("/api/ants/create", post(create_ant))
+        .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .with_state(state);
 
     log::info!("Web server listening on {}", bind);
@@ -153,8 +156,8 @@ async fn icon_512() -> impl IntoResponse {
     )
 }
 
-/// GET /api/bots — list all bots with status.
-async fn list_bots(State(state): State<AppState>) -> impl IntoResponse {
+/// GET /api/ants — list all ants with status.
+async fn list_ants(State(state): State<AppState>) -> impl IntoResponse {
     let bots = state.registry.list_bots().await;
     Json(bots)
 }
@@ -194,6 +197,121 @@ async fn cancel_task(
         }
     }
     StatusCode::NOT_FOUND
+}
+
+/// GET /api/ants/:id/config — read an ANT's config.
+async fn get_config(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.registry.read_config(&id) {
+        Some(content) => (StatusCode::OK, content).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// PUT /api/ants/:id/config — update an ANT's config.
+#[derive(Deserialize)]
+struct ConfigUpdate {
+    content: String,
+}
+
+async fn put_config(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ConfigUpdate>,
+) -> impl IntoResponse {
+    // Validate it's valid TOML.
+    if toml::from_str::<crate::config::Config>(&req.content).is_err() {
+        return (StatusCode::BAD_REQUEST, "Invalid TOML config").into_response();
+    }
+    match state.registry.write_config(&id, &req.content) {
+        Ok(()) => (StatusCode::OK, "Config saved. Restart the ANT to apply.").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// POST /api/ants/create — create a new ANT.
+#[derive(Deserialize)]
+struct CreateAnt {
+    id: String,
+    name: String,
+    token: String,
+    working_dir: String,
+    system_prompt: Option<String>,
+}
+
+async fn create_ant(
+    State(state): State<AppState>,
+    Json(req): Json<CreateAnt>,
+) -> impl IntoResponse {
+    // Validate id (alphanumeric + hyphens only).
+    if req.id.is_empty()
+        || !req.id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return (StatusCode::BAD_REQUEST, "Invalid ANT id. Use alphanumeric, hyphens, underscores.").into_response();
+    }
+
+    // Check it doesn't already exist.
+    if state.registry.read_config(&req.id).is_some() {
+        return (StatusCode::CONFLICT, "ANT already exists").into_response();
+    }
+
+    // Generate ant.toml.
+    let prompt = req.system_prompt.unwrap_or_else(|| "You are a helpful assistant.".into());
+    let config = format!(
+        r#"name = "{name}"
+mode = "claude"
+
+[telegram]
+token = "{token}"
+
+[claude]
+working_dir = "{working_dir}"
+memory_dir = "memory"
+repos_dir = "repos"
+skip_permissions = true
+backup_interval_hours = 6
+
+system_prompt = """\
+{prompt}"""
+"#,
+        name = req.name,
+        token = req.token,
+        working_dir = req.working_dir,
+        prompt = prompt,
+    );
+
+    match state.registry.write_config(&req.id, &config) {
+        Ok(()) => (StatusCode::CREATED, "ANT created. Restart Anthill to start it.").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// DELETE /api/ants/:id — delete an ANT.
+async fn delete_ant(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    // Stop the ANT if it's running (abort its tasks).
+    {
+        let bots = state.registry.bots.read().await;
+        if let Some(handle) = bots.get(&id) {
+            if let Ok(tasks) = handle.tasks.lock() {
+                for task in tasks.values() {
+                    task.handle.abort();
+                }
+            }
+        }
+    }
+    // Remove from registry.
+    state.registry.bots.write().await.remove(&id);
+
+    // Delete config.
+    match state.registry.delete_config(&id) {
+        Ok(()) => (StatusCode::OK, "ANT deleted").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }
 
 /// GET /ws — WebSocket upgrade.

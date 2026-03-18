@@ -332,9 +332,62 @@
 <body>
 
 <div id="sidebar">
-  <h1>Anthill</h1>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid #333">
+    <h1 style="padding:0;border:none;margin:0">Anthill</h1>
+    <button onclick="showCreateModal()" style="background:var(--accent);color:white;border:none;border-radius:6px;width:32px;height:32px;font-size:18px;cursor:pointer;line-height:1" title="New ANT">+</button>
+  </div>
   <div id="bot-list"></div>
   <div style="padding:12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">ANTS: Autonomous iNTelligenceS</div>
+</div>
+
+<!-- Create ANT modal -->
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <h2 style="margin-bottom:16px" id="modal-title">New ANT</h2>
+    <div id="modal-fields">
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:13px;color:var(--text-dim)">ID (directory name, no spaces)</span>
+        <input id="f-id" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px" placeholder="my-ant">
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:13px;color:var(--text-dim)">Display Name</span>
+        <input id="f-name" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px" placeholder="My Dev ANT">
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:13px;color:var(--text-dim)">Telegram Bot Token</span>
+        <input id="f-token" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px;font-family:var(--mono)" placeholder="123456:ABC-DEF...">
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:13px;color:var(--text-dim)">Working Directory</span>
+        <input id="f-workdir" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px" placeholder="/home/user/anthill-my-ant">
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:13px;color:var(--text-dim)">System Prompt (personality)</span>
+        <textarea id="f-prompt" rows="3" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:8px;margin-top:4px;font-size:14px;resize:vertical" placeholder="You are a helpful assistant."></textarea>
+      </label>
+    </div>
+    <div id="modal-error" style="color:var(--red);font-size:13px;margin-bottom:8px;display:none"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="hideModal()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px 16px;cursor:pointer">Cancel</button>
+      <button id="modal-submit" onclick="submitCreate()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Config editor modal -->
+<div id="config-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:560px;max-height:90vh;overflow-y:auto">
+    <h2 style="margin-bottom:16px" id="config-title">Edit Config</h2>
+    <textarea id="config-editor" rows="20" style="width:100%;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:6px;padding:10px;font-family:var(--mono);font-size:13px;resize:vertical"></textarea>
+    <div id="config-error" style="color:var(--red);font-size:13px;margin-top:8px;display:none"></div>
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px">
+      <button onclick="deleteAnt()" style="background:none;color:var(--red);border:1px solid var(--red);border-radius:6px;padding:8px 16px;cursor:pointer">Delete ANT</button>
+      <div style="display:flex;gap:10px">
+        <button onclick="hideConfigModal()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px 16px;cursor:pointer">Cancel</button>
+        <button onclick="saveConfig()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600">Save</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="main">
@@ -474,10 +527,11 @@ function renderBotList() {
     list.innerHTML += `
       <div class="bot-item ${active}" onclick="selectBot('${bot.id}')">
         <div class="bot-dot ${statusClass}"></div>
-        <div>
+        <div style="flex:1;min-width:0">
           <div class="bot-name">${bot.name}</div>
           <div class="bot-meta">${tasks ? tasks + ' worker' + (tasks > 1 ? 's' : '') + ' active' : 'idle'}</div>
         </div>
+        <button onclick="event.stopPropagation();showConfigModal('${bot.id}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;padding:4px" title="Settings">⚙</button>
       </div>`;
   });
 }
@@ -618,6 +672,133 @@ document.getElementById('input').addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 });
+
+// --- ANT management ---
+let editingAntId = null;
+
+function showCreateModal() {
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-token').value = '';
+  document.getElementById('f-workdir').value = '';
+  document.getElementById('f-prompt').value = '';
+  document.getElementById('modal-error').style.display = 'none';
+  document.getElementById('modal-title').textContent = 'New ANT';
+  document.getElementById('create-modal').style.display = 'flex';
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function hideModal() {
+  document.getElementById('create-modal').style.display = 'none';
+}
+
+async function submitCreate() {
+  const id = document.getElementById('f-id').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  const token = document.getElementById('f-token').value.trim();
+  const workdir = document.getElementById('f-workdir').value.trim();
+  const prompt = document.getElementById('f-prompt').value.trim();
+  const errEl = document.getElementById('modal-error');
+
+  if (!id || !name || !token) {
+    errEl.textContent = 'ID, Name, and Token are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/ants/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, token, working_dir: workdir || `/tmp/anthill-${id}`, system_prompt: prompt || undefined }),
+    });
+    if (resp.ok) {
+      hideModal();
+      alert('ANT created! Restart Anthill to start it.');
+    } else {
+      errEl.textContent = await resp.text();
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function showConfigModal(antId) {
+  editingAntId = antId;
+  const errEl = document.getElementById('config-error');
+  errEl.style.display = 'none';
+  const bot = state.bots[antId];
+  document.getElementById('config-title').textContent = `Edit: ${bot ? bot.name : antId}`;
+
+  try {
+    const resp = await fetch(`/api/ants/${antId}/config`);
+    if (resp.ok) {
+      document.getElementById('config-editor').value = await resp.text();
+      document.getElementById('config-modal').style.display = 'flex';
+    } else {
+      alert('Could not load config: ' + await resp.text());
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+  }
+}
+
+function hideConfigModal() {
+  document.getElementById('config-modal').style.display = 'none';
+  editingAntId = null;
+}
+
+async function saveConfig() {
+  if (!editingAntId) return;
+  const content = document.getElementById('config-editor').value;
+  const errEl = document.getElementById('config-error');
+
+  try {
+    const resp = await fetch(`/api/ants/${editingAntId}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (resp.ok) {
+      hideConfigModal();
+      alert('Config saved. Restart Anthill to apply changes.');
+    } else {
+      errEl.textContent = await resp.text();
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function deleteAnt() {
+  if (!editingAntId) return;
+  if (!confirm(`Delete ANT "${editingAntId}"? This removes its config but not the working directory.`)) return;
+
+  try {
+    const resp = await fetch(`/api/ants/${editingAntId}`, { method: 'DELETE' });
+    if (resp.ok) {
+      hideConfigModal();
+      delete state.bots[editingAntId];
+      delete state.messages[editingAntId];
+      if (state.activeBot === editingAntId) {
+        state.activeBot = null;
+        document.getElementById('chat').style.display = 'none';
+        document.getElementById('input-area').style.display = 'none';
+        document.getElementById('no-bot').style.display = 'flex';
+        document.getElementById('bot-title').textContent = 'Select an ANT';
+      }
+      renderBotList();
+    } else {
+      alert('Delete failed: ' + await resp.text());
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+  }
+}
 
 // Register service worker for PWA install.
 if ('serviceWorker' in navigator) {

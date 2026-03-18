@@ -129,7 +129,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
         );
     }
 
-    let registry = Arc::new(BotRegistry::new());
+    let registry = Arc::new(BotRegistry::new(ants_dir.clone()));
 
     log::info!(
         "Supervisor starting — {} ant(s) discovered",

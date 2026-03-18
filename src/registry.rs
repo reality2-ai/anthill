@@ -75,15 +75,59 @@ pub struct BotRegistry {
     pub bots: RwLock<HashMap<String, BotHandle>>,
     /// Global event broadcast — web server subscribes here.
     pub global_tx: broadcast::Sender<WsEvent>,
+    /// Path to the ants config directory (for creating/editing configs).
+    pub ants_dir: std::path::PathBuf,
 }
 
 impl BotRegistry {
-    pub fn new() -> Self {
+    pub fn new(ants_dir: std::path::PathBuf) -> Self {
         let (global_tx, _) = broadcast::channel(256);
         Self {
             bots: RwLock::new(HashMap::new()),
             global_tx,
+            ants_dir,
         }
+    }
+
+    /// Read an ANT's config file.
+    pub fn read_config(&self, ant_id: &str) -> Option<String> {
+        let path = self.ants_dir.join(ant_id).join("ant.toml");
+        std::fs::read_to_string(path).ok()
+    }
+
+    /// Write an ANT's config file.
+    pub fn write_config(&self, ant_id: &str, content: &str) -> Result<(), String> {
+        let dir = self.ants_dir.join(ant_id);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join("ant.toml");
+        std::fs::write(path, content).map_err(|e| e.to_string())
+    }
+
+    /// Delete an ANT's config directory.
+    pub fn delete_config(&self, ant_id: &str) -> Result<(), String> {
+        let dir = self.ants_dir.join(ant_id);
+        if dir.exists() {
+            std::fs::remove_dir_all(dir).map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// List ANT directory names on disk (may include ones not running).
+    pub fn list_config_dirs(&self) -> Vec<String> {
+        let mut dirs = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&self.ants_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("ant.toml").exists() {
+                    if let Some(name) = path.file_name() {
+                        dirs.push(name.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        dirs.sort();
+        dirs
     }
 
     /// List bot names and their status.
