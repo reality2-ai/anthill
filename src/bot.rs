@@ -172,14 +172,16 @@ pub async fn run_bot(
             let response_queue = Arc::new(Mutex::new(VecDeque::new()));
             let (request_tx, request_rx) = mpsc::unbounded_channel();
 
-            let ai_plugin = plugins::claude::AiPlugin::new(3, Arc::clone(&response_queue));
-            bus.register_plugin(Box::new(ai_plugin));
-
-            let ai_sentant = sentants::ai::AiSentant::new(
-                request_tx,
+            let ai_plugin = plugins::ai::AiMediationPlugin::new(
+                3,
                 Arc::clone(&response_queue),
+                request_tx,
                 tg_sender,
+                message_queue.clone(),
             );
+            let ai_plugin_id = bus.register_plugin(Box::new(ai_plugin));
+
+            let ai_sentant = sentants::ai::AiSentant::new(ai_plugin_id, pty_id);
             let terminal = sentants::terminal::TerminalSentant::new(pty_id);
 
             bus.register_sentant(Box::new(ai_sentant));
@@ -198,11 +200,15 @@ pub async fn run_bot(
         }
 
         _ => {
+            // Raw mode — ChunkerPlugin + pure ChunkerSentant.
             let pty_plugin = plugins::pty::PtyPlugin::new(2, &cfg.raw.shell);
             let pty_id = bus.register_plugin(Box::new(pty_plugin));
 
+            let chunker_plugin = plugins::chunker::ChunkerPlugin::new(3, tg_sender);
+            let chunker_plugin_id = bus.register_plugin(Box::new(chunker_plugin));
+
             let terminal = sentants::terminal::TerminalSentant::new(pty_id);
-            let chunker = sentants::chunker::ChunkerSentant::new(tg_sender);
+            let chunker = sentants::chunker::ChunkerSentant::new(chunker_plugin_id);
 
             bus.register_sentant(Box::new(terminal));
             bus.register_sentant(Box::new(chunker));
