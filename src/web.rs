@@ -60,8 +60,8 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/config", get(get_config).put(put_config))
         .route("/api/ants/create", post(create_ant))
         .route("/api/ants/{id}/files", get(list_files))
-        .route("/api/ants/{id}/files/*path", get(get_file).delete(delete_file))
-        .route("/api/ants/{id}/upload/*path", post(upload_file))
+        .route("/api/ants/{id}/files/{*path}", get(get_file).delete(delete_file))
+        .route("/api/ants/{id}/upload/{*path}", post(upload_file))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/auth/verify", post(auth_verify))
         .route("/api/auth/join", post(auth_join))
@@ -634,7 +634,7 @@ async fn list_files(
     }
 }
 
-/// GET /api/ants/:id/files/*path — list directory or serve file.
+/// GET /api/ants/:id/files/{*path} — list directory or serve file.
 async fn get_file(
     State(state): State<AppState>,
     Path((id, subpath)): Path<(String, String)>,
@@ -662,7 +662,7 @@ async fn get_file(
     }
 }
 
-/// POST /api/ants/:id/upload/*path — upload a file.
+/// POST /api/ants/:id/upload/{*path} — upload a file.
 async fn upload_file(
     State(state): State<AppState>,
     Path((id, subpath)): Path<(String, String)>,
@@ -687,7 +687,7 @@ async fn upload_file(
     }
 }
 
-/// DELETE /api/ants/:id/files/*path — delete a file or empty directory.
+/// DELETE /api/ants/:id/files/{*path} — delete a file or empty directory.
 async fn delete_file(
     State(state): State<AppState>,
     Path((id, subpath)): Path<(String, String)>,
