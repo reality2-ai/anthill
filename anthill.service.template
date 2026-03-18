@@ -1,0 +1,20 @@
+[Unit]
+Description=Anthill Bot Supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@USER@@
+Environment=HOME=@@HOME@@
+Environment=RUST_LOG=info
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:@@HOME@@/.cargo/bin:@@HOME@@/.local/bin
+ExecStart=/usr/local/bin/anthill --supervise @@HOME@@/.config/anthill
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

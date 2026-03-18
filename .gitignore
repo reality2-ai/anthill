@@ -1,0 +1,5 @@
+/target
+Cargo.lock
+
+# Config with secrets (bot tokens, API keys)
+anthill.toml

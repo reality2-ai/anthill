@@ -1,0 +1,208 @@
+//! Bot runner — starts a single bot's event loop.
+//!
+//! Extracted from main.rs so it can be called from both standalone
+//! mode and supervisor mode (in-process).
+
+use r2_engine::EventBus;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use tokio::sync::{broadcast, mpsc};
+
+use crate::{backup, claude_cli, config, plugins, registry, sentants};
+
+/// Handles for communicating with a running bot.
+#[allow(dead_code)]
+pub struct BotHandles {
+    pub request_tx: mpsc::UnboundedSender<claude_cli::CliRequest>,
+    pub stats: claude_cli::StatsMap,
+    pub tasks: claude_cli::TaskMap,
+    pub event_tx: broadcast::Sender<registry::WsEvent>,
+}
+
+/// Run a single bot. Returns the handles for external communication.
+///
+/// This spawns background tasks (claude worker, backup) and runs
+/// the R2 event loop. It blocks until the bot shuts down.
+pub async fn run_bot(
+    cfg: config::Config,
+    bot_name: String,
+    global_event_tx: Option<broadcast::Sender<registry::WsEvent>>,
+    bot_registry: Option<Arc<registry::BotRegistry>>,
+) -> anyhow::Result<()> {
+    // Resolve Telegram token.
+    if let Some(token) = cfg.telegram.token.as_ref() {
+        std::env::set_var("TELOXIDE_TOKEN", token);
+    } else if std::env::var("TELOXIDE_TOKEN").is_err() {
+        anyhow::bail!("No Telegram bot token configured for bot '{}'", bot_name);
+    }
+
+    let mode = if cfg.mode.is_empty() { "raw" } else { cfg.mode.as_str() };
+    let use_ai_routing = mode == "ai" || mode == "claude";
+    let rt = tokio::runtime::Handle::current();
+
+    // Telegram plugin.
+    let telegram_plugin =
+        plugins::telegram_bot::TelegramPlugin::new(0, &rt, cfg.telegram.allow.clone(), use_ai_routing);
+    let tg_sender = telegram_plugin.outgoing_sender();
+
+    let mut bus = EventBus::new();
+    let tg_id = bus.register_plugin(Box::new(telegram_plugin));
+
+    match mode {
+        "claude" => {
+            let response_queue = Arc::new(Mutex::new(VecDeque::new()));
+            let (request_tx, request_rx) = mpsc::unbounded_channel();
+            let stats: claude_cli::StatsMap = Arc::new(Mutex::new(HashMap::new()));
+            let tasks: claude_cli::TaskMap = Arc::new(Mutex::new(HashMap::new()));
+
+            // Create event broadcast channel.
+            let (event_tx, _) = broadcast::channel::<registry::WsEvent>(256);
+
+            // Register with the bot registry (for web dashboard access).
+            if let Some(ref reg) = bot_registry {
+                let display_name = cfg.name.clone().unwrap_or_else(|| bot_name.clone());
+                let handle = registry::BotHandle {
+                    name: bot_name.clone(),
+                    display_name,
+                    request_tx: request_tx.clone(),
+                    stats: Arc::clone(&stats),
+                    tasks: Arc::clone(&tasks),
+                    event_tx: event_tx.clone(),
+                    status: Arc::new(tokio::sync::RwLock::new(registry::BotStatusKind::Running)),
+                };
+                reg.bots.write().await.insert(bot_name.clone(), handle);
+            }
+
+            let cli_plugin =
+                plugins::claude_cli::ClaudeCliPlugin::new(1, Arc::clone(&response_queue));
+            bus.register_plugin(Box::new(cli_plugin));
+
+            let worker_tg_sender = tg_sender.clone();
+            let cli_sentant = sentants::claude_cli::ClaudeCliSentant::new(
+                request_tx,
+                Arc::clone(&response_queue),
+                tg_sender,
+                Arc::clone(&stats),
+                Arc::clone(&tasks),
+            );
+            let telegram = sentants::telegram::TelegramSentant::new(tg_id);
+
+            bus.register_sentant(Box::new(cli_sentant));
+            bus.register_sentant(Box::new(telegram));
+
+            let working_dir = cfg
+                .claude
+                .working_dir
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap().display().to_string());
+
+            let memory_dir = std::path::Path::new(&working_dir).join(&cfg.claude.memory_dir);
+            let repos_dir = std::path::Path::new(&working_dir).join(&cfg.claude.repos_dir);
+
+            std::fs::create_dir_all(&working_dir)?;
+            std::fs::create_dir_all(&memory_dir)?;
+            std::fs::create_dir_all(&repos_dir)?;
+
+            log::info!("[{}] working dir: {}", bot_name, working_dir);
+
+            backup::ensure_git_repo(std::path::Path::new(&working_dir))?;
+
+            let backup_working_dir = working_dir.clone();
+            let worker_config = claude_cli::CliWorkerConfig {
+                working_dir,
+                memory_dir,
+                repos_dir,
+                system_prompt: cfg.claude.system_prompt.clone(),
+                skip_permissions: cfg.claude.skip_permissions,
+            };
+
+            // Forward events to the global broadcast if in supervisor mode.
+            let worker_event_tx = global_event_tx.clone().or_else(|| Some(event_tx.clone()));
+
+            tokio::spawn(claude_cli::claude_cli_worker(
+                request_rx,
+                response_queue,
+                worker_config,
+                stats,
+                worker_tg_sender,
+                tasks,
+                worker_event_tx,
+                bot_name.clone(),
+            ));
+
+            if cfg.claude.backup_interval_hours > 0 {
+                tokio::spawn(backup::backup_loop(
+                    backup_working_dir,
+                    cfg.claude.backup_interval_hours,
+                    cfg.claude.backup_remote.clone(),
+                ));
+            }
+        }
+
+        "ai" => {
+            let api_key = cfg.anthropic_api_key().ok_or_else(|| {
+                anyhow::anyhow!("AI mode requires anthropic_api_key for bot '{}'", bot_name)
+            })?;
+
+            let pty_plugin = plugins::pty::PtyPlugin::new(2, &cfg.raw.shell);
+            let pty_id = bus.register_plugin(Box::new(pty_plugin));
+
+            let response_queue = Arc::new(Mutex::new(VecDeque::new()));
+            let (request_tx, request_rx) = mpsc::unbounded_channel();
+
+            let ai_plugin = plugins::claude::AiPlugin::new(3, Arc::clone(&response_queue));
+            bus.register_plugin(Box::new(ai_plugin));
+
+            let ai_sentant = sentants::ai::AiSentant::new(
+                request_tx,
+                Arc::clone(&response_queue),
+                tg_sender,
+            );
+            let terminal = sentants::terminal::TerminalSentant::new(pty_id);
+            let telegram = sentants::telegram::TelegramSentant::new(tg_id);
+
+            bus.register_sentant(Box::new(ai_sentant));
+            bus.register_sentant(Box::new(terminal));
+            bus.register_sentant(Box::new(telegram));
+
+            let model = cfg.ai.model.clone();
+            tokio::spawn(crate::claude_worker::claude_worker(
+                request_rx,
+                response_queue,
+                api_key,
+                model,
+            ));
+        }
+
+        _ => {
+            let pty_plugin = plugins::pty::PtyPlugin::new(2, &cfg.raw.shell);
+            let pty_id = bus.register_plugin(Box::new(pty_plugin));
+
+            let terminal = sentants::terminal::TerminalSentant::new(pty_id);
+            let chunker = sentants::chunker::ChunkerSentant::new(tg_sender);
+            let telegram = sentants::telegram::TelegramSentant::new(tg_id);
+
+            bus.register_sentant(Box::new(terminal));
+            bus.register_sentant(Box::new(chunker));
+            bus.register_sentant(Box::new(telegram));
+        }
+    }
+
+    bus.init_all();
+    log::info!("[{}] running", bot_name);
+
+    // Main event loop — 50ms tick.
+    let mut last_tick = Instant::now();
+    loop {
+        let elapsed = last_tick.elapsed().as_millis() as u32;
+        last_tick = Instant::now();
+
+        bus.poll_plugins();
+        bus.advance_time(elapsed);
+        bus.tick();
+
+        let _ = bus.drain_outbound();
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+}

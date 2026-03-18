@@ -1,0 +1,22 @@
+# anthill supervisor configuration
+#
+# Place this in your config directory (e.g. ~/.config/anthill/).
+# Create ant subdirectories under ants/ with an ant.toml each.
+
+# Directory containing ant configs (relative to this file).
+ants_dir = "ants"
+
+# Restart crashed ants automatically.
+restart_on_crash = true
+
+# Base delay before restarting (multiplied by restart count for backoff).
+restart_delay_secs = 5
+
+# Maximum consecutive restarts before giving up (0 = unlimited).
+max_restarts = 10
+
+# HTTP port for the web dashboard.
+http_port = 3000
+
+# HTTP bind address (0.0.0.0 = all interfaces).
+http_bind = "0.0.0.0"

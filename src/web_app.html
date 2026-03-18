@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Anthill">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon-192.svg">
+<title>Anthill</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --text: #eee;
+    --text-dim: #888;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #333;
+  }
+
+  #sidebar h1 {
+    padding: 16px;
+    font-size: 18px;
+    border-bottom: 1px solid #333;
+    color: var(--accent);
+  }
+
+  #bot-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .bot-item {
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .bot-item:hover { background: var(--surface2); }
+  .bot-item.active { background: var(--surface2); border-left: 3px solid var(--accent); }
+
+  .bot-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .bot-dot.running { background: var(--green); }
+  .bot-dot.stopped { background: var(--red); }
+
+  .bot-name { font-weight: 600; }
+  .bot-meta { font-size: 12px; color: var(--text-dim); }
+
+  /* Main panel */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  #header {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  #header h2 { font-size: 16px; }
+
+  #task-bar {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  /* Chat area */
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    line-height: 1.5;
+    word-wrap: break-word;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    background: var(--surface2);
+    border-bottom-right-radius: 4px;
+  }
+
+  .msg.bot {
+    align-self: flex-start;
+    background: var(--surface);
+    border-bottom-left-radius: 4px;
+  }
+
+  .msg h1, .msg h2, .msg h3, .msg h4 { margin: 12px 0 6px; }
+  .msg h1 { font-size: 1.2em; }
+  .msg h2 { font-size: 1.1em; }
+  .msg h3 { font-size: 1em; font-style: italic; }
+  .msg h4 { font-size: 0.95em; font-weight: normal; font-style: italic; }
+
+  .msg p { margin: 6px 0; }
+  .msg ul, .msg ol { margin: 6px 0; padding-left: 20px; }
+  .msg li { margin: 3px 0; }
+  .msg hr { border: none; border-top: 1px solid #444; margin: 10px 0; }
+  .msg a { color: var(--accent); text-decoration: none; }
+  .msg a:hover { text-decoration: underline; }
+  .msg blockquote { border-left: 3px solid #444; padding-left: 12px; color: var(--text-dim); margin: 6px 0; }
+  .msg table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  .msg th, .msg td { border: 1px solid #444; padding: 6px 10px; text-align: left; }
+  .msg th { background: var(--surface2); }
+
+  .msg pre {
+    background: #0a0a1a;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    position: relative;
+  }
+
+  .msg pre:hover .copy-btn { opacity: 1; }
+
+  .copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    border: none;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .copy-btn:hover { color: var(--text); }
+
+  .msg code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: #0a0a1a;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .msg pre code {
+    background: none;
+    padding: 0;
+  }
+
+  .typing {
+    align-self: flex-start;
+    color: var(--text-dim);
+    font-style: italic;
+    font-size: 14px;
+  }
+
+  /* Input area */
+  #input-area {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-top: 1px solid #333;
+    display: flex;
+    gap: 10px;
+  }
+
+  #input-area textarea {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: var(--font);
+    font-size: 14px;
+    resize: none;
+    min-height: 44px;
+    max-height: 120px;
+  }
+
+  #input-area textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  #send-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    align-self: flex-end;
+  }
+
+  #send-btn:hover { opacity: 0.9; }
+  #send-btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* Tasks panel */
+  #tasks-panel {
+    padding: 8px 20px;
+    background: var(--surface);
+    border-top: 1px solid #333;
+    max-height: 150px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  #tasks-panel.has-tasks { display: block; }
+
+  .task-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+
+  .task-preview { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-time { color: var(--yellow); margin: 0 12px; }
+  .task-cancel { color: var(--red); cursor: pointer; font-size: 12px; }
+
+  /* Connection indicator */
+  #connection {
+    padding: 6px 16px;
+    font-size: 12px;
+    text-align: center;
+    display: none;
+  }
+
+  #connection.disconnected {
+    display: block;
+    background: var(--red);
+    color: white;
+  }
+
+  /* Responsive: mobile */
+  @media (max-width: 768px) {
+    #sidebar {
+      position: fixed;
+      left: -260px;
+      top: 0;
+      bottom: 0;
+      z-index: 100;
+      transition: left 0.2s;
+    }
+
+    #sidebar.open { left: 0; }
+
+    #menu-btn {
+      display: block !important;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 24px;
+      cursor: pointer;
+    }
+
+    .msg { max-width: 95%; }
+  }
+
+  @media (min-width: 769px) {
+    #menu-btn { display: none; }
+  }
+
+  /* No bot selected */
+  #no-bot {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>Anthill</h1>
+  <div id="bot-list"></div>
+  <div style="padding:12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">ANTS: Autonomous iNTelligenceS</div>
+</div>
+
+<div id="main">
+  <div id="connection">Disconnected — reconnecting...</div>
+  <div id="header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button id="menu-btn" onclick="toggleSidebar()">☰</button>
+      <h2 id="bot-title">Select an ANT</h2>
+    </div>
+    <div id="task-bar"></div>
+  </div>
+  <div id="no-bot">Select an ANT from the sidebar to start chatting</div>
+  <div id="chat" style="display:none"></div>
+  <div id="tasks-panel"></div>
+  <div id="input-area" style="display:none">
+    <textarea id="input" placeholder="Send a message..." rows="1"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+    <button id="send-btn" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<script>
+const state = {
+  bots: {},
+  activeBot: null,
+  messages: {},   // bot -> [{role, text}]
+  tasks: {},      // bot -> [{id, preview, startTime}]
+  ws: null,
+  typing: {},     // bot -> timeout
+};
+
+// --- WebSocket ---
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('connection').className = '';
+    state.ws = ws;
+  };
+
+  ws.onclose = () => {
+    document.getElementById('connection').className = 'disconnected';
+    state.ws = null;
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    handleEvent(msg);
+  };
+}
+
+function handleEvent(msg) {
+  switch (msg.type) {
+    case 'snapshot':
+      msg.bots.forEach(b => {
+        state.bots[b.id] = b;
+        if (!state.messages[b.id]) state.messages[b.id] = [];
+        if (!state.tasks[b.id]) state.tasks[b.id] = [];
+      });
+      // Load history if provided.
+      if (msg.history) {
+        for (const [bot, msgs] of Object.entries(msg.history)) {
+          state.messages[bot] = msgs;
+        }
+      }
+      renderBotList();
+      if (state.activeBot) renderChat();
+      break;
+
+    case 'user_message':
+      if (!state.messages[msg.bot]) state.messages[msg.bot] = [];
+      state.messages[msg.bot].push({ role: 'user', text: msg.text });
+      if (msg.bot === state.activeBot) renderChat();
+      break;
+
+    case 'message':
+      if (!state.messages[msg.bot]) state.messages[msg.bot] = [];
+      state.messages[msg.bot].push({ role: 'bot', text: msg.text, task_id: msg.task_id });
+      clearTyping(msg.bot);
+      if (msg.bot === state.activeBot) renderChat();
+      break;
+
+    case 'task_started':
+      if (!state.tasks[msg.bot]) state.tasks[msg.bot] = [];
+      state.tasks[msg.bot].push({ id: msg.task_id, preview: msg.preview, startTime: Date.now() });
+      renderTasks();
+      renderBotList();
+      break;
+
+    case 'task_completed':
+      if (state.tasks[msg.bot]) {
+        state.tasks[msg.bot] = state.tasks[msg.bot].filter(t => t.id !== msg.task_id);
+      }
+      renderTasks();
+      renderBotList();
+      break;
+
+    case 'typing':
+      showTyping(msg.bot);
+      break;
+
+    case 'bot_status':
+      if (state.bots[msg.bot]) state.bots[msg.bot].status = msg.status;
+      renderBotList();
+      break;
+  }
+}
+
+// --- Sending ---
+function sendMessage() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text || !state.activeBot || !state.ws) return;
+
+  // Message will appear via the user_message broadcast event.
+  state.ws.send(JSON.stringify({
+    type: 'chat',
+    bot: state.activeBot,
+    message: text,
+  }));
+
+  input.value = '';
+  input.style.height = 'auto';
+  renderChat();
+}
+
+// --- Rendering ---
+function renderBotList() {
+  const list = document.getElementById('bot-list');
+  list.innerHTML = '';
+  Object.values(state.bots).sort((a, b) => a.name.localeCompare(b.name)).forEach(bot => {
+    const tasks = (state.tasks[bot.id] || []).length;
+    const statusClass = bot.status === 'Stopped' ? 'stopped' : 'running';
+    const active = bot.id === state.activeBot ? 'active' : '';
+    list.innerHTML += `
+      <div class="bot-item ${active}" onclick="selectBot('${bot.id}')">
+        <div class="bot-dot ${statusClass}"></div>
+        <div>
+          <div class="bot-name">${bot.name}</div>
+          <div class="bot-meta">${tasks ? tasks + ' worker' + (tasks > 1 ? 's' : '') + ' active' : 'idle'}</div>
+        </div>
+      </div>`;
+  });
+}
+
+function selectBot(id) {
+  state.activeBot = id;
+  const bot = state.bots[id];
+  document.getElementById('bot-title').textContent = bot ? bot.name : id;
+  document.getElementById('no-bot').style.display = 'none';
+  document.getElementById('chat').style.display = 'flex';
+  document.getElementById('input-area').style.display = 'flex';
+  document.getElementById('input').focus();
+  renderBotList();
+  renderChat();
+  renderTasks();
+  // Close sidebar on mobile
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function renderChat() {
+  const chat = document.getElementById('chat');
+  const msgs = state.messages[state.activeBot] || [];
+  chat.innerHTML = msgs.map(m => {
+    if (m.role === 'bot') {
+      return `<div class="msg bot">${formatMarkdown(m.text)}</div>`;
+    }
+    return `<div class="msg user">${escapeHtml(m.text)}</div>`;
+  }).join('');
+
+  // Show typing if active
+  if (state.typing[state.activeBot]) {
+    chat.innerHTML += '<div class="typing">Thinking...</div>';
+  }
+
+  addCopyButtons();
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function renderTasks() {
+  const panel = document.getElementById('tasks-panel');
+  const tasks = state.tasks[state.activeBot] || [];
+  const taskBar = document.getElementById('task-bar');
+
+  if (tasks.length === 0) {
+    panel.className = '';
+    panel.innerHTML = '';
+    taskBar.textContent = '';
+    return;
+  }
+
+  panel.className = 'has-tasks';
+  taskBar.textContent = `${tasks.length} worker${tasks.length > 1 ? 's' : ''} active`;
+
+  panel.innerHTML = tasks.map(t => {
+    const secs = Math.floor((Date.now() - t.startTime) / 1000);
+    const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    return `<div class="task-item">
+      <span class="task-preview">#${t.id} ${escapeHtml(t.preview)}</span>
+      <span class="task-time">${time}</span>
+      <span class="task-cancel" onclick="cancelTask(${t.id})">cancel</span>
+    </div>`;
+  }).join('');
+}
+
+// Update task timers every second
+setInterval(renderTasks, 1000);
+
+function cancelTask(taskId) {
+  if (!state.ws || !state.activeBot) return;
+  state.ws.send(JSON.stringify({
+    type: 'cancel',
+    bot: state.activeBot,
+    task_id: taskId,
+  }));
+}
+
+// --- Typing ---
+function showTyping(bot) {
+  if (state.typing[bot]) clearTimeout(state.typing[bot]);
+  state.typing[bot] = setTimeout(() => {
+    delete state.typing[bot];
+    if (bot === state.activeBot) renderChat();
+  }, 6000);
+  if (bot === state.activeBot) renderChat();
+}
+
+function clearTyping(bot) {
+  if (state.typing[bot]) {
+    clearTimeout(state.typing[bot]);
+    delete state.typing[bot];
+  }
+}
+
+// --- Formatting ---
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Configure marked.js
+if (typeof marked !== 'undefined') {
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+  });
+}
+
+function formatMarkdown(text) {
+  if (typeof marked !== 'undefined') {
+    return marked.parse(text);
+  }
+  // Fallback if CDN fails
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+// Add copy buttons to code blocks after rendering
+function addCopyButtons() {
+  document.querySelectorAll('.msg pre').forEach(pre => {
+    if (pre.querySelector('.copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.onclick = () => {
+      const code = pre.querySelector('code');
+      navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    };
+    pre.appendChild(btn);
+  });
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// Auto-resize textarea
+document.getElementById('input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// Register service worker for PWA install.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// Start
+connect();
+</script>
+</body>
+</html>
