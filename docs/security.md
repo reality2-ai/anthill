@@ -4,21 +4,7 @@
 
 Anthill implements R2-TRUST — the same provisioning model designed for IoT sensor networks. The colony is a **trust group**. The server is the **queen**. Browsers and phones are **viewers** that must be provisioned to join.
 
-```mermaid
-graph TD
-    subgraph TG[Trust Group - colony]
-        Queen[Server - the Queen<br/>colony.key]
-        D1[Phone<br/>credential in localStorage]
-        D2[Laptop<br/>credential in localStorage]
-    end
-
-    Admin[Admin terminal] -->|anthill --join-code| Queen
-    Queen -->|join code, 5 min, one-use| D1
-    D1 -->|X-Credential header| Queen
-    D2 -->|X-Credential header| Queen
-
-    Outside[Unauthenticated browser] -.->|401 Unauthorized| Queen
-```
+![Trust Group](https://mermaid.ink/img/Z3JhcGggVEQKICAgIHN1YmdyYXBoIFRHW1RydXN0IEdyb3VwIC0gY29sb255XQogICAgICAgIFF1ZWVuW1NlcnZlciAtIHRoZSBRdWVlbiBjb2xvbnkua2V5XQogICAgICAgIEQxW1Bob25lIC0gY3JlZGVudGlhbCBpbiBsb2NhbFN0b3JhZ2VdCiAgICAgICAgRDJbTGFwdG9wIC0gY3JlZGVudGlhbCBpbiBsb2NhbFN0b3JhZ2VdCiAgICBlbmQKCiAgICBBZG1pbltBZG1pbiB0ZXJtaW5hbF0gLS0+fGFudGhpbGwgLS1qb2luLWNvZGV8IFF1ZWVuCiAgICBRdWVlbiAtLT58am9pbiBjb2RlIDUgbWluIG9uZS11c2V8IEQxCiAgICBEMSAtLT58WC1DcmVkZW50aWFsIGhlYWRlcnwgUXVlZW4KICAgIEQyIC0tPnxYLUNyZWRlbnRpYWwgaGVhZGVyfCBRdWVlbgoKICAgIE91dHNpZGVbVW5hdXRoZW50aWNhdGVkIGJyb3dzZXJdIC0uLT58NDAxIFVuYXV0aG9yaXplZHwgUXVlZW4=)
 
 ### How it works
 

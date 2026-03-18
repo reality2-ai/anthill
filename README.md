@@ -45,36 +45,7 @@ Anthill is the first production application of R2 outside sensor networks. The s
 
 ### How Anthill uses R2
 
-```mermaid
-graph LR
-    subgraph Viewers
-        Phone[Phone browser]
-        Laptop[Laptop browser]
-        TG[Telegram app]
-    end
-
-    subgraph Server[Server - the Queen]
-        subgraph Plugins[Plugins - all I/O]
-            WP[WebPlugin]
-            TP[TelegramPlugin]
-            CP[ClaudeCliPlugin]
-        end
-        subgraph FSMs[Sentants - pure FSMs]
-            CS[ClaudeCliSentant]
-        end
-        CW[Claude Code]
-    end
-
-    Phone -->|trust group auth| WP
-    Laptop -->|trust group auth| WP
-    TG --> TP
-    WP -->|events - 12 bytes| CS
-    TP -->|events - 12 bytes| CS
-    CS -->|plugin_call| CP
-    CP -->|data plane| TP
-    CP -->|data plane| WP
-    CP --> CW
-```
+![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICBlbmQKCiAgICBzdWJncmFwaCBTZXJ2ZXJbU2VydmVyIC0gdGhlIFF1ZWVuXQogICAgICAgIHN1YmdyYXBoIFBsdWdpbnNbUGx1Z2lucyAtIGFsbCBJL09dCiAgICAgICAgICAgIFdQW1dlYlBsdWdpbl0KICAgICAgICAgICAgVFBbVGVsZWdyYW1QbHVnaW5dCiAgICAgICAgICAgIENQW0NsYXVkZUNsaVBsdWdpbl0KICAgICAgICBlbmQKICAgICAgICBzdWJncmFwaCBGU01zW1NlbnRhbnRzIC0gcHVyZSBGU01zXQogICAgICAgICAgICBDU1tDbGF1ZGVDbGlTZW50YW50XQogICAgICAgIGVuZAogICAgICAgIENXW0NsYXVkZSBDb2RlXQogICAgZW5kCgogICAgUGhvbmUgLS0+fHRydXN0IGdyb3VwIGF1dGh8IFdQCiAgICBMYXB0b3AgLS0+fHRydXN0IGdyb3VwIGF1dGh8IFdQCiAgICBURyAtLT4gVFAKICAgIFdQIC0tPnxldmVudHMgLSAxMiBieXRlc3wgQ1MKICAgIFRQIC0tPnxldmVudHMgLSAxMiBieXRlc3wgQ1MKICAgIENTIC0tPnxwbHVnaW5fY2FsbHwgQ1AKICAgIENQIC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQ1AgLS0+fGRhdGEgcGxhbmV8IFdQCiAgICBDUCAtLT4gQ1c=)
 
 **Sentants** make decisions. **Plugins** handle data. Events are tiny. Data flows plugin-to-plugin.
 

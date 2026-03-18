@@ -63,34 +63,7 @@ The server is the **queen** — it exists the moment Anthill starts. Browsers an
 
 ## Event flow (claude mode)
 
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant TP as TelegramPlugin
-    participant MQ as MessageQueue
-    participant Bus as Event Bus
-    participant S as ClaudeCliSentant
-    participant CP as ClaudeCliPlugin
-    participant C as Claude Code
-
-    User->>TP: "explain this code"
-    TP->>MQ: store full text
-    TP->>Bus: RELAY_COMMAND {cmd:0, chat:123}
-    Bus->>S: event (12 bytes)
-    S->>Bus: Action::plugin_call(CMD_DISPATCH)
-    Bus->>CP: execute(CMD_DISPATCH, {chat:123})
-    CP->>MQ: pop full text
-    CP->>TP: "Thinking..." (data plane)
-    CP->>C: claude -p "explain this code"
-    Note over C: Working...
-    C->>CP: response text
-    CP->>Bus: RELAY_AI_READY {chat:123}
-    Bus->>S: event (12 bytes)
-    S->>Bus: Action::plugin_call(CMD_REPLY)
-    Bus->>CP: execute(CMD_REPLY, {chat:123})
-    CP->>TP: response (data plane)
-    TP->>User: formatted response
-```
+![Event Flow](https://mermaid.ink/img/c2VxdWVuY2VEaWFncmFtCiAgICBwYXJ0aWNpcGFudCBVc2VyIGFzIFVzZXIKICAgIHBhcnRpY2lwYW50IFRQIGFzIFRlbGVncmFtUGx1Z2luCiAgICBwYXJ0aWNpcGFudCBNUSBhcyBNZXNzYWdlUXVldWUKICAgIHBhcnRpY2lwYW50IEJ1cyBhcyBFdmVudCBCdXMKICAgIHBhcnRpY2lwYW50IFMgYXMgQ2xhdWRlQ2xpU2VudGFudAogICAgcGFydGljaXBhbnQgQ1AgYXMgQ2xhdWRlQ2xpUGx1Z2luCiAgICBwYXJ0aWNpcGFudCBDIGFzIENsYXVkZSBDb2RlCgogICAgVXNlci0+PlRQOiBleHBsYWluIHRoaXMgY29kZQogICAgVFAtPj5NUTogc3RvcmUgZnVsbCB0ZXh0CiAgICBUUC0+PkJ1czogUkVMQVlfQ09NTUFORCBjbWQ6MCBjaGF0OjEyMwogICAgQnVzLT4+UzogZXZlbnQgMTIgYnl0ZXMKICAgIFMtPj5CdXM6IHBsdWdpbl9jYWxsIENNRF9ESVNQQVRDSAogICAgQnVzLT4+Q1A6IGV4ZWN1dGUgQ01EX0RJU1BBVENICiAgICBDUC0+Pk1ROiBwb3AgZnVsbCB0ZXh0CiAgICBDUC0+PlRQOiBUaGlua2luZy4uLgogICAgQ1AtPj5DOiBjbGF1ZGUgLXAKICAgIE5vdGUgb3ZlciBDOiBXb3JraW5nLi4uCiAgICBDLT4+Q1A6IHJlc3BvbnNlIHRleHQKICAgIENQLT4+QnVzOiBSRUxBWV9BSV9SRUFEWQogICAgQnVzLT4+UzogZXZlbnQgMTIgYnl0ZXMKICAgIFMtPj5CdXM6IHBsdWdpbl9jYWxsIENNRF9SRVBMWQogICAgQnVzLT4+Q1A6IGV4ZWN1dGUgQ01EX1JFUExZCiAgICBDUC0+PlRQOiByZXNwb25zZSB2aWEgZGF0YSBwbGFuZQogICAgVFAtPj5Vc2VyOiBmb3JtYXR0ZWQgcmVzcG9uc2U=)
 
 The sentant touches zero bytes of message text. It only routes IDs.
 
