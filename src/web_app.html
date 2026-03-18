@@ -429,7 +429,14 @@
     <button onclick="showCreateModal()" style="background:var(--accent);color:white;border:none;border-radius:6px;width:32px;height:32px;font-size:18px;cursor:pointer;line-height:1" title="New ANT">+</button>
   </div>
   <div id="bot-list"></div>
-  <div style="padding:12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">ANTS: Autonomous iNTelligenceS</div>
+  <div style="padding:8px 12px;border-top:1px solid #333">
+    <button onclick="generateJoinCode()" style="width:100%;background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:8px;cursor:pointer;font-size:13px">Generate Join Code</button>
+    <div id="join-code-display" style="display:none;margin-top:8px;text-align:center">
+      <div style="font-family:var(--mono);font-size:20px;letter-spacing:3px;color:var(--green)" id="join-code-value"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="join-code-expiry"></div>
+    </div>
+  </div>
+  <div style="padding:8px 12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">ANTS: Autonomous iNTelligenceS</div>
 </div>
 
 <!-- Create ANT modal -->
@@ -1172,6 +1179,32 @@ async function deleteAnt() {
     }
   } catch (e) {
     alert('Network error: ' + e.message);
+  }
+}
+
+// --- Join code generation ---
+async function generateJoinCode() {
+  const credential = getCredential();
+  try {
+    const resp = await fetch('/api/auth/join-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      document.getElementById('join-code-value').textContent = data.code;
+      document.getElementById('join-code-expiry').textContent = `Expires in ${Math.floor(data.expires_in_seconds / 60)} minutes`;
+      document.getElementById('join-code-display').style.display = 'block';
+      // Auto-hide after expiry.
+      setTimeout(() => {
+        document.getElementById('join-code-display').style.display = 'none';
+      }, data.expires_in_seconds * 1000);
+    } else {
+      alert('Failed to generate code');
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
   }
 }
 
