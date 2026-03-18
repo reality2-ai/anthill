@@ -2,6 +2,10 @@
 
 Everything you need before installing Anthill.
 
+> **Platform:** Anthill currently runs on **Linux only** (tested on Arch/Manjaro and Ubuntu). It uses systemd for service management and `/dev/urandom` for crypto. macOS support is possible but untested. Windows is not supported.
+>
+> **Technical level:** Setup requires comfort with the command line, Rust toolchain, and systemd. This is an early-stage project aimed at developers.
+
 ## 1. [Rust](https://www.rust-lang.org/tools/install)
 
 ```bash

@@ -2,13 +2,15 @@
 
 A colony for **ANTS** — Autonomous iNTelligenceS.
 
-Anthill uses [Reality2](https://github.com/reality2-ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Telegram](https://telegram.org/), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
+Anthill uses [Reality2](https://github.com/reality2-ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Telegram](https://telegram.org/), [Slack](https://slack.com/), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
 
-Anthill runs AI agents on a server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard or Telegram.
+Anthill runs AI agents on a Linux server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard, Telegram, or Slack.
 
 Each ANT has its own personality, workspace, persistent memory, and can run multiple tasks concurrently. Access is controlled by a trust group — devices join the colony via one-time join codes.
 
 Built on the [Reality2](https://github.com/reality2-ai) (R2) sentant engine — the same event-driven architecture used for IoT sensor networks, now proven for AI agents.
+
+> **Note:** Anthill currently runs on **Linux only** and requires some technical setup (Rust toolchain, Claude Code CLI, systemd). See [Prerequisites](docs/prerequisites.md) for what's needed. macOS and Windows support may come in future.
 
 ## Quick start
 
@@ -69,7 +71,7 @@ Anthill is the first production application of R2 outside sensor networks. The s
 - **Git-backed workspace** — auto-committed on schedule, optionally pushed to GitHub
 - **ANT management UI** — create, configure, delete ANTS from the dashboard
 - **Device management** — provision/revoke devices from the dashboard
-- **Telegram optional** — ANTS work with web dashboard only, Telegram is an add-on
+- **Telegram + Slack** — optional, both can be active simultaneously on the same ANT
 - **Markdown rendering** — code blocks, headings, tables, links in both Telegram and web
 - **Auto-restart** — supervisor manages ANTS with exponential backoff
 - **Systemd integration** — starts on boot, HTTPS via Tailscale
@@ -78,7 +80,7 @@ Anthill is the first production application of R2 outside sensor networks. The s
 
 | Guide | What it covers |
 |---|---|
-| [Prerequisites](docs/prerequisites.md) | Rust, Node.js, Claude Code, Telegram, Tailscale |
+| [Prerequisites](docs/prerequisites.md) | Linux, Rust, Node.js, Claude Code, Telegram, Slack, Tailscale |
 | [Getting Started](docs/getting-started.md) | Single ANT setup, first message |
 | [Production Setup](docs/production-setup.md) | Multiple ANTS, supervisor, systemd |
 | [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA, cross-device history |

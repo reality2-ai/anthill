@@ -67,6 +67,29 @@ token = "123456:ABC-DEF..."
 allow = [123456789, 987654321]
 ```
 
+### [slack] (optional)
+
+Omit this section if you don't use Slack. Uses Socket Mode (WebSocket) — no public URL needed.
+
+```toml
+[slack]
+# Bot token from your Slack app (xoxb-...)
+bot_token = "xoxb-..."
+
+# App-level token for Socket Mode (xapp-...)
+app_token = "xapp-..."
+```
+
+To set up:
+1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps)
+2. Enable **Socket Mode** → generate an app-level token (`xapp-...`)
+3. Add bot OAuth scopes: `chat:write`, `channels:history`, `groups:history`, `im:history`
+4. Subscribe to bot events: `message.channels`, `message.groups`, `message.im`
+5. Install the app to your workspace → copy the bot token (`xoxb-...`)
+6. Invite the bot to a channel: `/invite @your-bot-name`
+
+Telegram and Slack can both be active on the same ANT simultaneously.
+
 ### [claude]
 
 For `mode = "claude"` (the main mode).
