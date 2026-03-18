@@ -474,21 +474,13 @@ async fn auth_join(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    // Queen bootstrap: first device joins without a code.
-    let is_queen = trust.is_empty_colony();
-    if !is_queen && !trust.verify_join_code(&req.code) {
+    if !trust.verify_join_code(&req.code) {
         return (StatusCode::FORBIDDEN, "Invalid or expired join code").into_response();
     }
 
-    let default_name = if is_queen { "Queen" } else { "unnamed device" };
-    let name = if req.device_name.is_empty() { default_name } else { &req.device_name };
+    let name = if req.device_name.is_empty() { "unnamed device" } else { &req.device_name };
     let device = trust.provision_device(name);
-
-    if is_queen {
-        log::info!("Queen provisioned: '{}' ({})", device.name, &device.id[..8]);
-    } else {
-        log::info!("New device joined colony: '{}' ({})", device.name, &device.id[..8]);
-    }
+    log::info!("Device joined colony: '{}' ({})", device.name, &device.id[..8]);
 
     Json(serde_json::json!({
         "device_id": device.id,
