@@ -304,7 +304,7 @@ tailscale status --self
 # e.g. alfred.tail12345.ts.net
 
 # Set up HTTPS proxy to Anthill
-tailscale serve https / http://localhost:3000
+sudo tailscale serve http://localhost:3000
 ```
 
 Now access the dashboard at `https://alfred.tail12345.ts.net` with a valid certificate. This is required for PWA installation on some browsers and enables secure WebSocket (`wss://`).
@@ -312,7 +312,7 @@ Now access the dashboard at `https://alfred.tail12345.ts.net` with a valid certi
 To make this permanent (survives reboots):
 
 ```bash
-tailscale serve --bg https / http://localhost:3000
+sudo tailscale serve --bg http://localhost:3000
 ```
 
 To check what's being served:
@@ -341,7 +341,7 @@ Both Anthill and the HTTPS proxy survive reboots with no extra configuration:
 sudo systemctl enable anthill
 
 # HTTPS proxy — persists inside the Tailscale daemon (done in step 7 with --bg)
-tailscale serve --bg https / http://localhost:3000
+sudo tailscale serve --bg http://localhost:3000
 ```
 
 After a reboot, Anthill starts automatically, Tailscale reconnects, and the HTTPS proxy resumes. The dashboard is accessible immediately once the machine is up.
