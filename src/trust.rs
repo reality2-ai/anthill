@@ -310,12 +310,14 @@ fn now_secs() -> u64 {
 }
 
 fn generate_random_bytes(n: usize) -> Vec<u8> {
-    // Use /dev/urandom on Unix, or fallback to time-based.
-    if let Ok(bytes) = std::fs::read("/dev/urandom") {
-        return bytes[..n.min(bytes.len())].to_vec();
-    }
-    // Fallback: time + pid mixing (not cryptographically great).
+    use std::io::Read;
     let mut bytes = vec![0u8; n];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(&mut bytes).is_ok() {
+            return bytes;
+        }
+    }
+    // Fallback: time + pid mixing.
     let seed = now_secs() ^ (std::process::id() as u64);
     for (i, b) in bytes.iter_mut().enumerate() {
         *b = ((seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64)) >> 33) as u8;
