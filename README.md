@@ -2,9 +2,13 @@
 
 A colony for **ANTS** — Autonomous iNTelligenceS.
 
-Run AI agents powered by [Claude Code](https://docs.anthropic.com/en/docs/claude-code) on a server. Talk to them from anywhere — your phone, laptop, or tablet — via Telegram or a built-in web dashboard.
+Anthill uses [Reality2](https://github.com/reality2-ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Telegram](https://telegram.org/), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
 
-Each ANT has its own personality, workspace, persistent memory, and can run multiple tasks concurrently.
+Anthill runs AI agents on a server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard or Telegram.
+
+Each ANT has its own personality, workspace, persistent memory, and can run multiple tasks concurrently. Access is controlled by a trust group — devices join the colony via one-time join codes.
+
+Built on the [Reality2](https://github.com/reality2-ai) (R2) sentant engine — the same event-driven architecture used for IoT sensor networks, now proven for AI agents.
 
 ## Quick start
 
@@ -12,40 +16,103 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 git clone https://github.com/reality2-ai/anthill.git
 cd anthill
 cp anthill-example.toml anthill.toml
-# Edit anthill.toml — set mode = "claude" and skip_permissions = true
+# Edit anthill.toml — set mode = "claude"
 cargo run --release
 ```
 
-Open `http://localhost:3000` in your browser. Done.
+Generate a join code and open the dashboard:
 
-Optionally add a Telegram bot token to also chat via Telegram.
+```bash
+anthill --join-code              # prints a code (expires in 5 min)
+# Open http://localhost:3000 → enter the code → you're in
+```
 
-For the full setup with multiple ANTS, web dashboard, and auto-start on boot, see the guides below.
+## What is Reality2?
+
+[Reality2](https://github.com/reality2-ai) (R2) is an event-driven architecture for autonomous agents — originally designed for IoT sensor networks on ESP32 microcontrollers, now proven to work for AI agents too.
+
+The core principles:
+
+- **Sentants** are pure state machines. They receive events, make decisions, emit actions. No I/O, no side effects, no network access. Given the same events, they always produce the same actions. Deterministic and testable.
+
+- **Plugins** are service adapters. They bridge external systems (Telegram, Claude Code, web servers, hardware) into the event bus. All I/O happens here.
+
+- **Events carry decisions** (< 256 bytes) — IDs, state codes, routing signals. **Plugins carry data** — message text, AI responses, file contents. If it doesn't fit in 256 bytes, it belongs in the plugin data plane, not the event bus.
+
+- **Trust groups** control access. Devices join a colony by presenting a join code (R2-TRUST provisioning). Every API call and WebSocket connection is authenticated. The colony server is the queen; browsers and phones are authenticated viewers.
+
+Anthill is the first production application of R2 outside sensor networks. The same architecture that coordinates accelerometer readings on ESP32s now coordinates AI agent conversations from phones.
+
+### How Anthill uses R2
+
+```
+Your phone (browser)                    Server (the queen)
+┌─────────────────┐                    ┌─────────────────────────┐
+│ Web dashboard    │◄── WebSocket ───► │ WebPlugin               │
+│ (authenticated   │    (trust group)  │                         │
+│  viewer)         │                   │ ClaudeCliPlugin          │
+└─────────────────┘                    │  ├─ worker channels     │
+                                       │  ├─ task map            │
+┌─────────────────┐                    │  ├─ stats               │
+│ Telegram app     │◄── Bot API ────► │  └─ message queue       │
+└─────────────────┘                    │                         │
+                                       │ TelegramPlugin          │
+                                       │  └─ incoming/outgoing   │
+                                       │                         │
+                                       │ ClaudeCliSentant (FSM)  │
+                                       │  └─ decisions only      │
+                                       └─────────────────────────┘
+```
+
+**Sentants** (pure FSMs — zero I/O):
+| Sentant | Role |
+|---|---|
+| ClaudeCliSentant | Dispatches messages, routes responses, handles commands |
+| AiSentant | NL→command→summary pipeline (ai mode) |
+| ChunkerSentant | Output batching decisions (raw mode) |
+| TerminalSentant | PTY lifecycle coordination |
+| TelegramSentant | Session event routing |
+
+**Plugins** (all I/O):
+| Plugin | Role |
+|---|---|
+| ClaudeCliPlugin | Claude Code invocations, task tracking, stats, Telegram sends |
+| AiMediationPlugin | Claude API calls, output buffering, history (ai mode) |
+| ChunkerPlugin | ANSI stripping, chunking, Telegram sends (raw mode) |
+| TelegramPlugin | Telegram Bot API, message classification, data plane |
+| PtyPlugin | Pseudo-terminal management |
+
+## Features
+
+- **Multiple ANTS** — each with its own personality, workspace, and optional Telegram bot
+- **Web dashboard** — responsive, installable as PWA, accessible via [Tailscale](https://tailscale.com/)
+- **Trust group security** — join codes, device provisioning, auth on every request
+- **Concurrent tasks** — send messages while others are running; `/ants` to check progress
+- **Real-time progress** — see what each worker is doing (tool use, agent spawns)
+- **Per-user memory** — persistent across conversations and restarts
+- **File browser** — browse workspace, upload/download files, preview images and code
+- **Git-backed workspace** — auto-committed on schedule, optionally pushed to GitHub
+- **ANT management UI** — create, configure, delete ANTS from the dashboard
+- **Device management** — provision/revoke devices from the dashboard
+- **Telegram optional** — ANTS work with web dashboard only, Telegram is an add-on
+- **Markdown rendering** — code blocks, headings, tables, links in both Telegram and web
+- **Auto-restart** — supervisor manages ANTS with exponential backoff
+- **Systemd integration** — starts on boot, HTTPS via Tailscale
 
 ## Documentation
 
 | Guide | What it covers |
 |---|---|
-| [Prerequisites](docs/prerequisites.md) | Rust, Node.js, Claude Code, Telegram bot, Tailscale, GitHub CLI |
-| [Getting Started](docs/getting-started.md) | Single ANT setup, first message, basic config |
-| [Production Setup](docs/production-setup.md) | Multiple ANTS, supervisor, systemd, auto-start |
-| [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA install, cross-device history |
+| [Prerequisites](docs/prerequisites.md) | Rust, Node.js, Claude Code, Telegram, Tailscale |
+| [Getting Started](docs/getting-started.md) | Single ANT setup, first message |
+| [Production Setup](docs/production-setup.md) | Multiple ANTS, supervisor, systemd |
+| [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA, cross-device history |
 | [Configuration](docs/configuration.md) | Full reference for supervisor.toml and ant.toml |
-| [Commands](docs/commands.md) | Telegram commands, Claude Code commands, raw mode keys |
-| [Memory & Workspaces](docs/memory-and-workspaces.md) | Per-user memory, workspace structure, git backups |
-| [Architecture](docs/architecture.md) | R2 sentant engine, events, plugins, concurrent tasks |
+| [Commands](docs/commands.md) | Telegram and dashboard commands |
+| [Memory & Workspaces](docs/memory-and-workspaces.md) | Per-user memory, git backups |
+| [Architecture](docs/architecture.md) | R2 sentant engine, events, plugins |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
-| [Security](docs/security.md) | Access control, tokens, permissions |
-
-## Features
-
-- **Multiple ANTS** — each with its own personality, workspace, and Telegram bot
-- **Web dashboard** — responsive UI, installable as PWA, accessible via Tailscale
-- **Concurrent tasks** — send messages while others are running
-- **Per-user memory** — persistent across conversations and restarts
-- **Git-backed workspace** — auto-committed, optionally pushed to GitHub
-- **Auto-restart** — supervisor manages ANTS with exponential backoff
-- **Markdown rendering** — code blocks, headings, tables, links — in both Telegram and web UI
+| [Security](docs/security.md) | Trust groups, device provisioning, access control |
 
 ## License
 
