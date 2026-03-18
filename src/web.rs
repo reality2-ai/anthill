@@ -199,21 +199,55 @@ async fn cancel_task(
     StatusCode::NOT_FOUND
 }
 
-/// GET /api/ants/:id/config — read an ANT's config.
+/// GET /api/ants/:id/config — read an ANT's config as structured JSON.
 async fn get_config(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.registry.read_config(&id) {
-        Some(content) => (StatusCode::OK, content).into_response(),
+        Some(content) => {
+            // Parse TOML and return as JSON for the form UI.
+            match toml::from_str::<crate::config::Config>(&content) {
+                Ok(cfg) => Json(serde_json::json!({
+                    "name": cfg.name.unwrap_or_default(),
+                    "mode": cfg.mode,
+                    "telegram_token": cfg.telegram.token.unwrap_or_default(),
+                    "telegram_allow": cfg.telegram.allow,
+                    "working_dir": cfg.claude.working_dir.unwrap_or_default(),
+                    "memory_dir": cfg.claude.memory_dir,
+                    "repos_dir": cfg.claude.repos_dir,
+                    "skip_permissions": cfg.claude.skip_permissions,
+                    "backup_interval_hours": cfg.claude.backup_interval_hours,
+                    "backup_remote": cfg.claude.backup_remote,
+                    "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
+                    "shell": cfg.raw.shell,
+                    "ai_model": cfg.ai.model,
+                })).into_response(),
+                Err(_) => {
+                    (StatusCode::OK, content).into_response()
+                }
+            }
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-/// PUT /api/ants/:id/config — update an ANT's config.
+/// PUT /api/ants/:id/config — update an ANT's config from structured fields.
 #[derive(Deserialize)]
 struct ConfigUpdate {
-    content: String,
+    name: Option<String>,
+    mode: Option<String>,
+    telegram_token: Option<String>,
+    telegram_allow: Option<Vec<i64>>,
+    working_dir: Option<String>,
+    memory_dir: Option<String>,
+    repos_dir: Option<String>,
+    skip_permissions: Option<bool>,
+    backup_interval_hours: Option<u32>,
+    backup_remote: Option<String>,
+    system_prompt: Option<String>,
+    shell: Option<String>,
+    ai_model: Option<String>,
 }
 
 async fn put_config(
@@ -221,12 +255,61 @@ async fn put_config(
     Path(id): Path<String>,
     Json(req): Json<ConfigUpdate>,
 ) -> impl IntoResponse {
-    // Validate it's valid TOML.
-    if toml::from_str::<crate::config::Config>(&req.content).is_err() {
-        return (StatusCode::BAD_REQUEST, "Invalid TOML config").into_response();
+    // Generate TOML from the fields.
+    let mut toml = String::new();
+
+    if let Some(ref name) = req.name {
+        if !name.is_empty() {
+            toml.push_str(&format!("name = \"{}\"\n", name));
+        }
     }
-    match state.registry.write_config(&id, &req.content) {
-        Ok(()) => (StatusCode::OK, "Config saved. Restart the ANT to apply.").into_response(),
+    toml.push_str(&format!("mode = \"{}\"\n\n", req.mode.as_deref().unwrap_or("claude")));
+
+    toml.push_str("[telegram]\n");
+    if let Some(ref token) = req.telegram_token {
+        toml.push_str(&format!("token = \"{}\"\n", token));
+    }
+    if let Some(ref allow) = req.telegram_allow {
+        if !allow.is_empty() {
+            let ids: Vec<String> = allow.iter().map(|id| id.to_string()).collect();
+            toml.push_str(&format!("allow = [{}]\n", ids.join(", ")));
+        }
+    }
+
+    toml.push_str("\n[claude]\n");
+    if let Some(ref wd) = req.working_dir {
+        if !wd.is_empty() {
+            toml.push_str(&format!("working_dir = \"{}\"\n", wd));
+        }
+    }
+    toml.push_str(&format!("memory_dir = \"{}\"\n", req.memory_dir.as_deref().unwrap_or("memory")));
+    toml.push_str(&format!("repos_dir = \"{}\"\n", req.repos_dir.as_deref().unwrap_or("repos")));
+    toml.push_str(&format!("skip_permissions = {}\n", req.skip_permissions.unwrap_or(true)));
+    toml.push_str(&format!("backup_interval_hours = {}\n", req.backup_interval_hours.unwrap_or(0)));
+    let remote = req.backup_remote.as_deref().unwrap_or("");
+    if !remote.is_empty() {
+        toml.push_str(&format!("backup_remote = \"{}\"\n", remote));
+    }
+    if let Some(ref prompt) = req.system_prompt {
+        if !prompt.is_empty() {
+            // Escape for TOML multi-line string.
+            toml.push_str(&format!("system_prompt = \"\"\"\\\n{}\"\"\"", prompt));
+        }
+    }
+
+    toml.push_str("\n\n[raw]\n");
+    toml.push_str(&format!("shell = \"{}\"\n", req.shell.as_deref().unwrap_or("/bin/bash")));
+
+    toml.push_str("\n[ai]\n");
+    toml.push_str(&format!("model = \"{}\"\n", req.ai_model.as_deref().unwrap_or("claude-sonnet-4-20250514")));
+
+    // Validate the generated TOML.
+    if toml::from_str::<crate::config::Config>(&toml).is_err() {
+        return (StatusCode::BAD_REQUEST, "Generated invalid config").into_response();
+    }
+
+    match state.registry.write_config(&id, &toml) {
+        Ok(()) => (StatusCode::OK, "Config saved. Restart Anthill to apply.").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
