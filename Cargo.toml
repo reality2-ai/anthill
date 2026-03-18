@@ -49,6 +49,11 @@ tower-http = { version = "0.6", features = ["cors"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
+# Cryptography
+sha2 = "0.10"
+hmac = "0.12"
+aes-gcm = "0.10"
+
 # Error handling
 anyhow = "1"
 

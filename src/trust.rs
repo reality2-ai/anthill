@@ -6,78 +6,170 @@
 //!   3. Device credentials (permanent, derived at join time)
 //!   4. Authentication (HMAC verification on every connect)
 
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// HMAC-SHA256 using the r2-wire implementation.
+type HmacSha256 = Hmac<Sha256>;
+
+/// Compute HMAC-SHA256.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    // Simple HMAC-SHA256 implementation.
-    use std::io::Write;
-    let block_size = 64;
-    let mut key_padded = vec![0u8; block_size];
-
-    if key.len() > block_size {
-        // Hash the key if too long.
-        let digest = sha256(key);
-        key_padded[..32].copy_from_slice(&digest);
-    } else {
-        key_padded[..key.len()].copy_from_slice(key);
-    }
-
-    let mut ipad = vec![0x36u8; block_size];
-    let mut opad = vec![0x5cu8; block_size];
-    for i in 0..block_size {
-        ipad[i] ^= key_padded[i];
-        opad[i] ^= key_padded[i];
-    }
-
-    let mut inner = Vec::new();
-    inner.write_all(&ipad).unwrap();
-    inner.write_all(data).unwrap();
-    let inner_hash = sha256(&inner);
-
-    let mut outer = Vec::new();
-    outer.write_all(&opad).unwrap();
-    outer.write_all(&inner_hash).unwrap();
-    sha256(&outer).to_vec()
+    let mut mac = HmacSha256::new_from_slice(key)
+        .expect("HMAC key length should be valid");
+    mac.update(data);
+    mac.finalize().into_bytes().to_vec()
 }
 
-/// Simple SHA-256 (using the ring crate would be better, but we'll use
-/// a minimal implementation to avoid new dependencies).
-fn sha256(data: &[u8]) -> [u8; 32] {
-    // Use std::process to call sha256sum as a fallback-free approach.
-    // Actually, let's just use a simple hash derivation that's good enough
-    // for our purposes. For production, this should use a proper crypto library.
-    //
-    // We'll use the FNV approach from r2-fnv extended to 256 bits,
-    // combined with multiple rounds for diffusion.
-    // This is NOT cryptographically secure SHA-256 — it's a placeholder.
-    // TODO: use ring or sha2 crate for proper implementation.
-    let mut state = [0u8; 32];
-    // Seed with data length.
-    let len_bytes = (data.len() as u64).to_le_bytes();
-    state[0..8].copy_from_slice(&len_bytes);
+/// Maximum age of a signed message (seconds) before it's considered stale.
+const MAX_MESSAGE_AGE_SECS: u64 = 60;
 
-    for (i, &byte) in data.iter().enumerate() {
-        let idx = i % 32;
-        state[idx] = state[idx].wrapping_add(byte);
-        state[(idx + 1) % 32] ^= state[idx].wrapping_mul(131);
-        state[(idx + 7) % 32] = state[(idx + 7) % 32].wrapping_add(state[idx].rotate_left(3));
+/// Sign a message: HMAC-SHA256(credential, device_id + timestamp + payload).
+/// Returns (signature_hex, timestamp).
+pub fn sign_message(credential: &str, device_id: &str, payload: &str) -> (String, u64) {
+    let timestamp = now_secs();
+    let data = format!("{}:{}:{}", device_id, timestamp, payload);
+    let key = hex::decode(credential).unwrap_or_default();
+    let sig = hmac_sha256(&key, data.as_bytes());
+    (hex::encode(&sig), timestamp)
+}
+
+/// Verify a signed message. Returns true if valid and fresh.
+pub fn verify_signature(
+    credential: &str,
+    device_id: &str,
+    timestamp: u64,
+    payload: &str,
+    signature: &str,
+) -> bool {
+    // Check freshness.
+    let now = now_secs();
+    if now.abs_diff(timestamp) > MAX_MESSAGE_AGE_SECS {
+        return false;
     }
 
-    // Multiple mixing rounds.
-    for _ in 0..16 {
-        for i in 0..32 {
-            state[i] = state[i]
-                .wrapping_add(state[(i + 13) % 32])
-                .rotate_left(5)
-                ^ state[(i + 7) % 32];
+    let data = format!("{}:{}:{}", device_id, timestamp, payload);
+    let key = hex::decode(credential).unwrap_or_default();
+    let expected = hmac_sha256(&key, data.as_bytes());
+    let expected_hex = hex::encode(&expected);
+
+    // Constant-time comparison.
+    if signature.len() != expected_hex.len() {
+        return false;
+    }
+    signature
+        .bytes()
+        .zip(expected_hex.bytes())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
+}
+
+/// Derive an encryption key from a credential (32 bytes for AES-256).
+pub fn derive_encryption_key(credential: &str) -> Vec<u8> {
+    let key = hex::decode(credential).unwrap_or_default();
+    hmac_sha256(&key, b"anthill:encrypt:v1")
+}
+
+/// Encrypt a payload with AES-256-GCM.
+/// Returns base64(nonce + ciphertext).
+pub fn encrypt_payload(credential: &str, plaintext: &[u8]) -> Result<String, String> {
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    use aes_gcm::aead::Aead;
+
+    let key_bytes = derive_encryption_key(credential);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| format!("key error: {}", e))?;
+
+    // Generate random 12-byte nonce.
+    let nonce_bytes = generate_random_bytes(12);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|e| format!("encrypt error: {}", e))?;
+
+    // Prepend nonce to ciphertext, base64 encode.
+    let mut output = nonce_bytes;
+    output.extend_from_slice(&ciphertext);
+    Ok(base64_encode(&output))
+}
+
+/// Decrypt an AES-256-GCM payload.
+/// Input is base64(nonce + ciphertext).
+pub fn decrypt_payload(credential: &str, encrypted: &str) -> Result<Vec<u8>, String> {
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+    use aes_gcm::aead::Aead;
+
+    let key_bytes = derive_encryption_key(credential);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| format!("key error: {}", e))?;
+
+    let data = base64_decode(encrypted)?;
+    if data.len() < 12 {
+        return Err("ciphertext too short".into());
+    }
+
+    let nonce = Nonce::from_slice(&data[..12]);
+    let ciphertext = &data[12..];
+
+    cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| format!("decrypt error: {}", e))
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((n >> 18) & 63) as usize] as char);
+        result.push(CHARS[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((n >> 6) & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(n & 63) as usize] as char);
+        } else {
+            result.push('=');
         }
     }
-    state
+    result
+}
+
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    let s = s.trim_end_matches('=');
+    let mut result = Vec::new();
+    let chars: Vec<u8> = s.bytes().map(|b| match b {
+        b'A'..=b'Z' => b - b'A',
+        b'a'..=b'z' => b - b'a' + 26,
+        b'0'..=b'9' => b - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => 255,
+    }).collect();
+
+    for chunk in chars.chunks(4) {
+        let len = chunk.len();
+        if chunk.iter().any(|&b| b == 255) {
+            return Err("invalid base64".into());
+        }
+        let n = (chunk[0] as u32) << 18
+            | (if len > 1 { chunk[1] as u32 } else { 0 }) << 12
+            | (if len > 2 { chunk[2] as u32 } else { 0 }) << 6
+            | (if len > 3 { chunk[3] as u32 } else { 0 });
+        result.push((n >> 16) as u8);
+        if len > 2 { result.push((n >> 8) as u8); }
+        if len > 3 { result.push(n as u8); }
+    }
+    Ok(result)
 }
 
 /// A provisioned device.

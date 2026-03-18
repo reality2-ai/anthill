@@ -816,24 +816,31 @@ fn guess_content_type(path: &std::path::Path) -> &'static str {
     }
 }
 
-/// GET /ws — WebSocket upgrade (with credential in query string).
+/// GET /ws — WebSocket upgrade (with credential + device_id in query string).
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let credential = params.get("credential").cloned().unwrap_or_default();
+    let device_id = params.get("device_id").cloned().unwrap_or_default();
 
     // Verify credential.
     if check_auth(&state, &credential).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    ws.on_upgrade(move |socket| handle_ws(socket, state)).into_response()
+    ws.on_upgrade(move |socket| handle_ws(socket, state, credential, device_id))
+        .into_response()
 }
 
-/// Handle a WebSocket connection.
-async fn handle_ws(mut socket: WebSocket, state: AppState) {
+/// Handle a WebSocket connection with HMAC envelope support.
+async fn handle_ws(
+    mut socket: WebSocket,
+    state: AppState,
+    credential: String,
+    device_id: String,
+) {
     let registry = &state.registry;
 
     // Subscribe to the global event broadcast.
@@ -849,13 +856,27 @@ async fn handle_ws(mut socket: WebSocket, state: AppState) {
         std::collections::HashMap::new()
     };
 
+    // Helper: wrap outgoing message in a signed envelope.
+    let server_device_id = "server".to_string();
+    let send_signed = |payload: &str, cred: &str| -> String {
+        let (sig, ts) = crate::trust::sign_message(cred, "server", payload);
+        serde_json::json!({
+            "device_id": "server",
+            "timestamp": ts,
+            "signature": sig,
+            "payload": payload,
+        }).to_string()
+    };
+
     let snapshot = serde_json::json!({
         "type": "snapshot",
         "bots": bots,
         "history": history,
     });
+    let snapshot_str = snapshot.to_string();
+    let envelope = send_signed(&snapshot_str, &credential);
     if socket
-        .send(Message::Text(snapshot.to_string().into()))
+        .send(Message::Text(envelope.into()))
         .await
         .is_err()
     {
@@ -865,21 +886,37 @@ async fn handle_ws(mut socket: WebSocket, state: AppState) {
     // Stream events and handle incoming messages.
     loop {
         tokio::select! {
-            // Broadcast event → send to client.
+            // Broadcast event → sign and send to client.
             Ok(event) = rx.recv() => {
                 let json = match serde_json::to_string(&event) {
                     Ok(j) => j,
                     Err(_) => continue,
                 };
-                if socket.send(Message::Text(json.into())).await.is_err() {
+                let envelope = send_signed(&json, &credential);
+                if socket.send(Message::Text(envelope.into())).await.is_err() {
                     break;
                 }
             }
 
-            // Client message → handle command.
+            // Client message → verify signature, then handle command.
             Some(Ok(msg)) = socket.recv() => {
                 if let Message::Text(text) = msg {
-                    if let Ok(cmd) = serde_json::from_str::<WsCommand>(&text) {
+                    // Try to parse as signed envelope first.
+                    let payload_str = if let Ok(env) = serde_json::from_str::<WsEnvelope>(&text) {
+                        // Verify HMAC signature.
+                        if !crate::trust::verify_signature(
+                            &credential, &env.device_id, env.timestamp, &env.payload, &env.signature,
+                        ) {
+                            log::warn!("WebSocket: invalid signature from device {}", env.device_id);
+                            continue;
+                        }
+                        env.payload
+                    } else {
+                        // Fall back to unsigned (for backward compatibility during transition).
+                        text.to_string()
+                    };
+
+                    if let Ok(cmd) = serde_json::from_str::<WsCommand>(&payload_str) {
                         match cmd {
                             WsCommand::Chat { bot, message, chat_id } => {
                                 registry.send_message(&bot, chat_id.unwrap_or(0), message).await;
@@ -902,6 +939,15 @@ async fn handle_ws(mut socket: WebSocket, state: AppState) {
             else => break,
         }
     }
+}
+
+/// Signed envelope for WebSocket messages.
+#[derive(Deserialize)]
+struct WsEnvelope {
+    device_id: String,
+    timestamp: u64,
+    signature: String,
+    payload: String,
 }
 
 /// Commands received from WebSocket clients.

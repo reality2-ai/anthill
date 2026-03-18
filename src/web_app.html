@@ -623,7 +623,8 @@ const state = {
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const credential = getCredential();
-  const ws = new WebSocket(`${proto}//${location.host}/ws?credential=${encodeURIComponent(credential)}`);
+  const deviceId = localStorage.getItem('anthill_device_id') || '';
+  const ws = new WebSocket(`${proto}//${location.host}/ws?credential=${encodeURIComponent(credential)}&device_id=${encodeURIComponent(deviceId)}`);
 
   ws.onopen = () => {
     document.getElementById('connection').className = '';
@@ -637,8 +638,14 @@ function connect() {
   };
 
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    handleEvent(msg);
+    try {
+      const raw = JSON.parse(e.data);
+      // Unwrap signed envelope if present.
+      const msg = raw.payload ? JSON.parse(raw.payload) : raw;
+      handleEvent(msg);
+    } catch (err) {
+      console.warn('WS parse error:', err);
+    }
   };
 }
 
@@ -720,11 +727,11 @@ function sendMessage() {
   if (!text || !state.activeBot || !state.ws) return;
 
   // Message will appear via the user_message broadcast event.
-  state.ws.send(JSON.stringify({
+  wsSendSigned({
     type: 'chat',
     bot: state.activeBot,
     message: text,
-  }));
+  });
 
   input.value = '';
   input.style.height = 'auto';
@@ -825,11 +832,11 @@ setInterval(renderTasks, 1000);
 
 function cancelTask(taskId) {
   if (!state.ws || !state.activeBot) return;
-  state.ws.send(JSON.stringify({
+  wsSendSigned({
     type: 'cancel',
     bot: state.activeBot,
     task_id: taskId,
-  }));
+  });
 }
 
 // --- Typing ---
@@ -1221,6 +1228,46 @@ async function deleteAnt() {
   }
 }
 
+// --- Crypto: HMAC-SHA256 signing ---
+async function hmacSign(credential, deviceId, payload) {
+  const encoder = new TextEncoder();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const data = `${deviceId}:${timestamp}:${payload}`;
+
+  // Import credential as HMAC key.
+  const keyBytes = hexToBytes(credential);
+  const key = await crypto.subtle.importKey(
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  const sigHex = bytesToHex(new Uint8Array(sig));
+
+  return { device_id: deviceId, timestamp, signature: sigHex, payload };
+}
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Send a signed WebSocket message.
+async function wsSendSigned(payload) {
+  if (!state.ws) return;
+  const credential = getCredential();
+  const deviceId = localStorage.getItem('anthill_device_id') || '';
+  const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  const envelope = await hmacSign(credential, deviceId, payloadStr);
+  state.ws.send(JSON.stringify(envelope));
+}
+
 // --- Authenticated fetch ---
 function authFetch(url, options = {}) {
   const credential = getCredential();
@@ -1330,9 +1377,10 @@ function getCredential() {
   return localStorage.getItem('anthill_credential') || '';
 }
 
-function setCredential(credential, deviceName) {
+function setCredential(credential, deviceName, deviceId) {
   localStorage.setItem('anthill_credential', credential);
   localStorage.setItem('anthill_device_name', deviceName);
+  if (deviceId) localStorage.setItem('anthill_device_id', deviceId);
 }
 
 async function checkAuth() {
@@ -1396,7 +1444,7 @@ async function joinColony() {
 
     if (resp.ok) {
       const data = await resp.json();
-      setCredential(data.credential, data.name);
+      setCredential(data.credential, data.name, data.device_id);
       showApp();
     } else {
       errEl.textContent = await resp.text();
