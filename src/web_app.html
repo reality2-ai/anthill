@@ -408,7 +408,7 @@
   <div style="text-align:center;max-width:360px;padding:24px">
     <div style="font-size:48px;margin-bottom:16px">🐜</div>
     <h1 style="color:var(--accent);margin-bottom:8px">Anthill</h1>
-    <p style="color:var(--text-dim);margin-bottom:24px">This colony requires a join code to connect.</p>
+    <p id="join-desc" style="color:var(--text-dim);margin-bottom:24px">Loading...</p>
     <div class="field">
       <input id="join-code" class="field-input" placeholder="Enter join code (e.g. a1b-c2d)" style="text-align:center;font-size:18px;letter-spacing:2px;font-family:var(--mono)">
     </div>
@@ -417,7 +417,7 @@
     </div>
     <div id="join-error" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
     <button onclick="joinColony()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-weight:600;font-size:16px;width:100%">Join Colony</button>
-    <p style="color:var(--text-dim);font-size:12px;margin-top:16px">Ask the colony queen for a join code.</p>
+    <p id="join-hint" style="color:var(--text-dim);font-size:12px;margin-top:16px"></p>
   </div>
 </div>
 
@@ -1211,9 +1211,28 @@ async function checkAuth() {
   }
 }
 
-function showJoinScreen() {
+async function showJoinScreen() {
   document.getElementById('join-screen').style.display = 'flex';
   document.getElementById('app-container').style.display = 'none';
+
+  // Check if this is a fresh colony (queen bootstrap).
+  try {
+    const resp = await fetch('/api/auth/status');
+    const data = await resp.json();
+    if (data.empty_colony) {
+      document.getElementById('join-desc').textContent = 'Welcome! You are the first to connect — you will be the Queen.';
+      document.getElementById('join-code').style.display = 'none';
+      document.getElementById('join-name').placeholder = 'Your name (e.g. Queen)';
+      document.getElementById('join-hint').textContent = 'No join code needed for the first device.';
+    } else {
+      document.getElementById('join-desc').textContent = 'This colony requires a join code to connect.';
+      document.getElementById('join-code').style.display = 'block';
+      document.getElementById('join-name').placeholder = 'Device name (e.g. My Phone)';
+      document.getElementById('join-hint').textContent = 'Ask the colony queen for a join code.';
+    }
+  } catch (e) {
+    document.getElementById('join-desc').textContent = 'This colony requires a join code to connect.';
+  }
 }
 
 function showApp() {

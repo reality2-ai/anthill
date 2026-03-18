@@ -109,6 +109,8 @@ pub struct ColonyTrust {
     devices: DeviceRegistry,
     /// Path to devices file.
     devices_path: PathBuf,
+    /// Path to join codes file (shared between CLI and server).
+    join_codes_path: PathBuf,
     /// Currently active join codes (code → expiry timestamp).
     join_codes: HashMap<String, u64>,
 }
@@ -139,15 +141,24 @@ impl ColonyTrust {
             DeviceRegistry::default()
         };
 
+        let join_codes_path = config_dir.join("join-codes.toml");
+        let join_codes = Self::load_join_codes(&join_codes_path);
+
         Ok(Self {
             root_secret,
             devices,
             devices_path,
-            join_codes: HashMap::new(),
+            join_codes_path,
+            join_codes,
         })
     }
 
-    /// Generate a join code (valid for 5 minutes).
+    /// Returns true if no devices have been provisioned yet (queen bootstrap).
+    pub fn is_empty_colony(&self) -> bool {
+        self.devices.devices.is_empty()
+    }
+
+    /// Generate a join code (valid for 5 minutes). Persisted to disk.
     pub fn generate_join_code(&mut self) -> String {
         let now = now_secs();
         let expiry = now + 300; // 5 minutes
@@ -160,7 +171,6 @@ impl ColonyTrust {
         data.extend_from_slice(&random);
 
         let mac = hmac_sha256(&self.root_secret, &data);
-        // Take first 6 bytes, encode as readable code.
         let code = format!(
             "{:03x}-{:03x}",
             u16::from_le_bytes([mac[0], mac[1]]) & 0xFFF,
@@ -172,21 +182,57 @@ impl ColonyTrust {
         // Clean expired codes.
         self.join_codes.retain(|_, exp| *exp > now);
 
+        // Persist to disk so the server process can see codes from the CLI.
+        self.save_join_codes();
+
         code
     }
 
     /// Verify and consume a join code. Returns true if valid.
     pub fn verify_join_code(&mut self, code: &str) -> bool {
+        // Reload from disk (CLI may have written new codes).
+        self.join_codes = Self::load_join_codes(&self.join_codes_path);
+
         let now = now_secs();
         if let Some(&expiry) = self.join_codes.get(code) {
             if expiry > now {
                 self.join_codes.remove(code);
+                self.save_join_codes();
                 return true;
             }
         }
         // Clean expired.
         self.join_codes.retain(|_, exp| *exp > now);
+        self.save_join_codes();
         false
+    }
+
+    fn load_join_codes(path: &Path) -> HashMap<String, u64> {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            let now = now_secs();
+            // Simple format: one line per code, "code expiry_timestamp"
+            contents
+                .lines()
+                .filter_map(|line| {
+                    let mut parts = line.split_whitespace();
+                    let code = parts.next()?.to_string();
+                    let expiry: u64 = parts.next()?.parse().ok()?;
+                    if expiry > now { Some((code, expiry)) } else { None }
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        }
+    }
+
+    fn save_join_codes(&self) {
+        let contents: String = self
+            .join_codes
+            .iter()
+            .map(|(code, expiry)| format!("{} {}", code, expiry))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = std::fs::write(&self.join_codes_path, contents);
     }
 
     /// Provision a new device. Returns the device credential.

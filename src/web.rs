@@ -68,6 +68,7 @@ pub async fn run_web_server(
         .route("/api/auth/devices", get(auth_list_devices))
         .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
         .route("/api/auth/join-code", post(auth_generate_join_code))
+        .route("/api/auth/status", get(auth_status))
         .with_state(state);
 
     log::info!("Web server listening on {}", bind);
@@ -473,13 +474,21 @@ async fn auth_join(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    if !trust.verify_join_code(&req.code) {
+    // Queen bootstrap: first device joins without a code.
+    let is_queen = trust.is_empty_colony();
+    if !is_queen && !trust.verify_join_code(&req.code) {
         return (StatusCode::FORBIDDEN, "Invalid or expired join code").into_response();
     }
 
-    let name = if req.device_name.is_empty() { "unnamed device" } else { &req.device_name };
+    let default_name = if is_queen { "Queen" } else { "unnamed device" };
+    let name = if req.device_name.is_empty() { default_name } else { &req.device_name };
     let device = trust.provision_device(name);
-    log::info!("New device joined colony: '{}' ({})", device.name, &device.id[..8]);
+
+    if is_queen {
+        log::info!("Queen provisioned: '{}' ({})", device.name, &device.id[..8]);
+    } else {
+        log::info!("New device joined colony: '{}' ({})", device.name, &device.id[..8]);
+    }
 
     Json(serde_json::json!({
         "device_id": device.id,
@@ -559,6 +568,19 @@ async fn auth_generate_join_code(
     Json(serde_json::json!({
         "code": code,
         "expires_in_seconds": 300,
+    })).into_response()
+}
+
+/// GET /api/auth/status — public: is the colony empty (queen bootstrap)?
+async fn auth_status(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let trust = match state.trust.lock() {
+        Ok(t) => t,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    Json(serde_json::json!({
+        "empty_colony": trust.is_empty_colony(),
     })).into_response()
 }
 

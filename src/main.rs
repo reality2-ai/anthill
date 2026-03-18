@@ -73,13 +73,17 @@ async fn main() -> anyhow::Result<()> {
     // Generate join code.
     if let Some(ref config_dir) = args.join_code {
         let mut trust = trust::ColonyTrust::load(config_dir)?;
-        let code = trust.generate_join_code();
-        println!("\n  Join code: {}\n", code);
-        println!("  Expires in 5 minutes.");
-        println!("  Enter this code in the Anthill web dashboard to join the colony.\n");
-        // Keep the process alive so the code stays valid.
-        println!("  Press Ctrl+C when done.");
-        tokio::signal::ctrl_c().await?;
+
+        if trust.is_empty_colony() {
+            println!("\n  No devices provisioned yet.");
+            println!("  The first device to connect will be the Queen — no code needed.");
+            println!("  Just open the web dashboard and enter any name.\n");
+        } else {
+            let code = trust.generate_join_code();
+            println!("\n  Join code:  {}", code);
+            println!("  Expires in: 5 minutes");
+            println!("\n  Enter this in the Anthill web dashboard to join the colony.\n");
+        }
         return Ok(());
     }
 
