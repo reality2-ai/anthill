@@ -166,10 +166,10 @@ For running one or more ANTS as a system service that starts on boot.
 ~/.config/anthill/
 ├── supervisor.toml               # Supervisor settings (port, restart policy)
 ├── history/                      # Chat history (auto-created)
-│   ├── alfred.jsonl              # Per-ANT, loaded by web dashboard
+│   ├── my-ant.jsonl              # Per-ANT, loaded by web dashboard
 │   └── hine.jsonl
 └── ants/                         # One subdirectory per ANT
-    ├── alfred/
+    ├── my-ant/
     │   └── ant.toml              # ANT config
     └── hine/
         └── ant.toml
@@ -178,7 +178,7 @@ For running one or more ANTS as a system service that starts on boot.
 Each ANT also has a **working directory** (set in `ant.toml`):
 
 ```
-<working_dir>/                    # e.g. ~/Development/anthill-alfred
+<working_dir>/                    # e.g. ~/Development/anthill-my-ant
 ├── .git/                         # Auto-initialised for backups
 ├── .gitignore                    # Auto-created: excludes repos/
 ├── memory/                       # Per-user memory files
@@ -301,13 +301,13 @@ Tailscale can provision a valid HTTPS certificate and proxy to Anthill automatic
 ```bash
 # Find your machine's Tailscale domain
 tailscale status --self
-# e.g. alfred.tail12345.ts.net
+# e.g. <machine-name>.tail12345.ts.net
 
 # Set up HTTPS proxy to Anthill
 sudo tailscale serve http://localhost:3000
 ```
 
-Now access the dashboard at `https://alfred.tail12345.ts.net` with a valid certificate. This is required for PWA installation on some browsers and enables secure WebSocket (`wss://`).
+Now access the dashboard at `https://<machine-name>.tail12345.ts.net` with a valid certificate. This is required for PWA installation on some browsers and enables secure WebSocket (`wss://`).
 
 To make this permanent (survives reboots):
 
