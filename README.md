@@ -2,7 +2,7 @@
 
 A colony for **ANTS** — Autonomous iNTelligenceS.
 
-Anthill uses [Reality2](https://github.com/reality2-ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Telegram](https://telegram.org/), [Slack](https://slack.com/), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
+Anthill uses [Reality2](https://github.com/reality2-ai) (R2) — an open-source engine where autonomous agents (sentants) make decisions via events, and plugins handle all I/O. In Anthill, the sentants coordinate AI conversations while plugins manage connections to AI backends (such as [Claude](https://www.anthropic.com/), [ChatGPT](https://openai.com/), or local models via [Ollama](https://ollama.com/)), messaging platforms ([Telegram](https://telegram.org/), [Slack](https://slack.com/)), and the web interface. R2's trust group model secures access — devices join the colony via one-time codes, and every request is authenticated.
 
 Anthill runs AI agents on a Linux server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard, Telegram, or Slack.
 
@@ -10,7 +10,7 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 
 Built on the [Reality2](https://github.com/reality2-ai) (R2) sentant engine — the same event-driven architecture used for IoT sensor networks, now proven for AI agents.
 
-> **Note:** Anthill currently runs on **Linux only** and requires some technical setup (Rust toolchain, Claude Code CLI, systemd). See [Prerequisites](docs/prerequisites.md) for what's needed. macOS and Windows support may come in future.
+> **Note:** Anthill currently runs on **Linux only** and requires some technical setup (Rust toolchain, AI CLI tools, systemd). See [Prerequisites](docs/prerequisites.md) for what's needed. macOS and Windows support may come in future.
 
 ## Quick start
 
@@ -37,7 +37,7 @@ The core principles:
 
 - **Sentants** are pure state machines. They receive events, make decisions, emit actions. No I/O, no side effects, no network access. Given the same events, they always produce the same actions. Deterministic and testable.
 
-- **Plugins** are service adapters. They bridge external systems (Telegram, Claude Code, web servers, hardware) into the event bus. All I/O happens here.
+- **Plugins** are service adapters. They bridge external systems (AI backends, Telegram, Slack, web servers, hardware) into the event bus. All I/O happens here.
 
 - **Events carry decisions** (< 256 bytes) — IDs, state codes, routing signals. **Plugins carry data** — message text, AI responses, file contents. If it doesn't fit in 256 bytes, it belongs in the plugin data plane, not the event bus.
 
@@ -80,7 +80,7 @@ Anthill is the first production application of R2 outside sensor networks. The s
 
 | Guide | What it covers |
 |---|---|
-| [Prerequisites](docs/prerequisites.md) | Linux, Rust, Node.js, Claude Code, Telegram, Slack, Tailscale |
+| [Prerequisites](docs/prerequisites.md) | Linux, Rust, AI backend (Claude, OpenAI, Ollama), Telegram/Slack, Tailscale |
 | [Getting Started](docs/getting-started.md) | Single ANT setup, first message |
 | [Production Setup](docs/production-setup.md) | Multiple ANTS, supervisor, systemd |
 | [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA, cross-device history |
