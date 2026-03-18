@@ -18,7 +18,7 @@ echo ""
 echo "Building release binary..."
 cargo build -p anthill --release
 
-BINARY="../../target/release/anthill"
+BINARY="target/release/anthill"
 
 echo "Installing binary to $INSTALL_DIR/anthill..."
 sudo cp "$BINARY" "$INSTALL_DIR/anthill"
