@@ -29,22 +29,18 @@ Located at `~/.config/anthill/ants/<name>/ant.toml`. One per ANT.
 
 ### Minimal config
 
-The only required fields are `mode` and `skip_permissions`:
+Only `mode` is required. Everything else has sensible defaults:
 
 ```toml
-name = "My ANT"
 mode = "claude"
-
-[claude]
-skip_permissions = true
 ```
 
-Everything else has sensible defaults:
-- **Telegram** — disabled (web dashboard only)
-- **working_dir** — defaults to `~/.config/anthill/ants/<id>/working`
-- **memory_dir** — `memory` (relative to working_dir)
-- **repos_dir** — `repos` (relative to working_dir)
-- **backup** — disabled
+- **Name** defaults to the directory name
+- **Telegram** disabled (web dashboard only)
+- **Working directory** defaults to `~/.config/anthill/ants/<id>/working`
+- **Permissions** automatically set based on mode (claude/ai = skip, raw = don't skip)
+- **Memory and repos directories** always `memory/` and `repos/` within the working directory
+- **Backups** disabled
 
 ### Full config
 
@@ -82,15 +78,6 @@ For `mode = "claude"` (the main mode).
 # Default: ~/.config/anthill/ants/<id>/working
 working_dir = "/path/to/workspace"
 
-# Per-user memory files (relative to working_dir)
-memory_dir = "memory"
-
-# Cloned git repos (relative to working_dir, excluded from backup)
-repos_dir = "repos"
-
-# REQUIRED — lets Claude run commands without interactive approval
-skip_permissions = true
-
 # Auto-commit workspace changes to git (hours, 0 = disabled)
 backup_interval_hours = 6
 
@@ -100,6 +87,19 @@ backup_remote = "origin"
 # System prompt — defines the ANT's personality
 system_prompt = """\
 You are a helpful programming assistant."""
+```
+
+The following are set automatically and don't normally need changing:
+
+```toml
+# Per-user memory files (always "memory" within working_dir)
+memory_dir = "memory"
+
+# Cloned git repos (always "repos" within working_dir, excluded from backup)
+repos_dir = "repos"
+
+# Auto-set based on mode: true for claude/ai, false for raw
+skip_permissions = true
 ```
 
 ### [raw]
