@@ -241,6 +241,8 @@ async fn get_config(
                     "mode": cfg.mode,
                     "telegram_token": cfg.telegram.token.unwrap_or_default(),
                     "telegram_allow": cfg.telegram.allow,
+                    "slack_bot_token": cfg.slack.bot_token.unwrap_or_default(),
+                    "slack_app_token": cfg.slack.app_token.unwrap_or_default(),
                     "working_dir": cfg.claude.working_dir.unwrap_or_default(),
                     "memory_dir": cfg.claude.memory_dir,
                     "repos_dir": cfg.claude.repos_dir,
@@ -268,6 +270,8 @@ struct ConfigUpdate {
     mode: Option<String>,
     telegram_token: Option<String>,
     telegram_allow: Option<Vec<i64>>,
+    slack_bot_token: Option<String>,
+    slack_app_token: Option<String>,
     working_dir: Option<String>,
     memory_dir: Option<String>,
     repos_dir: Option<String>,
@@ -307,6 +311,19 @@ async fn put_config(
 
     let mode_str = req.mode.as_deref().unwrap_or("claude");
     let skip_perms = mode_str == "claude" || mode_str == "ai";
+
+    // Slack section (optional).
+    let slack_bot = req.slack_bot_token.as_deref().unwrap_or("");
+    let slack_app = req.slack_app_token.as_deref().unwrap_or("");
+    if !slack_bot.is_empty() || !slack_app.is_empty() {
+        toml.push_str("\n[slack]\n");
+        if !slack_bot.is_empty() {
+            toml.push_str(&format!("bot_token = \"{}\"\n", slack_bot));
+        }
+        if !slack_app.is_empty() {
+            toml.push_str(&format!("app_token = \"{}\"\n", slack_app));
+        }
+    }
 
     toml.push_str("\n[claude]\n");
     if let Some(ref wd) = req.working_dir {

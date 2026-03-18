@@ -503,14 +503,24 @@
       </select>
     </div>
 
-    <h3 class="section-title">Telegram</h3>
+    <h3 class="section-title">Telegram (optional)</h3>
     <div class="field">
-      <span class="field-label">Bot Token</span>
+      <span class="field-label">Bot Token <span style="color:var(--text-dim)">(from @BotFather, leave empty to disable)</span></span>
       <input id="c-token" class="field-input mono" placeholder="123456:ABC-DEF...">
     </div>
     <div class="field">
       <span class="field-label">Allowed Chat IDs <span style="color:var(--text-dim)">(comma-separated, empty = all)</span></span>
       <input id="c-allow" class="field-input mono" placeholder="123456789, 987654321">
+    </div>
+
+    <h3 class="section-title">Slack (optional)</h3>
+    <div class="field">
+      <span class="field-label">Bot Token <span style="color:var(--text-dim)">(xoxb-..., leave empty to disable)</span></span>
+      <input id="c-slack-bot" class="field-input mono" placeholder="xoxb-...">
+    </div>
+    <div class="field">
+      <span class="field-label">App Token <span style="color:var(--text-dim)">(xapp-..., for Socket Mode)</span></span>
+      <input id="c-slack-app" class="field-input mono" placeholder="xapp-...">
     </div>
 
     <h3 class="section-title">Workspace</h3>
@@ -1110,6 +1120,8 @@ async function showConfigModal(antId) {
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
+      document.getElementById('c-slack-bot').value = cfg.slack_bot_token || '';
+      document.getElementById('c-slack-app').value = cfg.slack_app_token || '';
       document.getElementById('c-backup-hrs').value = cfg.backup_interval_hours || 0;
       document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
       document.getElementById('c-prompt').value = cfg.system_prompt || '';
@@ -1141,6 +1153,8 @@ async function saveConfig() {
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),
+    slack_bot_token: document.getElementById('c-slack-bot').value.trim(),
+    slack_app_token: document.getElementById('c-slack-app').value.trim(),
     skip_permissions: mode === 'claude' || mode === 'ai',
     backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
     backup_remote: document.getElementById('c-backup-remote').value.trim(),
