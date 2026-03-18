@@ -41,13 +41,11 @@ pub async fn run_bot(
         Arc::new(Mutex::new(VecDeque::new()));
 
     // Telegram plugin (optional — only if token is configured).
-    let has_telegram = cfg.telegram.token.is_some() || std::env::var("TELOXIDE_TOKEN").is_ok();
-    let (tg_sender, tg_id) = if has_telegram {
-        if let Some(token) = cfg.telegram.token.as_ref() {
-            std::env::set_var("TELOXIDE_TOKEN", token);
-        }
+    let telegram_token = cfg.telegram.token.clone()
+        .or_else(|| std::env::var("TELOXIDE_TOKEN").ok());
+    let (tg_sender, tg_id) = if let Some(token) = telegram_token {
         let telegram_plugin = plugins::telegram_bot::TelegramPlugin::new(
-            0, &rt, cfg.telegram.allow.clone(), use_ai_routing, message_queue.clone(),
+            0, &rt, token, cfg.telegram.allow.clone(), use_ai_routing, message_queue.clone(),
         );
         let sender = telegram_plugin.outgoing_sender();
         let id = bus.register_plugin(Box::new(telegram_plugin));

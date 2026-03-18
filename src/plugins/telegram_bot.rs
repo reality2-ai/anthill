@@ -46,14 +46,14 @@ impl TelegramPlugin {
     ///
     /// `rt` is the tokio runtime handle for spawning the bot task.
     /// `allowed_chat_ids` restricts which chats can interact.
-    pub fn new(id: PluginId, rt: &tokio::runtime::Handle, allowed_chat_ids: Vec<i64>, ai_mode: bool, message_queue: MessageQueue) -> Self {
+    pub fn new(id: PluginId, rt: &tokio::runtime::Handle, token: String, allowed_chat_ids: Vec<i64>, ai_mode: bool, message_queue: MessageQueue) -> Self {
         let (in_tx, in_rx) = mpsc::channel::<IncomingMessage>(64);
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(i64, String)>();
 
         let allowed = allowed_chat_ids.clone();
 
         rt.spawn(async move {
-            let bot = Bot::from_env();
+            let bot = Bot::new(token);
 
             // Spawn outgoing message sender.
             let bot_out = bot.clone();
