@@ -48,33 +48,31 @@ Anthill is the first production application of R2 outside sensor networks. The s
 ```mermaid
 graph LR
     subgraph Viewers
-        Phone["📱 Phone<br/>(browser)"]
-        Laptop["💻 Laptop<br/>(browser)"]
-        TG["📨 Telegram"]
+        Phone[Phone browser]
+        Laptop[Laptop browser]
+        TG[Telegram app]
     end
 
-    subgraph Queen["🐜 Server (the Queen)"]
-        subgraph Plugins["Plugins (I/O)"]
-            WP["WebPlugin<br/>WebSocket + API"]
-            TP["TelegramPlugin<br/>Bot API + data plane"]
-            CP["ClaudeCliPlugin<br/>worker · tasks · stats"]
+    subgraph Server[Server - the Queen]
+        subgraph Plugins[Plugins - all I/O]
+            WP[WebPlugin]
+            TP[TelegramPlugin]
+            CP[ClaudeCliPlugin]
         end
-        subgraph Sentants["Sentants (pure FSMs)"]
-            CS["ClaudeCliSentant<br/>decisions only"]
+        subgraph FSMs[Sentants - pure FSMs]
+            CS[ClaudeCliSentant]
         end
-        subgraph Worker["Claude Code"]
-            CW["claude -p<br/>(concurrent tasks)"]
-        end
+        CW[Claude Code]
     end
 
-    Phone -- "trust group<br/>auth" --> WP
-    Laptop -- "trust group<br/>auth" --> WP
+    Phone -->|trust group auth| WP
+    Laptop -->|trust group auth| WP
     TG --> TP
-    WP -- "events<br/>(< 256 bytes)" --> CS
-    TP -- "events<br/>(< 256 bytes)" --> CS
-    CS -- "Action::plugin_call" --> CP
-    CP -- "data plane<br/>(full text)" --> TP
-    CP -- "data plane" --> WP
+    WP -->|events - 12 bytes| CS
+    TP -->|events - 12 bytes| CS
+    CS -->|plugin_call| CP
+    CP -->|data plane| TP
+    CP -->|data plane| WP
     CP --> CW
 ```
 

@@ -65,11 +65,11 @@ The server is the **queen** — it exists the moment Anthill starts. Browsers an
 
 ```mermaid
 sequenceDiagram
-    participant User as User (Telegram/Web)
+    participant User as User
     participant TP as TelegramPlugin
-    participant MQ as MessageQueue<br/>(data plane)
-    participant Bus as Event Bus<br/>(< 256 bytes)
-    participant S as ClaudeCliSentant<br/>(pure FSM)
+    participant MQ as MessageQueue
+    participant Bus as Event Bus
+    participant S as ClaudeCliSentant
     participant CP as ClaudeCliPlugin
     participant C as Claude Code
 

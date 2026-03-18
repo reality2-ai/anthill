@@ -6,18 +6,18 @@ Anthill implements R2-TRUST — the same provisioning model designed for IoT sen
 
 ```mermaid
 graph TD
-    subgraph TG["Trust Group (colony)"]
-        Queen["🐜 Server<br/>(the Queen)<br/>colony.key"]
-        D1["📱 Phone<br/>credential in localStorage"]
-        D2["💻 Laptop<br/>credential in localStorage"]
+    subgraph TG[Trust Group - colony]
+        Queen[Server - the Queen<br/>colony.key]
+        D1[Phone<br/>credential in localStorage]
+        D2[Laptop<br/>credential in localStorage]
     end
 
-    Admin["Admin terminal"] -- "anthill --join-code" --> Queen
-    Queen -- "join code<br/>(5 min, one-use)" --> D1
-    D1 -- "X-Credential header<br/>on every request" --> Queen
-    D2 -- "X-Credential header" --> Queen
+    Admin[Admin terminal] -->|anthill --join-code| Queen
+    Queen -->|join code, 5 min, one-use| D1
+    D1 -->|X-Credential header| Queen
+    D2 -->|X-Credential header| Queen
 
-    Outside["🚫 Unauthenticated<br/>browser"] -. "401 Unauthorized" .-> Queen
+    Outside[Unauthenticated browser] -.->|401 Unauthorized| Queen
 ```
 
 ### How it works
