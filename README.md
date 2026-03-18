@@ -91,6 +91,21 @@ Anthill is the first production application of R2 outside sensor networks. The s
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Security](docs/security.md) | Trust groups, device provisioning, access control |
 
+## Why not just use OpenClaw?
+
+[OpenClaw](https://www.zdnet.com/article/openclaw-moltbot-clawdbot-5-reasons-viral-ai-agent-security-nightmare/) (formerly Clawdbot/Moltbot) went viral as an "AI that actually does things" — but security researchers have [flagged serious concerns](https://www.zdnet.com/article/openclaw-moltbot-clawdbot-5-reasons-viral-ai-agent-security-nightmare/). Anthill addresses each one through its R2 architecture:
+
+| OpenClaw problem | Anthill approach |
+|---|---|
+| **Exposed credentials** — API keys and tokens leaked via misconfigured instances with no auth | Trust group model — colony.key never leaves the server, every API call requires a provisioned credential, join codes expire in 5 minutes |
+| **No authentication** — hundreds of instances found open on the internet | Auth middleware on every endpoint — no credential = 401. Web dashboard requires join code to access |
+| **Full system access** — grants broad permissions with no isolation | Each ANT has its own workspace directory. Plugins handle I/O — sentants never touch raw data. Access restricted via Telegram allow-list and trust group |
+| **Prompt injection** — malicious content in emails/web pages can hijack the agent | Sentants only see small event payloads (IDs, codes). Untrusted content flows through the plugin data plane, never through the decision layer. The 256-byte event limit makes injection via events structurally impossible |
+| **Malicious plugins/skills** — fake extensions and backdoored skills circulating | No plugin marketplace. Plugins are compiled into the binary from source. You audit what you run |
+| **Viral fakes** — scam repos, fake tokens, impostor extensions | Self-hosted single binary. No app store, no extensions, no third-party skill downloads |
+
+The fundamental difference: OpenClaw gives an AI agent broad access and hopes nothing goes wrong. Anthill uses R2's architecture to enforce separation — sentants make decisions, plugins handle data, trust groups control access. The security is structural, not aspirational.
+
 ## License
 
 MIT OR Apache-2.0
