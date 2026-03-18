@@ -21,6 +21,9 @@ const TELEGRAM_CHUNK_MAX: usize = 4000;
 /// Debounce delay in milliseconds.
 const DEBOUNCE_MS: u32 = 500;
 
+// TODO: This sentant holds a Telegram channel (violation of R2 pure FSM principle).
+// The chunking and Telegram sending should move to a ChunkerPlugin.
+// This is only used in raw mode which is a secondary concern.
 pub struct ChunkerSentant {
     state: StateId,
     buffer: Vec<u8>,

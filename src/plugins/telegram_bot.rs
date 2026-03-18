@@ -6,6 +6,8 @@
 //!   0x02 — send monospace message (same payload, wrapped in ```...```)
 
 use r2_engine::plugin::*;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use teloxide::prelude::*;
 use teloxide::types::{ChatAction, ChatId, ParseMode};
 use tokio::sync::mpsc;
@@ -22,6 +24,10 @@ struct IncomingMessage {
     chat_id: i64,
 }
 
+/// Shared message queue — data plane between Telegram and Claude plugins.
+/// Full message text stored here; events carry only IDs.
+pub type MessageQueue = Arc<Mutex<VecDeque<(i64, String)>>>;
+
 pub struct TelegramPlugin {
     id: PluginId,
     incoming_rx: mpsc::Receiver<IncomingMessage>,
@@ -30,6 +36,8 @@ pub struct TelegramPlugin {
     poll_buf: Vec<u8>,
     /// When true, emit RELAY_COMMAND instead of RELAY_INPUT.
     ai_mode: bool,
+    /// Data plane: full message text stored here for the Claude plugin to consume.
+    message_queue: MessageQueue,
 }
 
 impl TelegramPlugin {
@@ -37,7 +45,7 @@ impl TelegramPlugin {
     ///
     /// `rt` is the tokio runtime handle for spawning the bot task.
     /// `allowed_chat_ids` restricts which chats can interact.
-    pub fn new(id: PluginId, rt: &tokio::runtime::Handle, allowed_chat_ids: Vec<i64>, ai_mode: bool) -> Self {
+    pub fn new(id: PluginId, rt: &tokio::runtime::Handle, allowed_chat_ids: Vec<i64>, ai_mode: bool, message_queue: MessageQueue) -> Self {
         let (in_tx, in_rx) = mpsc::channel::<IncomingMessage>(64);
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(i64, String)>();
 
@@ -104,6 +112,7 @@ impl TelegramPlugin {
             outgoing_tx: out_tx,
             poll_buf: Vec::new(),
             ai_mode,
+            message_queue,
         }
     }
 
@@ -172,46 +181,50 @@ impl Plugin for TelegramPlugin {
     fn poll(&mut self) -> Option<(u32, &[u8])> {
         match self.incoming_rx.try_recv() {
             Ok(msg) => {
-                // Encode as CBOR: { 0: text(command), 1: uint(chat_id) }
-                self.poll_buf.clear();
-                let text_bytes = msg.text.as_bytes();
+                if self.ai_mode {
+                    // AI/Claude mode: store full text in data plane, emit small event.
+                    // Parse command type from the text.
+                    let cmd_type = classify_command(&msg.text);
+                    let cancel_task_id = parse_cancel_id(&msg.text);
 
-                // map(2)
-                self.poll_buf.push(0xA2);
-                // key 0, value text
-                self.poll_buf.push(0x00);
-                let len = text_bytes.len();
-                if len <= 23 {
-                    self.poll_buf.push(0x60 | len as u8);
-                } else if len <= 255 {
-                    self.poll_buf.push(0x78);
-                    self.poll_buf.push(len as u8);
-                } else {
-                    self.poll_buf.push(0x79);
-                    self.poll_buf.extend_from_slice(&(len as u16).to_be_bytes());
-                }
-                self.poll_buf.extend_from_slice(text_bytes);
-                // key 1, value uint(chat_id)
-                self.poll_buf.push(0x01);
-                let cid = msg.chat_id as u64;
-                if cid <= 23 {
-                    self.poll_buf.push(cid as u8);
-                } else if cid <= 0xFF {
-                    self.poll_buf.push(0x18);
-                    self.poll_buf.push(cid as u8);
-                } else if cid <= 0xFFFF {
-                    self.poll_buf.push(0x19);
-                    self.poll_buf.extend_from_slice(&(cid as u16).to_be_bytes());
-                } else if cid <= 0xFFFF_FFFF {
-                    self.poll_buf.push(0x1A);
-                    self.poll_buf.extend_from_slice(&(cid as u32).to_be_bytes());
-                } else {
-                    self.poll_buf.push(0x1B);
-                    self.poll_buf.extend_from_slice(&cid.to_be_bytes());
-                }
+                    // Store full text in the shared message queue (data plane).
+                    if let Ok(mut q) = self.message_queue.lock() {
+                        q.push_back((msg.chat_id, msg.text));
+                    }
 
-                let event = if self.ai_mode { RELAY_COMMAND } else { RELAY_INPUT };
-                Some((event, &self.poll_buf))
+                    // Emit small event: { 0: uint(cmd_type), 1: uint(chat_id), 2: uint(cancel_task_id) }
+                    self.poll_buf.clear();
+                    self.poll_buf.push(0xA3); // map(3)
+                    self.poll_buf.push(0x00); // key 0
+                    self.poll_buf.push(cmd_type); // cmd_type fits in single byte
+                    self.poll_buf.push(0x01); // key 1
+                    encode_uint(&mut self.poll_buf, msg.chat_id as u64);
+                    self.poll_buf.push(0x02); // key 2
+                    encode_uint(&mut self.poll_buf, cancel_task_id as u64);
+
+                    Some((RELAY_COMMAND, &self.poll_buf))
+                } else {
+                    // Raw mode: carry text in the event (for terminal sentant).
+                    self.poll_buf.clear();
+                    let text_bytes = msg.text.as_bytes();
+                    self.poll_buf.push(0xA2); // map(2)
+                    self.poll_buf.push(0x00); // key 0
+                    let len = text_bytes.len();
+                    if len <= 23 {
+                        self.poll_buf.push(0x60 | len as u8);
+                    } else if len <= 255 {
+                        self.poll_buf.push(0x78);
+                        self.poll_buf.push(len as u8);
+                    } else {
+                        self.poll_buf.push(0x79);
+                        self.poll_buf.extend_from_slice(&(len as u16).to_be_bytes());
+                    }
+                    self.poll_buf.extend_from_slice(text_bytes);
+                    self.poll_buf.push(0x01); // key 1
+                    encode_uint(&mut self.poll_buf, msg.chat_id as u64);
+
+                    Some((RELAY_INPUT, &self.poll_buf))
+                }
             }
             Err(_) => None,
         }
@@ -226,6 +239,50 @@ impl Plugin for TelegramPlugin {
 ///
 /// Supports: headings, bold, italic, inline code, code blocks,
 /// bullet lists, numbered lists, links, strikethrough, horizontal rules.
+/// Classify a user message into a command type for the event payload.
+fn classify_command(text: &str) -> u8 {
+    let trimmed = text.trim();
+    match trimmed {
+        "/help" | "/start" => 1,
+        "/ants" | "/bots" | "/status" => 2,
+        "/usage" => 3,
+        "/new" => 6,
+        s if s == "/cancel all" => 5,
+        s if s == "/cancel" || s.starts_with("/cancel ") => 4,
+        _ => 0, // regular message
+    }
+}
+
+/// Parse a cancel task ID from "/cancel 42".
+fn parse_cancel_id(text: &str) -> u32 {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("/cancel ") {
+        let rest = rest.trim();
+        if rest != "all" {
+            return rest.parse().unwrap_or(0);
+        }
+    }
+    0
+}
+
+fn encode_uint(buf: &mut Vec<u8>, v: u64) {
+    if v <= 23 {
+        buf.push(v as u8);
+    } else if v <= 0xFF {
+        buf.push(0x18);
+        buf.push(v as u8);
+    } else if v <= 0xFFFF {
+        buf.push(0x19);
+        buf.extend_from_slice(&(v as u16).to_be_bytes());
+    } else if v <= 0xFFFF_FFFF {
+        buf.push(0x1A);
+        buf.extend_from_slice(&(v as u32).to_be_bytes());
+    } else {
+        buf.push(0x1B);
+        buf.extend_from_slice(&v.to_be_bytes());
+    }
+}
+
 fn markdown_to_telegram_html(md: &str) -> String {
     let mut out = String::with_capacity(md.len() + 256);
     let mut lines = md.lines().peekable();

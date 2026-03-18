@@ -36,20 +36,24 @@ pub async fn run_bot(
 
     let mut bus = EventBus::new();
 
+    // Shared message queue — data plane between Telegram and Claude plugins.
+    let message_queue: plugins::telegram_bot::MessageQueue =
+        Arc::new(Mutex::new(VecDeque::new()));
+
     // Telegram plugin (optional — only if token is configured).
     let has_telegram = cfg.telegram.token.is_some() || std::env::var("TELOXIDE_TOKEN").is_ok();
     let (tg_sender, tg_id) = if has_telegram {
         if let Some(token) = cfg.telegram.token.as_ref() {
             std::env::set_var("TELOXIDE_TOKEN", token);
         }
-        let telegram_plugin =
-            plugins::telegram_bot::TelegramPlugin::new(0, &rt, cfg.telegram.allow.clone(), use_ai_routing);
+        let telegram_plugin = plugins::telegram_bot::TelegramPlugin::new(
+            0, &rt, cfg.telegram.allow.clone(), use_ai_routing, message_queue.clone(),
+        );
         let sender = telegram_plugin.outgoing_sender();
         let id = bus.register_plugin(Box::new(telegram_plugin));
         log::info!("[{}] Telegram enabled", bot_name);
         (sender, Some(id))
     } else {
-        // No Telegram — create a dummy sender that drops messages.
         let (tx, _rx) = mpsc::unbounded_channel();
         log::info!("[{}] Telegram disabled (no token) — web dashboard only", bot_name);
         (tx, None)
@@ -65,7 +69,7 @@ pub async fn run_bot(
             // Create event broadcast channel.
             let (event_tx, _) = broadcast::channel::<registry::WsEvent>(256);
 
-            // Compute working directory early (needed for registry and worker).
+            // Compute working directory.
             let working_dir = cfg
                 .claude
                 .working_dir
@@ -102,18 +106,20 @@ pub async fn run_bot(
                 reg.bots.write().await.insert(bot_name.clone(), handle);
             }
 
-            let cli_plugin =
-                plugins::claude_cli::ClaudeCliPlugin::new(1, Arc::clone(&response_queue));
-            bus.register_plugin(Box::new(cli_plugin));
-
-            let worker_tg_sender = tg_sender.clone();
-            let cli_sentant = sentants::claude_cli::ClaudeCliSentant::new(
-                request_tx,
+            // Claude CLI plugin — holds all I/O state.
+            let cli_plugin = plugins::claude_cli::ClaudeCliPlugin::new(
+                1,
                 Arc::clone(&response_queue),
-                tg_sender,
-                Arc::clone(&stats),
+                request_tx,
+                tg_sender.clone(),
                 Arc::clone(&tasks),
+                Arc::clone(&stats),
+                message_queue.clone(),
             );
+            let cli_plugin_id = bus.register_plugin(Box::new(cli_plugin));
+
+            // Claude CLI sentant — pure FSM, no I/O.
+            let cli_sentant = sentants::claude_cli::ClaudeCliSentant::new(cli_plugin_id);
             bus.register_sentant(Box::new(cli_sentant));
 
             if let Some(id) = tg_id {
@@ -140,7 +146,7 @@ pub async fn run_bot(
                 response_queue,
                 worker_config,
                 stats,
-                worker_tg_sender,
+                tg_sender,
                 tasks,
                 worker_event_tx,
                 bot_name.clone(),

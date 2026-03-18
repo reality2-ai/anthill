@@ -27,6 +27,10 @@ const COLLECT_DEBOUNCE_MS: u32 = 2000;
 /// Maximum conversation turns to keep for context.
 const MAX_HISTORY: usize = 20;
 
+// TODO: This sentant holds channels and shared state (violation of R2 pure FSM principle).
+// The AI mediation logic should be refactored following the same pattern as claude_cli:
+// move all I/O into an AiPlugin, sentant only emits Action::plugin_call().
+// This is only used in ai mode which is a secondary concern.
 pub struct AiSentant {
     state: StateId,
     chat_id: i64,
