@@ -106,6 +106,52 @@ Anthill is the first production application of R2 outside sensor networks. The s
 
 The fundamental difference: OpenClaw gives an AI agent broad access and hopes nothing goes wrong. Anthill uses R2's architecture to enforce separation — sentants make decisions, plugins handle data, trust groups control access. The security is structural, not aspirational.
 
+## Security layers
+
+Anthill implements defence in depth — multiple independent layers, each with a different job:
+
+| Layer | What it does | Applies to |
+|---|---|---|
+| [Tailscale](https://tailscale.com/) | Network encryption (WireGuard) — only your devices can reach the server | Web dashboard |
+| HTTPS | Transport encryption via Tailscale's automatic certificates | Web dashboard |
+| Trust group | Authentication — devices join with one-time codes, every request verified | Web dashboard |
+| HMAC envelopes | Message integrity — every WebSocket message signed with HMAC-SHA256, timestamped to prevent replay | Web dashboard |
+| AES-256-GCM | Payload encryption (available, defence-in-depth) | Web dashboard |
+| R2 architecture | Structural isolation — sentants see only 12-byte decisions, never raw content | All channels |
+
+### The web dashboard is the most secure channel
+
+The web dashboard carries all five security layers. **Use it for sensitive operations** — managing ANTS, editing configs, browsing files, handling credentials.
+
+### Telegram and Slack are convenience channels
+
+Telegram and Slack are useful for quick interactions from your phone, but they are weaker:
+
+| | Web dashboard | Telegram | Slack |
+|---|---|---|---|
+| Network encryption | Tailscale (you control) | Telegram's TLS (they control) | Slack's TLS (they control) |
+| Authentication | Trust group + join codes | Bot token + `allow` list | Bot/app tokens |
+| Message signing | HMAC envelopes | None | None |
+| Payload encryption | AES-256-GCM (available) | None | None |
+| Identity verification | Device credential | Trust Telegram's chat ID | Trust Slack's user ID |
+| Who can read your messages | Only you | Telegram (Meta-adjacent) | Salesforce |
+
+**Risks of Telegram/Slack:**
+- If the bot token leaks, anyone can message your ANT (mitigated by `allow` list on Telegram)
+- Messages pass through third-party servers you don't control
+- No message signing — you trust the platform's claimed sender identity
+- Prompt injection is possible via forwarded messages or channel content
+
+**Mitigations:**
+- Use the `allow` list on Telegram to lock to your chat ID
+- Use private Slack channels with restricted membership
+- The sentant/plugin separation treats all incoming text as untrusted data (never as decisions)
+- Use Telegram/Slack for quick tasks; use the web dashboard for anything sensitive
+
+The long-term vision: R2-WIRE native transport replaces third-party platforms entirely — your phone's hive talks directly to the server's hive over Tailscale with full trust group envelopes. No middlemen.
+
+See [Security](docs/security.md) for full details on trust group provisioning and device management.
+
 ## License
 
 MIT OR Apache-2.0
