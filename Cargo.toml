@@ -16,6 +16,7 @@ r2-engine = { path = "crates/r2-engine", features = ["alloc", "std"] }
 r2-wire   = { path = "crates/r2-wire" }
 r2-fnv    = { path = "crates/r2-fnv" }
 r2-cbor   = { path = "crates/r2-cbor" }
+r2-trust  = { path = "crates/r2-trust", features = ["std"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -47,9 +48,10 @@ tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 
 # Cryptography
+ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
+rand = "0.8"
+chacha20poly1305 = "0.10"
 sha2 = "0.10"
-hmac = "0.12"
-aes-gcm = "0.10"
 
 # QR code generation (for key export)
 qrcode = "0.14"
@@ -64,6 +66,7 @@ members = [
     "crates/r2-wire",
     "crates/r2-fnv",
     "crates/r2-cbor",
+    "crates/r2-trust",
 ]
 
 [workspace.package]

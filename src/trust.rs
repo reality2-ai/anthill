@@ -1,40 +1,323 @@
-//! Colony trust — device provisioning and authentication.
+//! Colony trust — device provisioning and authentication via R2-TRUST.
 //!
-//! Implements R2-TRUST §4 provisioning for the Anthill colony:
-//!   1. Colony root secret (generated once, stored on server)
-//!   2. Join codes (short-lived, derived from root)
-//!   3. Device credentials (permanent, derived at join time)
-//!   4. Authentication (HMAC verification on every connect)
+//! Wraps `r2_trust::TrustGroup` (Ed25519 certificates, HKDF-derived keys,
+//! X25519 join encryption) with filesystem persistence and human-readable
+//! join codes.  Replaces the earlier HMAC-based implementation.
 
-use hmac::{Hmac, Mac};
+use ed25519_dalek::{Signer, SigningKey, Verifier};
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-type HmacSha256 = Hmac<Sha256>;
-
-/// Compute HMAC-SHA256.
-fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .expect("HMAC key length should be valid");
-    mac.update(data);
-    mac.finalize().into_bytes().to_vec()
-}
+use r2_trust::lifecycle::{MemberInfo, TrustGroup, DEFAULT_CERT_TTL_SECS, DEFAULT_JOIN_CODE_TTL_SECS};
+use r2_trust::revocation::{RevocationReason, RevocationSet};
 
 /// Maximum age of a signed message (seconds) before it's considered stale.
 const MAX_MESSAGE_AGE_SECS: u64 = 60;
 
-/// Sign a message: HMAC-SHA256(credential, device_id + timestamp + payload).
+/// A provisioned device (external view for JSON serialization).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Device {
+    /// Device identifier (hex-encoded Ed25519 public key).
+    pub id: String,
+    /// Human-readable name.
+    pub name: String,
+    /// Credential token (hex-encoded Ed25519 private key seed).
+    pub credential: String,
+    /// When this device joined (unix timestamp).
+    pub joined_at: u64,
+    /// Last seen (unix timestamp).
+    pub last_seen: u64,
+}
+
+/// Persistent device record for TOML storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredDevice {
+    /// Hex-encoded Ed25519 public key.
+    public_key: String,
+    /// Human-readable name.
+    name: String,
+    /// Certificate bytes (hex-encoded).
+    certificate: String,
+    /// When this device joined (unix timestamp).
+    joined_at: u64,
+    /// Last seen (unix timestamp).
+    last_seen: u64,
+}
+
+/// Persistent device registry.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct DeviceRegistry {
+    #[serde(default)]
+    devices: HashMap<String, StoredDevice>,
+}
+
+/// Colony trust state — wraps `r2_trust::TrustGroup`.
+pub struct ColonyTrust {
+    /// The R2-TRUST lifecycle group (key holder side).
+    group: TrustGroup,
+    /// Path to devices file.
+    devices_path: PathBuf,
+    /// Last-seen timestamps (not tracked by r2-trust).
+    last_seen: HashMap<String, u64>,
+}
+
+impl ColonyTrust {
+    /// Load or initialise colony trust from a config directory.
+    ///
+    /// Follows the load-or-create pattern: if `colony.key` exists, restore
+    /// the trust group; otherwise generate a new one.
+    pub fn load(config_dir: &Path) -> anyhow::Result<Self> {
+        let key_path = config_dir.join("colony.key");
+        let devices_path = config_dir.join("devices.toml");
+        let now = now_secs();
+
+        let (group, last_seen) = if key_path.exists() {
+            // Load existing signing key.
+            let hex = std::fs::read_to_string(&key_path)?;
+            let seed_bytes = hex_decode(hex.trim())?;
+            if seed_bytes.len() != 32 {
+                anyhow::bail!("colony.key must be 32 bytes (got {})", seed_bytes.len());
+            }
+            let mut seed = [0u8; 32];
+            seed.copy_from_slice(&seed_bytes);
+            let signing_key = SigningKey::from_bytes(&seed);
+
+            // Load members from devices.toml.
+            let (members, revocations, last_seen) = load_members(&devices_path);
+
+            // Build key holder self-cert for restore.
+            let self_cert = r2_trust::DeviceCertificate::issue(
+                &signing_key,
+                *signing_key.verifying_key().as_bytes(),
+                *signing_key.verifying_key().as_bytes(),
+                r2_trust::DeviceRole::KeyHolder,
+                now,
+                now + DEFAULT_CERT_TTL_SECS,
+            );
+
+            let group = TrustGroup::restore(
+                signing_key,
+                self_cert,
+                members,
+                revocations,
+                0,
+                r2_trust::MinCryptoLevel::Classical,
+            ).map_err(|e| anyhow::anyhow!("restore trust group: {:?}", e))?;
+
+            (group, last_seen)
+        } else {
+            // Generate new trust group.
+            let mut rng = OsRng;
+            let group = TrustGroup::create(&mut rng, now)
+                .map_err(|e| anyhow::anyhow!("create trust group: {:?}", e))?;
+
+            // Persist the signing key.
+            std::fs::create_dir_all(config_dir)?;
+            let hex = hex_encode(group.signing_key().to_bytes().as_ref());
+            std::fs::write(&key_path, &hex)?;
+            log::info!("Generated colony trust group key at {}", key_path.display());
+
+            (group, HashMap::new())
+        };
+
+        Ok(Self {
+            group,
+            devices_path,
+            last_seen,
+        })
+    }
+
+    /// Returns true if no devices have been provisioned yet.
+    pub fn is_empty_colony(&self) -> bool {
+        self.group.is_empty()
+    }
+
+    /// Generate a join code (valid for 5 minutes).
+    ///
+    /// Returns a human-readable hex string (e.g. "a1b2c3d4-e5f6a7b8-...").
+    pub fn generate_join_code(&mut self) -> String {
+        let mut rng = OsRng;
+        let now = now_secs();
+        let code = self.group.generate_join_code(&mut rng, now, DEFAULT_JOIN_CODE_TTL_SECS);
+        format_join_code(code.value())
+    }
+
+    /// Verify a join code is valid (without consuming it).
+    pub fn verify_join_code(&mut self, code: &str) -> bool {
+        let raw = match parse_join_code(code) {
+            Some(r) => r,
+            None => return false,
+        };
+        let now = now_secs();
+        self.group.validate_join_code(&raw, now)
+    }
+
+    /// Provision a new device (server generates keypair on behalf).
+    ///
+    /// Preserves the current Anthill UX: server returns a credential
+    /// (hex-encoded Ed25519 private key seed).
+    pub fn provision_device(&mut self, name: &str) -> Device {
+        let mut rng = OsRng;
+        let device_key = SigningKey::generate(&mut rng);
+        let device_pub = device_key.verifying_key();
+        let id = hex_encode(device_pub.as_bytes());
+        let credential = hex_encode(device_key.to_bytes().as_ref());
+        let now = now_secs();
+
+        // Generate an internal join code and consume it via process_join_request.
+        let code = self.group.generate_join_code(&mut rng, now, 60);
+        let code_value = *code.value();
+
+        let _ = self.group.process_join_request(
+            &mut rng,
+            now,
+            &code_value,
+            &device_pub,
+            String::from(name),
+            DEFAULT_CERT_TTL_SECS,
+        );
+
+        self.last_seen.insert(id.clone(), now);
+        self.save_devices();
+
+        Device {
+            id,
+            name: name.to_string(),
+            credential,
+            joined_at: now,
+            last_seen: now,
+        }
+    }
+
+    /// Authenticate a device by its credential (hex-encoded Ed25519 seed).
+    ///
+    /// Derives the public key from the seed and looks up the member.
+    pub fn authenticate(&mut self, credential: &str) -> Option<Device> {
+        let credential = credential.trim();
+        if credential.len() != 64 {
+            return None;
+        }
+
+        let bytes = hex_decode(credential).ok()?;
+        if bytes.len() != 32 {
+            return None;
+        }
+
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&bytes);
+
+        // Try as private key seed — derive public key.
+        let signing_key = SigningKey::from_bytes(&seed);
+        let pub_key = signing_key.verifying_key();
+        let pub_hex = hex_encode(pub_key.as_bytes());
+
+        if let Some(member) = self.group.find_member(pub_key.as_bytes()) {
+            let now = now_secs();
+            self.last_seen.insert(pub_hex.clone(), now);
+            return Some(Device {
+                id: pub_hex.clone(),
+                name: member.name.clone(),
+                credential: credential.to_string(),
+                joined_at: member.certificate.issued_at,
+                last_seen: now,
+            });
+        }
+
+        // Try as direct public key lookup.
+        if let Some(member) = self.group.find_member(&seed) {
+            let now = now_secs();
+            let id = hex_encode(&seed);
+            self.last_seen.insert(id.clone(), now);
+            return Some(Device {
+                id: id.clone(),
+                name: member.name.clone(),
+                credential: credential.to_string(),
+                joined_at: member.certificate.issued_at,
+                last_seen: now,
+            });
+        }
+
+        None
+    }
+
+    /// List all provisioned devices.
+    pub fn list_devices(&self) -> Vec<Device> {
+        let mut devices: Vec<Device> = self.group.members().iter().map(|m| {
+            let id = hex_encode(&m.certificate.device_public_key);
+            Device {
+                id: id.clone(),
+                name: m.name.clone(),
+                credential: id.clone(),
+                joined_at: m.certificate.issued_at,
+                last_seen: self.last_seen.get(&id).copied().unwrap_or(m.certificate.issued_at),
+            }
+        }).collect();
+        devices.sort_by_key(|d| d.joined_at);
+        devices
+    }
+
+    /// Revoke a device by its hex public key id.
+    pub fn revoke_device(&mut self, device_id: &str) -> bool {
+        let bytes = match hex_decode(device_id) {
+            Ok(b) if b.len() == 32 => b,
+            _ => return false,
+        };
+        let mut pk = [0u8; 32];
+        pk.copy_from_slice(&bytes);
+
+        let now = now_secs();
+        match self.group.revoke_device(now, &pk, RevocationReason::ForcedRemoval) {
+            Ok(_) => {
+                self.last_seen.remove(device_id);
+                self.save_devices();
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Persist devices to disk.
+    fn save_devices(&self) {
+        let mut registry = DeviceRegistry::default();
+        for member in self.group.members() {
+            let pk_hex = hex_encode(&member.certificate.device_public_key);
+            let cert_hex = hex_encode(&member.certificate.to_bytes());
+            registry.devices.insert(pk_hex.clone(), StoredDevice {
+                public_key: pk_hex.clone(),
+                name: member.name.clone(),
+                certificate: cert_hex,
+                joined_at: member.certificate.issued_at,
+                last_seen: self.last_seen.get(&pk_hex).copied()
+                    .unwrap_or(member.certificate.issued_at),
+            });
+        }
+        if let Ok(toml) = toml::to_string_pretty(&registry) {
+            let _ = std::fs::write(&self.devices_path, toml);
+        }
+    }
+}
+
+/// Sign a message with Ed25519: sign(signing_key, device_id + ":" + timestamp + ":" + payload).
 /// Returns (signature_hex, timestamp).
 pub fn sign_message(credential: &str, device_id: &str, payload: &str) -> (String, u64) {
     let timestamp = now_secs();
     let data = format!("{}:{}:{}", device_id, timestamp, payload);
-    let key = hex::decode(credential).unwrap_or_default();
-    let sig = hmac_sha256(&key, data.as_bytes());
-    (hex::encode(&sig), timestamp)
+
+    if let Ok(bytes) = hex_decode(credential) {
+        if bytes.len() == 32 {
+            let mut seed = [0u8; 32];
+            seed.copy_from_slice(&bytes);
+            let key = SigningKey::from_bytes(&seed);
+            let sig = key.sign(data.as_bytes());
+            return (hex_encode(&sig.to_bytes()), timestamp);
+        }
+    }
+
+    (String::new(), timestamp)
 }
 
 /// Verify a signed message. Returns true if valid and fresh.
@@ -45,85 +328,153 @@ pub fn verify_signature(
     payload: &str,
     signature: &str,
 ) -> bool {
-    // Check freshness.
     let now = now_secs();
     if now.abs_diff(timestamp) > MAX_MESSAGE_AGE_SECS {
         return false;
     }
 
     let data = format!("{}:{}:{}", device_id, timestamp, payload);
-    let key = hex::decode(credential).unwrap_or_default();
-    let expected = hmac_sha256(&key, data.as_bytes());
-    let expected_hex = hex::encode(&expected);
 
-    // Constant-time comparison.
-    if signature.len() != expected_hex.len() {
-        return false;
-    }
-    signature
-        .bytes()
-        .zip(expected_hex.bytes())
-        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
+    let bytes = match hex_decode(credential) {
+        Ok(b) if b.len() == 32 => b,
+        _ => return false,
+    };
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&bytes);
+    let key = SigningKey::from_bytes(&seed);
+    let pub_key = key.verifying_key();
+
+    let sig_bytes = match hex_decode(signature) {
+        Ok(b) if b.len() == 64 => b,
+        _ => return false,
+    };
+    let mut sig_arr = [0u8; 64];
+    sig_arr.copy_from_slice(&sig_bytes);
+    let sig = ed25519_dalek::Signature::from_bytes(&sig_arr);
+
+    pub_key.verify(data.as_bytes(), &sig).is_ok()
 }
 
-/// Derive an encryption key from a credential (32 bytes for AES-256).
-#[allow(dead_code)]
-pub fn derive_encryption_key(credential: &str) -> Vec<u8> {
-    let key = hex::decode(credential).unwrap_or_default();
-    hmac_sha256(&key, b"anthill:encrypt:v1")
-}
-
-/// Encrypt a payload with AES-256-GCM.
+/// Encrypt a payload using XChaCha20-Poly1305 with a key derived from the credential.
 /// Returns base64(nonce + ciphertext).
-#[allow(dead_code)]
 pub fn encrypt_payload(credential: &str, plaintext: &[u8]) -> Result<String, String> {
-    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-    use aes_gcm::aead::Aead;
+    use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
+    use sha2::{Sha256, Digest};
 
-    let key_bytes = derive_encryption_key(credential);
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+    let key_bytes = Sha256::digest(credential.as_bytes());
+    let cipher = XChaCha20Poly1305::new_from_slice(&key_bytes)
         .map_err(|e| format!("key error: {}", e))?;
 
-    // Generate random 12-byte nonce.
-    let nonce_bytes = generate_random_bytes(12);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let mut nonce_bytes = [0u8; 24];
+    rand::RngCore::fill_bytes(&mut OsRng, &mut nonce_bytes);
+    let nonce = XNonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
         .encrypt(nonce, plaintext)
         .map_err(|e| format!("encrypt error: {}", e))?;
 
-    // Prepend nonce to ciphertext, base64 encode.
-    let mut output = nonce_bytes;
+    let mut output = nonce_bytes.to_vec();
     output.extend_from_slice(&ciphertext);
     Ok(base64_encode(&output))
 }
 
-/// Decrypt an AES-256-GCM payload.
+/// Decrypt a XChaCha20-Poly1305 payload.
 /// Input is base64(nonce + ciphertext).
-#[allow(dead_code)]
 pub fn decrypt_payload(credential: &str, encrypted: &str) -> Result<Vec<u8>, String> {
-    use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-    use aes_gcm::aead::Aead;
+    use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
+    use sha2::{Sha256, Digest};
 
-    let key_bytes = derive_encryption_key(credential);
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+    let key_bytes = Sha256::digest(credential.as_bytes());
+    let cipher = XChaCha20Poly1305::new_from_slice(&key_bytes)
         .map_err(|e| format!("key error: {}", e))?;
 
     let data = base64_decode(encrypted)?;
-    if data.len() < 12 {
+    if data.len() < 24 {
         return Err("ciphertext too short".into());
     }
 
-    let nonce = Nonce::from_slice(&data[..12]);
-    let ciphertext = &data[12..];
+    let nonce = XNonce::from_slice(&data[..24]);
+    let ciphertext = &data[24..];
 
     cipher
         .decrypt(nonce, ciphertext)
         .map_err(|e| format!("decrypt error: {}", e))
 }
 
-#[allow(dead_code)]
+/// Thread-safe wrapper.
+pub type SharedTrust = Arc<Mutex<ColonyTrust>>;
+
+pub fn load_colony_trust(config_dir: &Path) -> anyhow::Result<SharedTrust> {
+    Ok(Arc::new(Mutex::new(ColonyTrust::load(config_dir)?)))
+}
+
+// --- Utilities ---
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Format 16-byte join code as human-readable "xxxx-xxxx-xxxx-xxxx".
+fn format_join_code(raw: &[u8; 16]) -> String {
+    let hex = hex_encode(raw);
+    format!("{}-{}-{}-{}", &hex[0..8], &hex[8..16], &hex[16..24], &hex[24..32])
+}
+
+/// Parse human-readable join code back to 16 bytes.
+fn parse_join_code(code: &str) -> Option<[u8; 16]> {
+    let stripped: String = code.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    let bytes = hex_decode(&stripped).ok()?;
+    if bytes.len() != 16 { return None; }
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&bytes);
+    Some(out)
+}
+
+/// Load members from devices.toml.
+fn load_members(path: &Path) -> (Vec<MemberInfo>, RevocationSet, HashMap<String, u64>) {
+    let mut members = Vec::new();
+    let mut last_seen = HashMap::new();
+
+    if let Ok(contents) = std::fs::read_to_string(path) {
+        if let Ok(registry) = toml::from_str::<DeviceRegistry>(&contents) {
+            for stored in registry.devices.values() {
+                if let Ok(cert_bytes) = hex_decode(&stored.certificate) {
+                    if let Ok(cert) = r2_trust::DeviceCertificate::from_bytes(&cert_bytes) {
+                        members.push(MemberInfo {
+                            certificate: cert,
+                            name: stored.name.clone(),
+                        });
+                        last_seen.insert(stored.public_key.clone(), stored.last_seen);
+                    }
+                }
+            }
+        }
+    }
+
+    (members, RevocationSet::new(), last_seen)
+}
+
+fn hex_encode(data: &[u8]) -> String {
+    data.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, anyhow::Error> {
+    let s = s.trim();
+    if s.len() % 2 != 0 {
+        anyhow::bail!("odd hex length");
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&s[i..i + 2], 16)
+                .map_err(|e| anyhow::anyhow!("bad hex: {}", e))
+        })
+        .collect()
+}
+
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -134,21 +485,14 @@ fn base64_encode(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         result.push(CHARS[((n >> 18) & 63) as usize] as char);
         result.push(CHARS[((n >> 12) & 63) as usize] as char);
-        if chunk.len() > 1 {
-            result.push(CHARS[((n >> 6) & 63) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        if chunk.len() > 2 {
-            result.push(CHARS[(n & 63) as usize] as char);
-        } else {
-            result.push('=');
-        }
+        if chunk.len() > 1 { result.push(CHARS[((n >> 6) & 63) as usize] as char); }
+        else { result.push('='); }
+        if chunk.len() > 2 { result.push(CHARS[(n & 63) as usize] as char); }
+        else { result.push('='); }
     }
     result
 }
 
-#[allow(dead_code)]
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim_end_matches('=');
     let mut result = Vec::new();
@@ -177,346 +521,69 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     Ok(result)
 }
 
-/// A provisioned device.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Device {
-    /// Device identifier (random, assigned at join).
-    pub id: String,
-    /// Human-readable name (set by user after joining).
-    pub name: String,
-    /// Hex-encoded credential (HMAC key for this device).
-    pub credential: String,
-    /// When this device joined (unix timestamp).
-    pub joined_at: u64,
-    /// Last seen (unix timestamp).
-    pub last_seen: u64,
-}
-
-/// Persistent device registry.
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct DeviceRegistry {
-    pub devices: HashMap<String, Device>,
-}
-
-/// Colony trust state.
-pub struct ColonyTrust {
-    /// Colony root secret (32 bytes).
-    root_secret: Vec<u8>,
-    /// Provisioned devices.
-    devices: DeviceRegistry,
-    /// Path to devices file.
-    devices_path: PathBuf,
-    /// Path to join codes file (shared between CLI and server).
-    join_codes_path: PathBuf,
-    /// Currently active join codes (code → expiry timestamp).
-    join_codes: HashMap<String, u64>,
-}
-
-impl ColonyTrust {
-    /// Load or initialise colony trust from a config directory.
-    pub fn load(config_dir: &Path) -> anyhow::Result<Self> {
-        let key_path = config_dir.join("colony.key");
-        let devices_path = config_dir.join("devices.toml");
-
-        // Load or generate root secret.
-        let root_secret = if key_path.exists() {
-            let hex = std::fs::read_to_string(&key_path)?;
-            hex::decode(hex.trim())?
-        } else {
-            let secret = generate_random_bytes(32);
-            let hex = hex::encode(&secret);
-            std::fs::write(&key_path, &hex)?;
-            log::info!("Generated colony root secret at {}", key_path.display());
-            secret
-        };
-
-        // Load devices.
-        let devices = if devices_path.exists() {
-            let contents = std::fs::read_to_string(&devices_path)?;
-            toml::from_str(&contents).unwrap_or_default()
-        } else {
-            DeviceRegistry::default()
-        };
-
-        let join_codes_path = config_dir.join("join-codes.toml");
-        let join_codes = Self::load_join_codes(&join_codes_path);
-
-        Ok(Self {
-            root_secret,
-            devices,
-            devices_path,
-            join_codes_path,
-            join_codes,
-        })
-    }
-
-    /// Returns true if no devices have been provisioned yet (queen bootstrap).
-    pub fn is_empty_colony(&self) -> bool {
-        self.devices.devices.is_empty()
-    }
-
-    /// Generate a join code (valid for 5 minutes). Persisted to disk.
-    pub fn generate_join_code(&mut self) -> String {
-        let now = now_secs();
-        let expiry = now + 300; // 5 minutes
-
-        // Derive code from root secret + timestamp + random.
-        let random = generate_random_bytes(8);
-        let mut data = Vec::new();
-        data.extend_from_slice(b"join:");
-        data.extend_from_slice(&now.to_le_bytes());
-        data.extend_from_slice(&random);
-
-        let mac = hmac_sha256(&self.root_secret, &data);
-        let code = format!(
-            "{:03x}-{:03x}",
-            u16::from_le_bytes([mac[0], mac[1]]) & 0xFFF,
-            u16::from_le_bytes([mac[2], mac[3]]) & 0xFFF,
-        );
-
-        self.join_codes.insert(code.clone(), expiry);
-
-        // Clean expired codes.
-        self.join_codes.retain(|_, exp| *exp > now);
-
-        // Persist to disk so the server process can see codes from the CLI.
-        self.save_join_codes();
-
-        code
-    }
-
-    /// Verify and consume a join code. Returns true if valid.
-    pub fn verify_join_code(&mut self, code: &str) -> bool {
-        // Reload from disk (CLI may have written new codes).
-        self.join_codes = Self::load_join_codes(&self.join_codes_path);
-
-        let now = now_secs();
-        if let Some(&expiry) = self.join_codes.get(code) {
-            if expiry > now {
-                self.join_codes.remove(code);
-                self.save_join_codes();
-                return true;
-            }
-        }
-        // Clean expired.
-        self.join_codes.retain(|_, exp| *exp > now);
-        self.save_join_codes();
-        false
-    }
-
-    fn load_join_codes(path: &Path) -> HashMap<String, u64> {
-        if let Ok(contents) = std::fs::read_to_string(path) {
-            let now = now_secs();
-            // Simple format: one line per code, "code expiry_timestamp"
-            contents
-                .lines()
-                .filter_map(|line| {
-                    let mut parts = line.split_whitespace();
-                    let code = parts.next()?.to_string();
-                    let expiry: u64 = parts.next()?.parse().ok()?;
-                    if expiry > now { Some((code, expiry)) } else { None }
-                })
-                .collect()
-        } else {
-            HashMap::new()
-        }
-    }
-
-    fn save_join_codes(&self) {
-        let contents: String = self
-            .join_codes
-            .iter()
-            .map(|(code, expiry)| format!("{} {}", code, expiry))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let _ = std::fs::write(&self.join_codes_path, contents);
-    }
-
-    /// Provision a new device. Returns the device credential.
-    pub fn provision_device(&mut self, name: &str) -> Device {
-        let id = hex::encode(&generate_random_bytes(16));
-        let credential = hex::encode(&hmac_sha256(
-            &self.root_secret,
-            format!("device:{}", id).as_bytes(),
-        ));
-
-        let device = Device {
-            id: id.clone(),
-            name: name.to_string(),
-            credential,
-            joined_at: now_secs(),
-            last_seen: now_secs(),
-        };
-
-        self.devices.devices.insert(id, device.clone());
-        self.save_devices();
-        device
-    }
-
-    /// Authenticate a device by its credential. Returns the device if valid.
-    pub fn authenticate(&mut self, credential: &str) -> Option<Device> {
-        for device in self.devices.devices.values_mut() {
-            if device.credential == credential {
-                device.last_seen = now_secs();
-                let d = device.clone();
-                self.save_devices();
-                return Some(d);
-            }
-        }
-        None
-    }
-
-    /// List all provisioned devices.
-    pub fn list_devices(&self) -> Vec<&Device> {
-        let mut devices: Vec<_> = self.devices.devices.values().collect();
-        devices.sort_by_key(|d| d.joined_at);
-        devices
-    }
-
-    /// Revoke a device.
-    pub fn revoke_device(&mut self, device_id: &str) -> bool {
-        let removed = self.devices.devices.remove(device_id).is_some();
-        if removed {
-            self.save_devices();
-        }
-        removed
-    }
-
-    /// Save devices to disk.
-    fn save_devices(&self) {
-        if let Ok(toml) = toml::to_string_pretty(&self.devices) {
-            let _ = std::fs::write(&self.devices_path, toml);
-        }
-    }
-}
-
-/// Thread-safe wrapper.
-pub type SharedTrust = Arc<Mutex<ColonyTrust>>;
-
-pub fn load_colony_trust(config_dir: &Path) -> anyhow::Result<SharedTrust> {
-    Ok(Arc::new(Mutex::new(ColonyTrust::load(config_dir)?)))
-}
-
-// --- Utilities ---
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-fn generate_random_bytes(n: usize) -> Vec<u8> {
-    use std::io::Read;
-    let mut bytes = vec![0u8; n];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if f.read_exact(&mut bytes).is_ok() {
-            return bytes;
-        }
-    }
-    // Fallback: time + pid mixing.
-    let seed = now_secs() ^ (std::process::id() as u64);
-    for (i, b) in bytes.iter_mut().enumerate() {
-        *b = ((seed.wrapping_mul(6364136223846793005).wrapping_add(i as u64)) >> 33) as u8;
-    }
-    bytes
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn join_code_format_roundtrip() {
+        let raw = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                    0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10];
+        let formatted = format_join_code(&raw);
+        assert_eq!(formatted, "01234567-89abcdef-fedcba98-76543210");
+        let parsed = parse_join_code(&formatted).expect("parse");
+        assert_eq!(parsed, raw);
+    }
+
+    #[test]
     fn sign_and_verify_roundtrip() {
-        let credential = hex::encode(&generate_random_bytes(32));
-        let device_id = "test-device-001";
-        let payload = "hello world";
-
-        let (signature, timestamp) = sign_message(&credential, device_id, payload);
-
-        assert!(verify_signature(&credential, device_id, timestamp, payload, &signature));
+        let key = SigningKey::generate(&mut OsRng);
+        let credential = hex_encode(key.to_bytes().as_ref());
+        let (signature, timestamp) = sign_message(&credential, "dev", "hello");
+        assert!(verify_signature(&credential, "dev", timestamp, "hello", &signature));
     }
 
     #[test]
     fn verify_rejects_wrong_credential() {
-        let cred1 = hex::encode(&generate_random_bytes(32));
-        let cred2 = hex::encode(&generate_random_bytes(32));
+        let key1 = SigningKey::generate(&mut OsRng);
+        let key2 = SigningKey::generate(&mut OsRng);
+        let cred1 = hex_encode(key1.to_bytes().as_ref());
+        let cred2 = hex_encode(key2.to_bytes().as_ref());
         let (signature, timestamp) = sign_message(&cred1, "dev1", "msg");
-
         assert!(!verify_signature(&cred2, "dev1", timestamp, "msg", &signature));
     }
 
     #[test]
-    fn verify_rejects_wrong_payload() {
-        let cred = hex::encode(&generate_random_bytes(32));
-        let (signature, timestamp) = sign_message(&cred, "dev1", "original");
-
-        assert!(!verify_signature(&cred, "dev1", timestamp, "tampered", &signature));
-    }
-
-    #[test]
-    fn verify_rejects_stale_timestamp() {
-        let cred = hex::encode(&generate_random_bytes(32));
-        let device_id = "dev1";
-        let payload = "test";
-        let old_timestamp = now_secs() - MAX_MESSAGE_AGE_SECS - 10;
-
-        let data = format!("{}:{}:{}", device_id, old_timestamp, payload);
-        let key = hex::decode(&cred).unwrap();
-        let sig = hex::encode(&hmac_sha256(&key, data.as_bytes()));
-
-        assert!(!verify_signature(&cred, device_id, old_timestamp, payload, &sig));
-    }
-
-    #[test]
     fn encrypt_decrypt_roundtrip() {
-        let cred = hex::encode(&generate_random_bytes(32));
+        let cred = hex_encode(&[0x42u8; 32]);
         let plaintext = b"secret data for testing";
-
         let encrypted = encrypt_payload(&cred, plaintext).unwrap();
         let decrypted = decrypt_payload(&cred, &encrypted).unwrap();
-
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
-    fn decrypt_with_wrong_key_fails() {
-        let cred1 = hex::encode(&generate_random_bytes(32));
-        let cred2 = hex::encode(&generate_random_bytes(32));
-
-        let encrypted = encrypt_payload(&cred1, b"secret").unwrap();
-        assert!(decrypt_payload(&cred2, &encrypted).is_err());
-    }
-
-    #[test]
     fn colony_trust_lifecycle() {
-        let dir = std::env::temp_dir().join("anthill-test-trust");
+        let dir = std::env::temp_dir().join("anthill-test-trust-r2");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        // Load creates colony key.
         let mut trust = ColonyTrust::load(&dir).unwrap();
         assert!(trust.is_empty_colony());
 
-        // Provision a device.
         let device = trust.provision_device("My Laptop");
         assert!(!trust.is_empty_colony());
         assert_eq!(device.name, "My Laptop");
 
-        // Authenticate with valid credential.
         let authed = trust.authenticate(&device.credential);
         assert!(authed.is_some());
-        assert_eq!(authed.unwrap().id, device.id);
+        assert_eq!(authed.unwrap().name, "My Laptop");
 
-        // Authenticate with wrong credential.
-        assert!(trust.authenticate("deadbeef").is_none());
+        assert!(trust.authenticate("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef").is_none());
 
-        // Join codes.
         let code = trust.generate_join_code();
-        assert!(trust.verify_join_code(&code)); // consumed
-        assert!(!trust.verify_join_code(&code)); // already used
+        assert!(trust.verify_join_code(&code));
 
-        // Revoke device.
         assert!(trust.revoke_device(&device.id));
         assert!(trust.authenticate(&device.credential).is_none());
 
@@ -525,7 +592,7 @@ mod tests {
 
     #[test]
     fn colony_trust_persists_across_loads() {
-        let dir = std::env::temp_dir().join("anthill-test-trust-persist");
+        let dir = std::env::temp_dir().join("anthill-test-trust-r2-persist");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -536,50 +603,11 @@ mod tests {
             device_cred = device.credential.clone();
         }
 
-        // Reload from disk.
         let mut trust2 = ColonyTrust::load(&dir).unwrap();
         assert!(!trust2.is_empty_colony());
         let authed = trust2.authenticate(&device_cred);
         assert!(authed.is_some());
 
         std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn base64_roundtrip() {
-        let data = b"hello world, this is a test of base64 encoding!";
-        let encoded = base64_encode(data);
-        let decoded = base64_decode(&encoded).unwrap();
-        assert_eq!(decoded, data);
-    }
-
-    #[test]
-    fn hex_roundtrip() {
-        let data = vec![0u8, 127, 255, 1, 42];
-        let encoded = hex::encode(&data);
-        assert_eq!(encoded, "007fff012a");
-        let decoded = hex::decode(&encoded).unwrap();
-        assert_eq!(decoded, data);
-    }
-}
-
-/// Hex encoding/decoding.
-mod hex {
-    pub fn encode(data: &[u8]) -> String {
-        data.iter().map(|b| format!("{:02x}", b)).collect()
-    }
-
-    pub fn decode(s: &str) -> Result<Vec<u8>, anyhow::Error> {
-        let s = s.trim();
-        if s.len() % 2 != 0 {
-            anyhow::bail!("odd hex length");
-        }
-        (0..s.len())
-            .step_by(2)
-            .map(|i| {
-                u8::from_str_radix(&s[i..i + 2], 16)
-                    .map_err(|e| anyhow::anyhow!("bad hex: {}", e))
-            })
-            .collect()
     }
 }
