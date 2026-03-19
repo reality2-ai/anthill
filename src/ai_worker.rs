@@ -87,10 +87,14 @@ pub type StatsMap = Arc<Mutex<HashMap<i64, UserStats>>>;
 pub type TaskMap = Arc<Mutex<HashMap<u32, RunningTask>>>;
 
 const MEMORY_PREAMBLE: &str = "\
-You have a persistent memory file for this user at the path shown below. \
-Read it at the start of each conversation to recall context. \
-When you learn something worth remembering (user preferences, project context, \
-key decisions, names, ongoing work), append it to the file. \
+You have two persistent memory files:\n\
+- ANT memory (shared across all users): shown below as [ANT MEMORY]\n\
+- User memory (per-user): shown below as [USER MEMORY]\n\n\
+When you learn something worth remembering:\n\
+- ANT-level facts (project context, architecture decisions, environment details, \
+installed tools, repos, ongoing work) → append to the ANT memory file\n\
+- User-specific facts (preferences, name, role, conversation context) → append to \
+the user memory file\n\
 Keep entries concise — one line per fact. Remove outdated entries when you notice them.";
 
 const WORKSPACE_PREAMBLE: &str = "\
@@ -307,23 +311,35 @@ pub async fn ai_worker_loop(
         log::warn!("Could not create memory dir {:?}: {}", config.memory_dir, e);
     }
 
+    // ANT-level memory file — shared across all users of this ANT.
+    let ant_memory_file = config.memory_dir.join("ant.md");
+    if !ant_memory_file.exists() {
+        let header = format!("# {} — ANT Memory\n\n\
+            This file stores what this ANT has learned across all conversations.\n\
+            Add project context, architecture decisions, environment details, tools, and ongoing work.\n\n",
+            bot_name);
+        let _ = std::fs::write(&ant_memory_file, header);
+    }
+
     while let Some(req) = rx.recv().await {
         // Remember chat IDs per source for cross-channel forwarding.
         if req.chat_id != 0 && req.source != "web" {
             source_chat_ids.insert(req.source.clone(), req.chat_id);
         }
-        let memory_file = config.memory_dir.join(format!("{}.md", req.chat_id));
+        let user_memory_file = config.memory_dir.join(format!("{}.md", req.chat_id));
 
-        // Create memory file if it doesn't exist.
-        if !memory_file.exists() {
+        // Create user memory file if it doesn't exist.
+        if !user_memory_file.exists() {
             let header = format!("# Memory — user {}\n\n", req.chat_id);
-            let _ = std::fs::write(&memory_file, header);
+            let _ = std::fs::write(&user_memory_file, header);
         }
 
         // Build the command for the selected backend.
+        // Both ANT and user memory are pre-loaded into the prompt.
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
-            &memory_file,
+            &ant_memory_file,
+            &user_memory_file,
             &config.working_dir,
             &config.repos_dir,
         );
@@ -726,7 +742,8 @@ pub async fn ai_worker_loop(
 
 fn build_system_prompt(
     custom: Option<&str>,
-    memory_file: &Path,
+    ant_memory_file: &Path,
+    user_memory_file: &Path,
     working_dir: &str,
     repos_dir: &Path,
 ) -> String {
@@ -746,9 +763,37 @@ fn build_system_prompt(
 
     prompt.push_str(MEMORY_PREAMBLE);
     prompt.push_str(&format!(
-        "\nMemory file: {}",
-        memory_file.display()
+        "\nANT memory file: {}\nUser memory file: {}\n",
+        ant_memory_file.display(),
+        user_memory_file.display()
     ));
+
+    // Pre-load ANT memory so the AI has it immediately (doesn't need to read the file).
+    let ant_memory = std::fs::read_to_string(ant_memory_file).unwrap_or_default();
+    if !ant_memory.trim().is_empty() {
+        prompt.push_str("\n[ANT MEMORY]\n");
+        // Cap at 4K to avoid bloating the prompt.
+        if ant_memory.len() > 4096 {
+            prompt.push_str(&ant_memory[..4096]);
+            prompt.push_str("\n... (truncated — read the full file for more)\n");
+        } else {
+            prompt.push_str(&ant_memory);
+        }
+        prompt.push_str("\n[/ANT MEMORY]\n");
+    }
+
+    // Pre-load user memory too.
+    let user_memory = std::fs::read_to_string(user_memory_file).unwrap_or_default();
+    if !user_memory.trim().is_empty() {
+        prompt.push_str("\n[USER MEMORY]\n");
+        if user_memory.len() > 4096 {
+            prompt.push_str(&user_memory[..4096]);
+            prompt.push_str("\n... (truncated — read the full file for more)\n");
+        } else {
+            prompt.push_str(&user_memory);
+        }
+        prompt.push_str("\n[/USER MEMORY]\n");
+    }
 
     prompt
 }
