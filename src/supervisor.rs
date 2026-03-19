@@ -199,12 +199,15 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     log::info!("Colony trust loaded — {} device(s) provisioned",
         trust.lock().map(|t| t.list_devices().len()).unwrap_or(0));
 
+    // Reload channel — web server signals when new ants should be spawned.
+    let (reload_tx, mut reload_rx) = tokio::sync::mpsc::channel::<()>(1);
+
     // Start the web server.
     let bind: SocketAddr = format!("{}:{}", sup_cfg.http_bind, sup_cfg.http_port)
         .parse()
         .unwrap();
     let web_registry = Arc::clone(&registry);
-    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), bind));
+    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, bind));
 
     log::info!("Web dashboard at http://{}", bind);
 
@@ -213,6 +216,26 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
         std::collections::HashMap::new();
 
     loop {
+        // Check for reload signal (non-blocking).
+        if reload_rx.try_recv().is_ok() {
+            let new_configs = discover_ants(&ants_dir);
+            let running: Vec<String> = ant_tasks.iter().map(|(n, _, _)| n.clone()).collect();
+            for (name, config_path) in &new_configs {
+                if !running.contains(name) {
+                    log::info!("Hot-adding ant '{}' — config: {}", name, config_path.display());
+                    if let Ok(cfg) = Config::load(config_path) {
+                        let handle = spawn_bot_task(
+                            name.clone(),
+                            cfg.clone(),
+                            registry.global_tx.clone(),
+                            Arc::clone(&registry),
+                        );
+                        ant_tasks.push((name.clone(), handle, cfg));
+                    }
+                }
+            }
+        }
+
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         for (name, handle, cfg) in &mut ant_tasks {

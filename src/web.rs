@@ -26,6 +26,8 @@ pub struct AppState {
     pub registry: Arc<BotRegistry>,
     pub history: SharedHistory,
     pub trust: SharedTrust,
+    /// Channel to tell the supervisor to reload/spawn new ants.
+    pub reload_tx: tokio::sync::mpsc::Sender<()>,
 }
 
 /// Embedded web app HTML.
@@ -36,12 +38,14 @@ pub async fn run_web_server(
     registry: Arc<BotRegistry>,
     history: SharedHistory,
     trust: SharedTrust,
+    reload_tx: tokio::sync::mpsc::Sender<()>,
     bind: SocketAddr,
 ) {
     let state = AppState {
         registry,
         history,
         trust,
+        reload_tx,
     };
 
     // Protected API routes — require credential in X-Credential header.
@@ -55,6 +59,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/files/{*path}", get(get_file).delete(delete_file))
         .route("/api/ants/{id}/upload/{*path}", post(upload_file))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
+        .route("/api/ants/reload", post(reload_ants))
         .route("/api/auth/devices", get(auth_list_devices))
         .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
         .route("/api/auth/join-code", post(auth_generate_join_code))
@@ -441,6 +446,16 @@ async fn delete_ant(
     match state.registry.delete_config(&id) {
         Ok(()) => (StatusCode::OK, "ANT deleted").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// POST /api/ants/reload — tell the supervisor to scan for new ants.
+async fn reload_ants(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match state.reload_tx.send(()).await {
+        Ok(()) => (StatusCode::OK, "Reload triggered").into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Reload channel closed").into_response(),
     }
 }
 

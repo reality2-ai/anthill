@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Anthill">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon-192.svg">
+<title>Anthill</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --text: #eee;
+    --text-dim: #888;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  #sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #333;
+  }
+
+  #sidebar h1 {
+    padding: 16px;
+    font-size: 18px;
+    border-bottom: 1px solid #333;
+    color: var(--accent);
+  }
+
+  #bot-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .bot-item {
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .bot-item:hover { background: var(--surface2); }
+  .bot-item.active { background: var(--surface2); border-left: 3px solid var(--accent); }
+
+  .bot-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .bot-dot.running { background: var(--green); }
+  .bot-dot.stopped { background: var(--red); }
+
+  .bot-name { font-weight: 600; }
+  .bot-meta { font-size: 12px; color: var(--text-dim); }
+
+  /* Main panel */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  #header {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  #header h2 { font-size: 16px; }
+
+  #task-bar {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  /* Chat area */
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    line-height: 1.5;
+    word-wrap: break-word;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    background: var(--surface2);
+    border-bottom-right-radius: 4px;
+  }
+
+  .msg.bot {
+    align-self: flex-start;
+    background: var(--surface);
+    border-bottom-left-radius: 4px;
+  }
+
+  .msg h1, .msg h2, .msg h3, .msg h4 { margin: 12px 0 6px; }
+  .msg h1 { font-size: 1.2em; }
+  .msg h2 { font-size: 1.1em; }
+  .msg h3 { font-size: 1em; font-style: italic; }
+  .msg h4 { font-size: 0.95em; font-weight: normal; font-style: italic; }
+
+  .msg p { margin: 6px 0; }
+  .msg ul, .msg ol { margin: 6px 0; padding-left: 20px; }
+  .msg li { margin: 3px 0; }
+  .msg hr { border: none; border-top: 1px solid #444; margin: 10px 0; }
+  .msg a { color: var(--accent); text-decoration: none; }
+  .msg a:hover { text-decoration: underline; }
+  .msg blockquote { border-left: 3px solid #444; padding-left: 12px; color: var(--text-dim); margin: 6px 0; }
+  .msg table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  .msg th, .msg td { border: 1px solid #444; padding: 6px 10px; text-align: left; }
+  .msg th { background: var(--surface2); }
+
+  .msg pre {
+    background: #0a0a1a;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    position: relative;
+  }
+
+  .msg pre:hover .copy-btn { opacity: 1; }
+
+  .copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    border: none;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .copy-btn:hover { color: var(--text); }
+
+  .msg code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: #0a0a1a;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .msg pre code {
+    background: none;
+    padding: 0;
+  }
+
+  .typing {
+    align-self: flex-start;
+    color: var(--text-dim);
+    font-style: italic;
+    font-size: 14px;
+  }
+
+  /* Input area */
+  #input-area {
+    padding: 12px 20px;
+    background: var(--surface);
+    border-top: 1px solid #333;
+    display: flex;
+    gap: 10px;
+  }
+
+  #input-area textarea {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: var(--font);
+    font-size: 14px;
+    resize: none;
+    min-height: 44px;
+    max-height: 120px;
+  }
+
+  #input-area textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  #send-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    align-self: flex-end;
+  }
+
+  #send-btn:hover { opacity: 0.9; }
+  #send-btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* Tasks panel */
+  #tasks-panel {
+    padding: 8px 20px;
+    background: var(--surface);
+    border-top: 1px solid #333;
+    max-height: 150px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  #tasks-panel.has-tasks { display: block; }
+
+  .task-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+  }
+
+  .task-preview { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-time { color: var(--yellow); margin: 0 12px; }
+  .task-cancel { color: var(--red); cursor: pointer; font-size: 12px; }
+
+  /* Connection indicator */
+  #connection {
+    padding: 6px 16px;
+    font-size: 12px;
+    text-align: center;
+    display: none;
+  }
+
+  #connection.disconnected {
+    display: block;
+    background: var(--red);
+    color: white;
+  }
+
+  /* Responsive: mobile */
+  @media (max-width: 768px) {
+    #sidebar {
+      position: fixed;
+      left: -260px;
+      top: 0;
+      bottom: 0;
+      z-index: 100;
+      transition: left 0.2s;
+    }
+
+    #sidebar.open { left: 0; }
+
+    #menu-btn {
+      display: block !important;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 24px;
+      cursor: pointer;
+    }
+
+    .msg { max-width: 95%; }
+  }
+
+  @media (min-width: 769px) {
+    #menu-btn { display: none; }
+  }
+
+  /* Form fields */
+  .field { margin-bottom: 12px; }
+  .field-label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
+  .field-input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 14px;
+    font-family: var(--font);
+  }
+  .field-input:focus { outline: none; border-color: var(--accent); }
+  .field-input.mono { font-family: var(--mono); }
+  .section-title {
+    font-size: 14px;
+    color: var(--accent);
+    margin: 16px 0 8px;
+    padding-top: 12px;
+    border-top: 1px solid #333;
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .toggle-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+  }
+
+  /* Tabs */
+  .tab {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 6px 14px;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .tab.active { background: var(--surface2); color: var(--text); }
+  .tab:hover { color: var(--text); }
+
+  /* File browser */
+  #files-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 4px;
+    border-bottom: 1px solid #222;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .file-item:hover { background: var(--surface2); border-radius: 6px; }
+  .file-icon { font-size: 18px; width: 24px; text-align: center; }
+  .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-size { color: var(--text-dim); font-size: 12px; }
+  .file-delete { color: var(--red); font-size: 12px; cursor: pointer; opacity: 0; padding: 4px; }
+  .file-item:hover .file-delete { opacity: 1; }
+
+  /* No bot selected */
+  #no-bot {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Join screen (shown when not authenticated) -->
+<div id="join-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;align-items:center;justify-content:center">
+  <div style="text-align:center;max-width:360px;padding:24px">
+    <img src="/logo.svg" alt="Anthill" style="width:280px;margin-bottom:16px">
+    <p style="color:var(--text-dim);margin-bottom:24px">Enter a join code to connect to this colony.</p>
+    <div class="field">
+      <input id="join-code" class="field-input" placeholder="Enter join code (e.g. a1b-c2d)" style="text-align:center;font-size:18px;letter-spacing:2px;font-family:var(--mono)">
+    </div>
+    <div class="field">
+      <input id="join-name" class="field-input" placeholder="Device name (e.g. My Phone)" style="text-align:center">
+    </div>
+    <div id="join-error" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
+    <button onclick="joinColony()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-weight:600;font-size:16px;width:100%">Join Colony</button>
+    <p style="color:var(--text-dim);font-size:12px;margin-top:16px">Generate a code on the server: <code style="font-family:var(--mono);background:#333;padding:2px 6px;border-radius:4px">anthill --join-code ~/.config/anthill</code></p>
+  </div>
+</div>
+
+<div id="app-container" style="display:none;width:100%;height:100%">
+
+<div id="sidebar">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid #333">
+    <img src="/logo.svg" alt="Anthill" style="height:36px">
+    <button onclick="showCreateModal()" style="background:var(--accent);color:white;border:none;border-radius:6px;width:32px;height:32px;font-size:18px;cursor:pointer;line-height:1" title="New ANT">+</button>
+  </div>
+  <div id="bot-list"></div>
+  <div style="padding:8px 12px;border-top:1px solid #333">
+    <button onclick="generateJoinCode()" style="width:100%;background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:8px;cursor:pointer;font-size:13px">Generate Join Code</button>
+    <div id="join-code-display" style="display:none;margin-top:8px;text-align:center">
+      <div style="font-family:var(--mono);font-size:20px;letter-spacing:3px;color:var(--green)" id="join-code-value"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="join-code-expiry"></div>
+    </div>
+  </div>
+  <div style="padding:8px 12px;border-top:1px solid #333">
+    <button onclick="showDevicesModal()" style="width:100%;background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px;cursor:pointer;font-size:13px">Manage Devices</button>
+  </div>
+  <div style="padding:8px 12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">
+    <div id="device-name-display" style="margin-bottom:4px"></div>
+    ANTS: Autonomous iNTelligenceS
+  </div>
+</div>
+
+<!-- Create ANT modal -->
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <h2 style="margin-bottom:16px" id="modal-title">New ANT</h2>
+    <div id="modal-fields">
+      <div class="field">
+        <span class="field-label">ID <span style="color:var(--accent)">*</span> <span style="color:var(--text-dim)">(directory name, no spaces)</span></span>
+        <input id="f-id" class="field-input" placeholder="my-ant">
+      </div>
+      <div class="field">
+        <span class="field-label">Display Name <span style="color:var(--text-dim)">(optional — defaults to ID)</span></span>
+        <input id="f-name" class="field-input" placeholder="My Dev ANT">
+      </div>
+
+      <h3 class="section-title">Telegram (optional)</h3>
+      <div class="field">
+        <span class="field-label">Bot Token <span style="color:var(--text-dim)">(leave empty for web-only)</span></span>
+        <input id="f-token" class="field-input mono" placeholder="123456:ABC-DEF...">
+      </div>
+
+      <h3 class="section-title">Workspace (optional)</h3>
+      <div class="field">
+        <span class="field-label">Working Directory <span style="color:var(--text-dim)">(defaults to ~/.config/anthill/ants/&lt;id&gt;/working)</span></span>
+        <input id="f-workdir" class="field-input mono" placeholder="">
+      </div>
+
+      <h3 class="section-title">Personality (optional)</h3>
+      <div class="field">
+        <span class="field-label">System Prompt</span>
+        <textarea id="f-prompt" class="field-input" rows="3" style="resize:vertical" placeholder="You are a helpful assistant."></textarea>
+      </div>
+    </div>
+    <div id="modal-error" style="color:var(--red);font-size:13px;margin-bottom:8px;display:none"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="hideModal()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px 16px;cursor:pointer">Cancel</button>
+      <button id="modal-submit" onclick="submitCreate()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div id="config-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto">
+    <h2 style="margin-bottom:16px" id="config-title">Settings</h2>
+
+    <div class="field">
+      <span class="field-label">Display Name</span>
+      <input id="c-name" class="field-input">
+    </div>
+    <div class="field">
+      <span class="field-label">Mode</span>
+      <select id="c-mode" class="field-input">
+        <option value="claude">claude — Claude Code per message</option>
+        <option value="ai">ai — NL → shell → summary</option>
+        <option value="raw">raw — persistent PTY</option>
+      </select>
+    </div>
+
+    <h3 class="section-title">Telegram (optional)</h3>
+    <div class="field">
+      <span class="field-label">Bot Token <span style="color:var(--text-dim)">(from @BotFather, leave empty to disable)</span></span>
+      <input id="c-token" class="field-input mono" placeholder="123456:ABC-DEF...">
+    </div>
+    <div class="field">
+      <span class="field-label">Allowed Chat IDs <span style="color:var(--text-dim)">(comma-separated, empty = all)</span></span>
+      <input id="c-allow" class="field-input mono" placeholder="123456789, 987654321">
+    </div>
+
+    <h3 class="section-title">Slack (optional)</h3>
+    <div class="field">
+      <span class="field-label">Bot Token <span style="color:var(--text-dim)">(xoxb-..., leave empty to disable)</span></span>
+      <input id="c-slack-bot" class="field-input mono" placeholder="xoxb-...">
+    </div>
+    <div class="field">
+      <span class="field-label">App Token <span style="color:var(--text-dim)">(xapp-..., for Socket Mode)</span></span>
+      <input id="c-slack-app" class="field-input mono" placeholder="xapp-...">
+    </div>
+
+    <h3 class="section-title">Workspace</h3>
+    <div class="field">
+      <span class="field-label">Working Directory <span style="color:var(--text-dim)">(defaults to ~/.config/anthill/ants/&lt;id&gt;/working)</span></span>
+      <input id="c-workdir" class="field-input mono" placeholder="">
+    </div>
+
+    <h3 class="section-title">Backups</h3>
+    <div class="field" style="display:flex;gap:12px">
+      <div style="flex:1">
+        <span class="field-label">Interval (hours, 0 = off)</span>
+        <input id="c-backup-hrs" class="field-input" type="number" value="0" min="0">
+      </div>
+      <div style="flex:1">
+        <span class="field-label">Git Remote</span>
+        <input id="c-backup-remote" class="field-input" placeholder="origin">
+      </div>
+    </div>
+
+    <h3 class="section-title">Cross-channel sync</h3>
+    <label class="toggle-row">
+      <input type="checkbox" id="c-sync-channels">
+      <span>Show user messages from other channels <span style="color:var(--text-dim)">(e.g. Telegram messages appear in Slack and web)</span></span>
+    </label>
+
+    <h3 class="section-title">Personality</h3>
+    <div class="field">
+      <span class="field-label">System Prompt</span>
+      <textarea id="c-prompt" class="field-input" rows="4" style="resize:vertical" placeholder="You are a helpful assistant."></textarea>
+    </div>
+
+    <div id="config-error" style="color:var(--red);font-size:13px;margin-top:8px;display:none"></div>
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:16px">
+      <button onclick="deleteAnt()" style="background:none;color:var(--red);border:1px solid var(--red);border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px">Delete</button>
+      <div style="display:flex;gap:10px">
+        <button onclick="hideConfigModal()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px 16px;cursor:pointer">Cancel</button>
+        <button onclick="saveConfig()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Devices modal -->
+<div id="devices-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:480px;max-height:90vh;overflow-y:auto">
+    <h2 style="margin-bottom:16px">Connected Devices</h2>
+    <div id="devices-list" style="margin-bottom:16px">Loading...</div>
+    <div style="display:flex;justify-content:flex-end">
+      <button onclick="hideDevicesModal()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px 16px;cursor:pointer">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="connection">Disconnected — reconnecting...</div>
+  <div id="header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button id="menu-btn" onclick="toggleSidebar()">☰</button>
+      <h2 id="bot-title">Select an ANT</h2>
+    </div>
+    <div id="tab-bar" style="display:none;gap:4px">
+      <button class="tab active" id="tab-chat" onclick="switchTab('chat')">Chat</button>
+      <button class="tab" id="tab-workers" onclick="switchTab('workers')">Workers</button>
+      <button class="tab" id="tab-files" onclick="switchTab('files')">Files</button>
+    </div>
+    <div id="task-bar"></div>
+  </div>
+  <div id="no-bot">Select an ANT from the sidebar to start chatting</div>
+  <div id="chat" style="display:none"></div>
+  <div id="files-panel" style="display:none">
+    <div id="files-breadcrumb" style="padding:8px 16px;font-size:13px;color:var(--text-dim);border-bottom:1px solid #333"></div>
+    <div id="files-toolbar" style="padding:8px 16px;display:flex;gap:8px;border-bottom:1px solid #333">
+      <button onclick="document.getElementById('file-upload').click()" style="background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px">Upload</button>
+      <input type="file" id="file-upload" style="display:none" multiple onchange="handleUpload(this.files)">
+    </div>
+    <div id="files-list" style="flex:1;overflow-y:auto;padding:8px 16px"></div>
+    <div id="file-preview" style="display:none;flex:1;overflow:auto;padding:16px"></div>
+  </div>
+  <div id="workers-panel" style="display:none;flex:1;overflow-y:auto;padding:16px 20px">
+    <div id="workers-list"></div>
+  </div>
+  <div id="tasks-panel"></div>
+  <div id="input-area" style="display:none">
+    <textarea id="input" placeholder="Send a message..." rows="1"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+    <button id="send-btn" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+</div><!-- /app-container -->
+
+<script>
+const state = {
+  bots: {},
+  activeBot: null,
+  messages: {},   // bot -> [{role, text}]
+  tasks: {},      // bot -> [{id, preview, startTime}]
+  ws: null,
+  typing: {},     // bot -> timeout
+};
+
+// --- WebSocket ---
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const credential = getCredential();
+  const deviceId = localStorage.getItem('anthill_device_id') || '';
+  const ws = new WebSocket(`${proto}//${location.host}/ws?credential=${encodeURIComponent(credential)}&device_id=${encodeURIComponent(deviceId)}`);
+
+  ws.onopen = () => {
+    document.getElementById('connection').className = '';
+    state.ws = ws;
+  };
+
+  ws.onclose = () => {
+    document.getElementById('connection').className = 'disconnected';
+    state.ws = null;
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const raw = JSON.parse(e.data);
+      // Unwrap signed envelope if present.
+      const msg = raw.payload ? JSON.parse(raw.payload) : raw;
+      handleEvent(msg);
+    } catch (err) {
+      console.warn('WS parse error:', err);
+    }
+  };
+}
+
+function handleEvent(msg) {
+  switch (msg.type) {
+    case 'snapshot':
+      msg.bots.forEach(b => {
+        state.bots[b.id] = b;
+        if (!state.messages[b.id]) state.messages[b.id] = [];
+        if (!state.tasks[b.id]) state.tasks[b.id] = [];
+      });
+      // Load history if provided.
+      if (msg.history) {
+        for (const [bot, msgs] of Object.entries(msg.history)) {
+          state.messages[bot] = msgs;
+        }
+      }
+      renderBotList();
+      if (state.activeBot) renderChat();
+      break;
+
+    case 'user_message':
+      if (!state.messages[msg.bot]) state.messages[msg.bot] = [];
+      state.messages[msg.bot].push({ role: 'user', text: msg.text });
+      if (msg.bot === state.activeBot) renderChat();
+      break;
+
+    case 'message':
+      if (!state.messages[msg.bot]) state.messages[msg.bot] = [];
+      state.messages[msg.bot].push({ role: 'bot', text: msg.text, task_id: msg.task_id });
+      clearTyping(msg.bot);
+      if (msg.bot === state.activeBot) renderChat();
+      break;
+
+    case 'task_started':
+      if (!state.tasks[msg.bot]) state.tasks[msg.bot] = [];
+      state.tasks[msg.bot].push({ id: msg.task_id, preview: msg.preview, startTime: Date.now(), progress: [] });
+      renderTasks();
+      renderBotList();
+      break;
+
+    case 'task_progress':
+      if (state.tasks[msg.bot]) {
+        const task = state.tasks[msg.bot].find(t => t.id === msg.task_id);
+        if (task) {
+          task.lastProgress = msg.detail;
+          if (!task.progress) task.progress = [];
+          task.progress.push({ kind: msg.kind, detail: msg.detail, time: Date.now() });
+          // Keep last 20 progress entries.
+          if (task.progress.length > 20) task.progress = task.progress.slice(-20);
+          renderTasks();
+        }
+      }
+      break;
+
+    case 'task_completed':
+      if (state.tasks[msg.bot]) {
+        state.tasks[msg.bot] = state.tasks[msg.bot].filter(t => t.id !== msg.task_id);
+      }
+      renderTasks();
+      renderBotList();
+      break;
+
+    case 'typing':
+      showTyping(msg.bot);
+      break;
+
+    case 'bot_status':
+      if (state.bots[msg.bot]) state.bots[msg.bot].status = msg.status;
+      renderBotList();
+      break;
+  }
+}
+
+// --- Sending ---
+function sendMessage() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text || !state.activeBot || !state.ws) return;
+
+  // Message will appear via the user_message broadcast event.
+  wsSendSigned({
+    type: 'chat',
+    bot: state.activeBot,
+    message: text,
+  });
+
+  input.value = '';
+  input.style.height = 'auto';
+  renderChat();
+}
+
+// --- Rendering ---
+function renderBotList() {
+  const list = document.getElementById('bot-list');
+  list.innerHTML = '';
+  Object.values(state.bots).sort((a, b) => a.name.localeCompare(b.name)).forEach(bot => {
+    const tasks = (state.tasks[bot.id] || []).length;
+    const statusClass = bot.status === 'Stopped' ? 'stopped' : 'running';
+    const active = bot.id === state.activeBot ? 'active' : '';
+    list.innerHTML += `
+      <div class="bot-item ${active}" onclick="selectBot('${bot.id}')">
+        <div class="bot-dot ${statusClass}"></div>
+        <div style="flex:1;min-width:0">
+          <div class="bot-name">${bot.name}</div>
+          <div class="bot-meta">${tasks ? tasks + ' worker' + (tasks > 1 ? 's' : '') + ' active' : 'idle'}</div>
+        </div>
+        <button onclick="event.stopPropagation();showConfigModal('${bot.id}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;padding:4px" title="Settings">⚙</button>
+      </div>`;
+  });
+}
+
+function selectBot(id) {
+  state.activeBot = id;
+  const bot = state.bots[id];
+  document.getElementById('bot-title').textContent = bot ? bot.name : id;
+  document.getElementById('tab-bar').style.display = 'flex';
+  document.getElementById('no-bot').style.display = 'none';
+  // Reset to chat tab.
+  switchTab('chat');
+  document.getElementById('input').focus();
+  renderBotList();
+  renderChat();
+  renderTasks();
+  // Close sidebar on mobile
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function renderChat() {
+  const chat = document.getElementById('chat');
+  const msgs = state.messages[state.activeBot] || [];
+  chat.innerHTML = msgs.map(m => {
+    if (m.role === 'bot') {
+      return `<div class="msg bot">${formatMarkdown(m.text)}</div>`;
+    }
+    return `<div class="msg user">${escapeHtml(m.text)}</div>`;
+  }).join('');
+
+  // Show typing if active
+  if (state.typing[state.activeBot]) {
+    chat.innerHTML += '<div class="typing">Thinking...</div>';
+  }
+
+  addCopyButtons();
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function renderTasks() {
+  const panel = document.getElementById('tasks-panel');
+  const tasks = state.tasks[state.activeBot] || [];
+  const taskBar = document.getElementById('task-bar');
+
+  if (tasks.length === 0) {
+    panel.className = '';
+    panel.innerHTML = '';
+    taskBar.textContent = '';
+    return;
+  }
+
+  panel.className = 'has-tasks';
+  taskBar.textContent = `${tasks.length} worker${tasks.length > 1 ? 's' : ''} active`;
+
+  panel.innerHTML = tasks.map(t => {
+    const secs = Math.floor((Date.now() - t.startTime) / 1000);
+    const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    const progress = t.lastProgress ? `<div style="font-size:12px;color:var(--green);margin-top:2px">${escapeHtml(t.lastProgress)}</div>` : '';
+    const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
+    const agentList = agents.length ? agents.map(a =>
+      `<div style="font-size:11px;color:var(--yellow);margin-top:1px;padding-left:12px">↳ ${escapeHtml(a.detail)}</div>`
+    ).join('') : '';
+    return `<div class="task-item" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="task-preview">#${t.id} ${escapeHtml(t.preview)}</span>
+        <span class="task-time">${time}</span>
+        <span class="task-cancel" onclick="cancelTask(${t.id})">cancel</span>
+      </div>
+      ${progress}${agentList}
+    </div>`;
+  }).join('');
+}
+
+// Update task timers every second
+setInterval(renderTasks, 1000);
+
+function cancelTask(taskId) {
+  if (!state.ws || !state.activeBot) return;
+  wsSendSigned({
+    type: 'cancel',
+    bot: state.activeBot,
+    task_id: taskId,
+  });
+}
+
+// --- Typing ---
+function showTyping(bot) {
+  if (state.typing[bot]) clearTimeout(state.typing[bot]);
+  state.typing[bot] = setTimeout(() => {
+    delete state.typing[bot];
+    if (bot === state.activeBot) renderChat();
+  }, 6000);
+  if (bot === state.activeBot) renderChat();
+}
+
+function clearTyping(bot) {
+  if (state.typing[bot]) {
+    clearTimeout(state.typing[bot]);
+    delete state.typing[bot];
+  }
+}
+
+// --- Formatting ---
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Configure marked.js
+if (typeof marked !== 'undefined') {
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+  });
+}
+
+function formatMarkdown(text) {
+  if (typeof marked !== 'undefined') {
+    return marked.parse(text);
+  }
+  // Fallback if CDN fails
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+// Add copy buttons to code blocks after rendering
+function addCopyButtons() {
+  document.querySelectorAll('.msg pre').forEach(pre => {
+    if (pre.querySelector('.copy-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.onclick = () => {
+      const code = pre.querySelector('code');
+      navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    };
+    pre.appendChild(btn);
+  });
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// Auto-resize textarea
+document.getElementById('input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// --- Tabs ---
+let currentTab = 'chat';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-chat').className = tab === 'chat' ? 'tab active' : 'tab';
+  document.getElementById('tab-workers').className = tab === 'workers' ? 'tab active' : 'tab';
+  document.getElementById('tab-files').className = tab === 'files' ? 'tab active' : 'tab';
+  document.getElementById('chat').style.display = tab === 'chat' ? 'flex' : 'none';
+  document.getElementById('input-area').style.display = tab === 'chat' ? 'flex' : 'none';
+  document.getElementById('workers-panel').style.display = tab === 'workers' ? 'flex' : 'none';
+  document.getElementById('files-panel').style.display = tab === 'files' ? 'flex' : 'none';
+  if (tab === 'files' && state.activeBot) loadFiles('');
+  if (tab === 'workers') renderWorkers();
+}
+
+// --- Workers view ---
+function renderWorkers() {
+  const list = document.getElementById('workers-list');
+  if (!state.activeBot) { list.innerHTML = ''; return; }
+  const tasks = state.tasks[state.activeBot] || [];
+  if (tasks.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px 0">No active workers. Send a message to start one.</div>';
+    return;
+  }
+  list.innerHTML = tasks.map(t => {
+    const secs = Math.floor((Date.now() - t.startTime) / 1000);
+    const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    const progress = t.lastProgress ? `<div style="color:var(--green);font-size:13px;margin-top:4px">${escapeHtml(t.lastProgress)}</div>` : '';
+    const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
+    const agentList = agents.length ? agents.map(a =>
+      `<div style="font-size:12px;color:var(--yellow);margin-top:2px;padding-left:12px">↳ ${escapeHtml(a.detail)}</div>`
+    ).join('') : '';
+    const history = (t.progress || []).slice(-5).map(p =>
+      `<div style="font-size:11px;color:var(--text-dim);margin-top:1px">${escapeHtml(p.detail)}</div>`
+    ).join('');
+    return `<div style="background:var(--surface);border-radius:8px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><span style="font-weight:600;color:var(--accent)">#${t.id}</span> <span style="margin-left:8px">${escapeHtml(t.preview)}</span></div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="color:var(--yellow);font-size:13px">${time}</span>
+          <button onclick="cancelTask(${t.id})" style="background:none;color:var(--red);border:1px solid var(--red);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px">Cancel</button>
+        </div>
+      </div>
+      ${progress}${agentList}
+      ${history ? '<div style="margin-top:6px;border-top:1px solid #333;padding-top:6px">' + history + '</div>' : ''}
+    </div>`;
+  }).join('');
+}
+setInterval(() => { if (currentTab === 'workers') renderWorkers(); }, 1000);
+
+// --- File browser ---
+let currentFilePath = '';
+
+async function loadFiles(path) {
+  if (!state.activeBot) return;
+  currentFilePath = path;
+
+  const url = path
+    ? `/api/ants/${state.activeBot}/files/${path}`
+    : `/api/ants/${state.activeBot}/files`;
+
+  // Hide preview, show list.
+  document.getElementById('file-preview').style.display = 'none';
+  document.getElementById('files-list').style.display = 'block';
+
+  try {
+    const resp = await authFetch(url);
+    if (!resp.ok) {
+      document.getElementById('files-list').innerHTML = '<div style="color:var(--text-dim);padding:20px">Could not load files.</div>';
+      return;
+    }
+
+    const contentType = resp.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      // Directory listing.
+      const entries = await resp.json();
+      renderFileList(entries, path);
+    } else {
+      // It's a file — show preview.
+      await showFilePreview(path, contentType, resp);
+    }
+  } catch (e) {
+    document.getElementById('files-list').innerHTML = '<div style="color:var(--red);padding:20px">Error: ' + e.message + '</div>';
+  }
+
+  renderBreadcrumb(path);
+}
+
+function renderBreadcrumb(path) {
+  const el = document.getElementById('files-breadcrumb');
+  const parts = path ? path.split('/').filter(Boolean) : [];
+  let html = '<span style="cursor:pointer;color:var(--accent)" onclick="loadFiles(\'\')">workspace</span>';
+  let accumulated = '';
+  for (const part of parts) {
+    accumulated += (accumulated ? '/' : '') + part;
+    const p = accumulated;
+    html += ` / <span style="cursor:pointer;color:var(--accent)" onclick="loadFiles('${p}')">${part}</span>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderFileList(entries, path) {
+  const list = document.getElementById('files-list');
+  if (entries.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-dim);padding:20px">Empty directory</div>';
+    return;
+  }
+
+  list.innerHTML = entries.map(e => {
+    const fullPath = path ? `${path}/${e.name}` : e.name;
+    const icon = e.is_dir ? '📁' : fileIcon(e.name);
+    const size = e.is_dir ? '' : formatSize(e.size);
+    const deleteBtn = e.is_dir ? '' : `<span class="file-delete" onclick="event.stopPropagation();deleteFileItem('${fullPath}')" title="Delete">✕</span>`;
+    return `<div class="file-item" onclick="loadFiles('${fullPath}')">
+      <span class="file-icon">${icon}</span>
+      <span class="file-name">${e.name}</span>
+      <span class="file-size">${size}</span>
+      ${deleteBtn}
+    </div>`;
+  }).join('');
+}
+
+async function showFilePreview(path, contentType, resp) {
+  document.getElementById('files-list').style.display = 'none';
+  const preview = document.getElementById('file-preview');
+  preview.style.display = 'block';
+
+  const fileName = path.split('/').pop();
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <b>${fileName}</b>
+    <div style="display:flex;gap:8px">
+      <a href="/api/ants/${state.activeBot}/files/${path}" download="${fileName}" style="background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;text-decoration:none">Download</a>
+      <button onclick="loadFiles('${currentFilePath.split('/').slice(0,-1).join('/')}')" style="background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px">Back</button>
+    </div>
+  </div>`;
+
+  if (contentType.startsWith('image/')) {
+    html += `<img src="/api/ants/${state.activeBot}/files/${path}" style="max-width:100%;border-radius:6px">`;
+  } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/javascript') {
+    const text = await resp.text();
+    html += `<pre style="background:#0a0a1a;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap">${escapeHtml(text)}</pre>`;
+  } else if (contentType === 'application/pdf') {
+    html += `<iframe src="/api/ants/${state.activeBot}/files/${path}" style="width:100%;height:80vh;border:none;border-radius:6px"></iframe>`;
+  } else {
+    html += `<div style="color:var(--text-dim)">Binary file — <a href="/api/ants/${state.activeBot}/files/${path}" download="${fileName}" style="color:var(--accent)">download</a></div>`;
+  }
+
+  preview.innerHTML = html;
+}
+
+async function handleUpload(files) {
+  if (!state.activeBot || !files.length) return;
+  const dir = currentFilePath ? currentFilePath + '/' : 'files/';
+
+  for (const file of files) {
+    const path = dir + file.name;
+    const data = await file.arrayBuffer();
+    await authFetch(`/api/ants/${state.activeBot}/upload/${path}`, {
+      method: 'POST',
+      body: data,
+    });
+  }
+
+  // Refresh.
+  document.getElementById('file-upload').value = '';
+  loadFiles(currentFilePath);
+}
+
+async function deleteFileItem(path) {
+  if (!state.activeBot) return;
+  if (!confirm(`Delete ${path.split('/').pop()}?`)) return;
+  await authFetch(`/api/ants/${state.activeBot}/files/${path}`, { method: 'DELETE' });
+  loadFiles(currentFilePath);
+}
+
+function fileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  if (['png','jpg','jpeg','gif','svg','webp'].includes(ext)) return '🖼';
+  if (['pdf'].includes(ext)) return '📄';
+  if (['rs','py','js','ts','go','rb','c','h','sh'].includes(ext)) return '📝';
+  if (['md','txt','log','toml','json','yaml','yml'].includes(ext)) return '📃';
+  if (['zip','tar','gz','bz2'].includes(ext)) return '📦';
+  return '📄';
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// --- ANT management ---
+let editingAntId = null;
+
+function showCreateModal() {
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-token').value = '';
+  document.getElementById('f-workdir').value = '';
+  document.getElementById('f-prompt').value = '';
+  document.getElementById('modal-error').style.display = 'none';
+  document.getElementById('modal-title').textContent = 'New ANT';
+  document.getElementById('create-modal').style.display = 'flex';
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function hideModal() {
+  document.getElementById('create-modal').style.display = 'none';
+}
+
+async function submitCreate() {
+  const id = document.getElementById('f-id').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  const token = document.getElementById('f-token').value.trim();
+  const workdir = document.getElementById('f-workdir').value.trim();
+  const prompt = document.getElementById('f-prompt').value.trim();
+  const errEl = document.getElementById('modal-error');
+
+  if (!id) {
+    errEl.textContent = 'ID is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const body = { id };
+    if (name) body.name = name;
+    if (token) body.token = token;
+    if (workdir) body.working_dir = workdir;
+    if (prompt) body.system_prompt = prompt;
+
+    const resp = await authFetch('/api/ants/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) {
+      // Trigger reload to spawn the new ANT.
+      await authFetch('/api/ants/reload', { method: 'POST' });
+      hideModal();
+    } else {
+      errEl.textContent = await resp.text();
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function showConfigModal(antId) {
+  editingAntId = antId;
+  const errEl = document.getElementById('config-error');
+  errEl.style.display = 'none';
+  const bot = state.bots[antId];
+  document.getElementById('config-title').textContent = `Settings: ${bot ? bot.name : antId}`;
+
+  try {
+    const resp = await authFetch(`/api/ants/${antId}/config`);
+    if (resp.ok) {
+      const cfg = await resp.json();
+      document.getElementById('c-name').value = cfg.name || '';
+      document.getElementById('c-mode').value = cfg.mode || 'claude';
+      document.getElementById('c-token').value = cfg.telegram_token || '';
+      document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
+      document.getElementById('c-workdir').value = cfg.working_dir || '';
+      document.getElementById('c-slack-bot').value = cfg.slack_bot_token || '';
+      document.getElementById('c-slack-app').value = cfg.slack_app_token || '';
+      document.getElementById('c-backup-hrs').value = cfg.backup_interval_hours || 0;
+      document.getElementById('c-sync-channels').checked = cfg.sync_channels || false;
+      document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
+      document.getElementById('c-prompt').value = cfg.system_prompt || '';
+      document.getElementById('config-modal').style.display = 'flex';
+    } else {
+      alert('Could not load config');
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+  }
+}
+
+function hideConfigModal() {
+  document.getElementById('config-modal').style.display = 'none';
+  editingAntId = null;
+}
+
+async function saveConfig() {
+  if (!editingAntId) return;
+  const errEl = document.getElementById('config-error');
+
+  const allowStr = document.getElementById('c-allow').value.trim();
+  const allow = allowStr ? allowStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
+
+  const mode = document.getElementById('c-mode').value;
+  const body = {
+    name: document.getElementById('c-name').value.trim(),
+    mode,
+    telegram_token: document.getElementById('c-token').value.trim(),
+    telegram_allow: allow,
+    working_dir: document.getElementById('c-workdir').value.trim(),
+    slack_bot_token: document.getElementById('c-slack-bot').value.trim(),
+    slack_app_token: document.getElementById('c-slack-app').value.trim(),
+    skip_permissions: mode === 'claude' || mode === 'ai',
+    sync_channels: document.getElementById('c-sync-channels').checked,
+    backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
+    backup_remote: document.getElementById('c-backup-remote').value.trim(),
+    system_prompt: document.getElementById('c-prompt').value.trim(),
+  };
+
+  try {
+    const resp = await authFetch(`/api/ants/${editingAntId}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) {
+      hideConfigModal();
+      // Update the display name locally.
+      if (state.bots[editingAntId] && body.name) {
+        state.bots[editingAntId].name = body.name;
+        renderBotList();
+        if (state.activeBot === editingAntId) {
+          document.getElementById('bot-title').textContent = body.name;
+        }
+      }
+    } else {
+      errEl.textContent = await resp.text();
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+async function deleteAnt() {
+  if (!editingAntId) return;
+  if (!confirm(`Delete ANT "${editingAntId}"? This removes its config but not the working directory.`)) return;
+
+  try {
+    const resp = await authFetch(`/api/ants/${editingAntId}`, { method: 'DELETE' });
+    if (resp.ok) {
+      hideConfigModal();
+      delete state.bots[editingAntId];
+      delete state.messages[editingAntId];
+      if (state.activeBot === editingAntId) {
+        state.activeBot = null;
+        document.getElementById('chat').style.display = 'none';
+        document.getElementById('input-area').style.display = 'none';
+        document.getElementById('no-bot').style.display = 'flex';
+        document.getElementById('bot-title').textContent = 'Select an ANT';
+      }
+      renderBotList();
+    } else {
+      alert('Delete failed: ' + await resp.text());
+    }
+  } catch (e) {
+    alert('Network error: ' + e.message);
+  }
+}
+
+// --- Crypto: HMAC-SHA256 signing ---
+async function hmacSign(credential, deviceId, payload) {
+  const encoder = new TextEncoder();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const data = `${deviceId}:${timestamp}:${payload}`;
+
+  // Import credential as HMAC key.
+  const keyBytes = hexToBytes(credential);
+  const key = await crypto.subtle.importKey(
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  const sigHex = bytesToHex(new Uint8Array(sig));
+
+  return { device_id: deviceId, timestamp, signature: sigHex, payload };
+}
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Send a signed WebSocket message (falls back to unsigned over HTTP).
+async function wsSendSigned(payload) {
+  if (!state.ws) return;
+  const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+
+  if (window.crypto && window.crypto.subtle) {
+    // HTTPS — sign the message.
+    const credential = getCredential();
+    const deviceId = localStorage.getItem('anthill_device_id') || '';
+    const envelope = await hmacSign(credential, deviceId, payloadStr);
+    state.ws.send(JSON.stringify(envelope));
+  } else {
+    // HTTP — send unsigned (server accepts both).
+    state.ws.send(payloadStr);
+  }
+}
+
+// --- Authenticated fetch ---
+function authFetch(url, options = {}) {
+  const credential = getCredential();
+  if (!options.headers) options.headers = {};
+  if (typeof options.headers.set === 'function') {
+    options.headers.set('X-Credential', credential);
+  } else {
+    options.headers['X-Credential'] = credential;
+  }
+  return fetch(url, options);
+}
+
+// --- Device management ---
+async function showDevicesModal() {
+  document.getElementById('devices-modal').style.display = 'flex';
+  document.getElementById('sidebar').classList.remove('open');
+  await loadDevices();
+}
+
+function hideDevicesModal() {
+  document.getElementById('devices-modal').style.display = 'none';
+}
+
+async function loadDevices() {
+  const credential = getCredential();
+  try {
+    const resp = await authFetch('/api/auth/devices');
+    if (!resp.ok) {
+      document.getElementById('devices-list').innerHTML = '<div style="color:var(--red)">Failed to load devices</div>';
+      return;
+    }
+    const devices = await resp.json();
+    const myCredential = credential;
+    const list = document.getElementById('devices-list');
+
+    if (devices.length === 0) {
+      list.innerHTML = '<div style="color:var(--text-dim)">No devices provisioned.</div>';
+      return;
+    }
+
+    list.innerHTML = devices.map(d => {
+      const joined = new Date(d.joined_at * 1000).toLocaleDateString();
+      const seen = timeSince(d.last_seen);
+      const isMe = d.credential === myCredential;
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #333">
+        <div>
+          <div style="font-weight:600">${escapeHtml(d.name)}${isMe ? ' <span style="color:var(--green);font-size:12px">(this device)</span>' : ''}</div>
+          <div style="font-size:12px;color:var(--text-dim)">Joined ${joined} · Last seen ${seen}</div>
+        </div>
+        ${isMe ? '' : `<button onclick="revokeDevice('${d.id}','${escapeHtml(d.name)}')" style="background:none;color:var(--red);border:1px solid var(--red);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px">Revoke</button>`}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('devices-list').innerHTML = '<div style="color:var(--red)">Error: ' + e.message + '</div>';
+  }
+}
+
+async function revokeDevice(deviceId, deviceName) {
+  if (!confirm(`Revoke "${deviceName}"? They will need a new join code to reconnect.`)) return;
+  const credential = getCredential();
+  try {
+    const resp = await authFetch(`/api/auth/devices/${deviceId}`, { method: 'DELETE' });
+    if (resp.ok) {
+      await loadDevices();
+    } else {
+      alert('Failed to revoke device');
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function timeSince(unixSecs) {
+  const secs = Math.floor(Date.now() / 1000) - unixSecs;
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+  return Math.floor(secs / 86400) + 'd ago';
+}
+
+// --- Join code generation ---
+async function generateJoinCode() {
+  const credential = getCredential();
+  try {
+    const resp = await authFetch('/api/auth/join-code', {
+      method: 'POST',
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      document.getElementById('join-code-value').textContent = data.code;
+      document.getElementById('join-code-expiry').textContent = `Expires in ${Math.floor(data.expires_in_seconds / 60)} minutes`;
+      document.getElementById('join-code-display').style.display = 'block';
+      // Auto-hide after expiry.
+      setTimeout(() => {
+        document.getElementById('join-code-display').style.display = 'none';
+      }, data.expires_in_seconds * 1000);
+    } else {
+      alert('Failed to generate code');
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// --- Authentication ---
+function getCredential() {
+  return localStorage.getItem('anthill_credential') || '';
+}
+
+function setCredential(credential, deviceName, deviceId) {
+  localStorage.setItem('anthill_credential', credential);
+  localStorage.setItem('anthill_device_name', deviceName);
+  if (deviceId) localStorage.setItem('anthill_device_id', deviceId);
+}
+
+async function checkAuth() {
+  const credential = getCredential();
+  if (!credential) {
+    showJoinScreen();
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    });
+    const data = await resp.json();
+    if (data.authenticated) {
+      showApp();
+    } else {
+      localStorage.removeItem('anthill_credential');
+      showJoinScreen();
+    }
+  } catch (e) {
+    // Server unreachable — try showing app anyway (might reconnect).
+    showApp();
+  }
+}
+
+function showJoinScreen() {
+  document.getElementById('join-screen').style.display = 'flex';
+  document.getElementById('app-container').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('join-screen').style.display = 'none';
+  document.getElementById('app-container').style.display = 'flex';
+  const deviceName = localStorage.getItem('anthill_device_name') || '';
+  if (deviceName) {
+    document.getElementById('device-name-display').textContent = '🔑 ' + deviceName;
+  }
+  connect();
+}
+
+async function joinColony() {
+  const code = document.getElementById('join-code').value.trim();
+  const name = document.getElementById('join-name').value.trim() || 'unnamed device';
+  const errEl = document.getElementById('join-error');
+
+  if (!code) {
+    errEl.textContent = 'Enter a join code.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/auth/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, device_name: name }),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      setCredential(data.credential, data.name, data.device_id);
+      showApp();
+    } else {
+      errEl.textContent = await resp.text();
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent = 'Connection failed: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// Register service worker for PWA install.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// Start — check auth first.
+checkAuth();
+</script>
+</body>
+</html>
