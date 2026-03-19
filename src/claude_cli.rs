@@ -99,12 +99,19 @@ pub async fn claude_cli_worker(
     event_tx: Option<tokio::sync::broadcast::Sender<crate::registry::WsEvent>>,
     bot_name: String,
 ) {
+    // Track the last known Telegram chat ID for cross-channel forwarding.
+    let mut last_telegram_chat_id: i64 = 0;
+
     // Ensure memory directory exists.
     if let Err(e) = std::fs::create_dir_all(&config.memory_dir) {
         log::warn!("Could not create memory dir {:?}: {}", config.memory_dir, e);
     }
 
     while let Some(req) = rx.recv().await {
+        // Remember Telegram chat IDs for cross-channel forwarding.
+        if req.source == "telegram" && req.chat_id != 0 {
+            last_telegram_chat_id = req.chat_id;
+        }
         let memory_file = config.memory_dir.join(format!("{}.md", req.chat_id));
 
         // Create memory file if it doesn't exist.
@@ -159,13 +166,13 @@ pub async fn claude_cli_worker(
         }
 
         // Forward user message to Telegram if from another channel and sync is enabled.
-        if config.sync_channels && req.source != "telegram" {
+        if config.sync_channels && req.source != "telegram" && last_telegram_chat_id != 0 {
             let label = match req.source.as_str() {
                 "web" => "🌐 web",
                 "slack" => "💬 slack",
                 _ => &req.source,
             };
-            let _ = ttx.send((chat_id, format!("_{} says:_ {}", label, req.message)));
+            let _ = ttx.send((last_telegram_chat_id, format!("_{} says:_ {}", label, req.message)));
         }
 
         // Broadcast task started event.
