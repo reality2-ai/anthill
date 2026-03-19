@@ -157,13 +157,49 @@ impl AiPlugin {
 
         // Auto-followup: if exactly one task is running for this chat,
         // queue the message as a follow-up instead of starting a new task.
-        if let Ok(map) = self.tasks.lock() {
+        // Exception: if the message starts with "!" it interrupts — cancels
+        // the current task and restarts with both prompts combined.
+        if let Ok(mut map) = self.tasks.lock() {
             let running_for_chat: Vec<u32> = map.values()
                 .filter(|t| t.chat_id == chat_id)
                 .map(|t| t.task_id)
                 .collect();
             if running_for_chat.len() == 1 {
                 let target_task = running_for_chat[0];
+
+                if text.starts_with('!') {
+                    // Interrupt: cancel current task and restart with combined context.
+                    let new_text = text.strip_prefix('!').unwrap_or(&text).trim().to_string();
+                    let original_preview = map.get(&target_task)
+                        .map(|t| t.message_preview.clone())
+                        .unwrap_or_default();
+                    if let Some(task) = map.remove(&target_task) {
+                        task.handle.abort();
+                    }
+                    drop(map);
+                    // Combined message: original context + new instruction.
+                    let combined = format!(
+                        "{}\n\nADDITIONAL CONTEXT (added while you were working):\n{}",
+                        original_preview, new_text
+                    );
+                    self.send_telegram(chat_id, &format!(
+                        "🔄 Interrupted task #{} — restarting with your addition.",
+                        target_task
+                    ));
+                    // Dispatch the combined message as a new task.
+                    let task_id = self.next_task_id;
+                    self.next_task_id += 1;
+                    let _ = self.request_tx.send(CliRequest {
+                        chat_id,
+                        message: combined,
+                        new_session: false,
+                        task_id,
+                        source,
+                    });
+                    return;
+                }
+
+                // Default: queue as follow-up.
                 drop(map);
                 if let Ok(mut fq) = self.follow_ups.lock() {
                     fq.entry(target_task).or_default().push(
@@ -175,7 +211,7 @@ impl AiPlugin {
                     );
                 }
                 self.send_telegram(chat_id, &format!(
-                    "📋 Queued as follow-up for task #{}.",
+                    "📋 Queued for after task #{}. Start with ! to interrupt and restart instead.",
                     target_task
                 ));
                 return;
