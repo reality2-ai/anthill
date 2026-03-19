@@ -164,6 +164,7 @@ impl ColonyTrust {
     }
 
     /// Verify a join code is valid (without consuming it).
+    #[allow(dead_code)]
     pub fn verify_join_code(&mut self, code: &str) -> bool {
         // Reload from disk in case CLI wrote new codes.
         self.load_join_codes();
@@ -218,6 +219,7 @@ impl ColonyTrust {
 
     /// Provision a new device directly (no join code required).
     /// Used internally for bootstrap / programmatic provisioning.
+    #[allow(dead_code)]
     pub fn provision_device(&mut self, name: &str) -> Device {
         let mut rng = OsRng;
         let device_key = SigningKey::generate(&mut rng);
@@ -475,6 +477,7 @@ pub fn encrypt_payload(credential: &str, plaintext: &[u8]) -> Result<String, Str
 
 /// Decrypt a XChaCha20-Poly1305 payload.
 /// Input is base64(nonce + ciphertext).
+#[allow(dead_code)]
 pub fn decrypt_payload(credential: &str, encrypted: &str) -> Result<Vec<u8>, String> {
     use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
     use sha2::{Sha256, Digest};
@@ -597,6 +600,7 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+#[allow(dead_code)]
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim_end_matches('=');
     let mut result = Vec::new();
