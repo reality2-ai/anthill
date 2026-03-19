@@ -230,8 +230,15 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                 "assistant" => {
                     if let Some(content) = json.pointer("/message/content") {
                         if let Some(arr) = content.as_array() {
+                            // Collect text blocks as partial result (in case no "result" event follows).
+                            let mut text_parts = Vec::new();
                             for block in arr {
                                 let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                if block_type == "text" {
+                                    if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                                        if !t.is_empty() { text_parts.push(t.to_string()); }
+                                    }
+                                }
                                 if block_type == "tool_use" {
                                     let tool = block.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
                                     let detail = match tool {
@@ -267,6 +274,10 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                                     let kind = if tool == "Agent" { "agent_spawn" } else { "tool_use" };
                                     return (Some((kind.into(), detail)), None);
                                 }
+                            }
+                            // Return text content as partial result (backup if no "result" event).
+                            if !text_parts.is_empty() {
+                                return (None, Some(text_parts.join("\n")));
                             }
                         }
                     }

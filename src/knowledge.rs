@@ -229,6 +229,38 @@ impl KnowledgeEdge {
 /// Minimum confidence for an edge to appear in the prompt.
 pub const MIN_PROMPT_CONFIDENCE: f64 = 0.15;
 
+// --- Query result types ---
+
+/// An edge in a query result, with path confidence.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct WeightedEdge {
+    pub from: NodeIndex,
+    pub to: NodeIndex,
+    pub edge: KnowledgeEdge,
+    /// Cumulative confidence along the path that led to this edge.
+    pub path_confidence: f64,
+}
+
+/// A path between two nodes with cumulative confidence.
+#[derive(Debug, Clone)]
+pub struct ConfidencePath {
+    pub nodes: Vec<NodeIndex>,
+    /// Product of edge confidences along the path (weakest link chain).
+    pub cumulative_confidence: f64,
+}
+
+/// Result of a graph query.
+#[derive(Debug, Default)]
+pub struct QueryResult {
+    /// Nodes found, with relevance scores.
+    pub nodes: Vec<(NodeIndex, KnowledgeNode, f64)>,
+    /// Edges in the result subgraph.
+    pub edges: Vec<WeightedEdge>,
+    /// Paths found (for path queries).
+    pub paths: Vec<ConfidencePath>,
+}
+
 /// Confidence below which edges are archived (moved to separate file).
 pub const ARCHIVE_CONFIDENCE: f64 = 0.10;
 
@@ -365,7 +397,273 @@ impl KnowledgeGraph {
         self.graph.node_count()
     }
 
-    // --- Layer 2: Context-aware retrieval ---
+    // --- Query API ---
+
+    /// Query: "What do I know about X?"
+    /// Finds the node, traverses outward to the given depth, returns the
+    /// subgraph with all edges and cumulative confidence.
+    pub fn query_about(&self, label: &str, max_depth: usize) -> QueryResult {
+        let mut result = QueryResult::default();
+        let root = match self.find_by_label(label) {
+            Some(idx) => idx,
+            None => {
+                // Fuzzy: try substring match.
+                let lower = label.to_lowercase();
+                match self.graph.node_indices().find(|&idx| {
+                    let l = self.graph[idx].label.to_lowercase();
+                    l.contains(&lower) || lower.contains(&l)
+                }) {
+                    Some(idx) => idx,
+                    None => return result,
+                }
+            }
+        };
+
+        // BFS traversal from root.
+        let mut visited = HashSet::new();
+        let mut frontier = vec![root];
+        visited.insert(root);
+
+        for _depth in 0..max_depth {
+            let mut next_frontier = Vec::new();
+            for &node in &frontier {
+                // Outgoing edges.
+                for edge_ref in self.graph.edges_directed(node, Direction::Outgoing) {
+                    let target = edge_ref.target();
+                    let edge = edge_ref.weight();
+                    result.edges.push(WeightedEdge {
+                        from: node,
+                        to: target,
+                        edge: edge.clone(),
+                        path_confidence: edge.confidence,
+                    });
+                    if visited.insert(target) {
+                        next_frontier.push(target);
+                    }
+                }
+                // Incoming edges (what points TO this node).
+                for edge_ref in self.graph.edges_directed(node, Direction::Incoming) {
+                    let source = edge_ref.source();
+                    let edge = edge_ref.weight();
+                    result.edges.push(WeightedEdge {
+                        from: source,
+                        to: node,
+                        edge: edge.clone(),
+                        path_confidence: edge.confidence,
+                    });
+                    if visited.insert(source) {
+                        next_frontier.push(source);
+                    }
+                }
+            }
+            frontier = next_frontier;
+        }
+
+        // Collect nodes with relevance scores (closer = higher).
+        for &idx in &visited {
+            let node = &self.graph[idx];
+            // Score: 1.0 for root, diminishes with distance.
+            let score = if idx == root { 1.0 } else {
+                // Average confidence of edges connecting to this node in result.
+                let connecting: Vec<f64> = result.edges.iter()
+                    .filter(|e| e.from == idx || e.to == idx)
+                    .map(|e| e.edge.relevance_score())
+                    .collect();
+                if connecting.is_empty() { 0.5 } else {
+                    connecting.iter().sum::<f64>() / connecting.len() as f64
+                }
+            };
+            result.nodes.push((idx, node.clone(), score));
+        }
+        result.nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        result
+    }
+
+    /// Query: "How is X connected to Y?"
+    /// Finds shortest path(s) between two nodes, with cumulative confidence
+    /// (product of edge confidences along the path — weakest link model).
+    pub fn query_path(&self, from_label: &str, to_label: &str, max_paths: usize) -> QueryResult {
+        let mut result = QueryResult::default();
+        let from = match self.find_by_label(from_label) {
+            Some(idx) => idx,
+            None => return result,
+        };
+        let to = match self.find_by_label(to_label) {
+            Some(idx) => idx,
+            None => return result,
+        };
+
+        // BFS to find shortest paths (unweighted distance, but track confidence).
+        let mut queue: std::collections::VecDeque<(NodeIndex, Vec<NodeIndex>, f64)> = std::collections::VecDeque::new();
+        queue.push_back((from, vec![from], 1.0));
+        let mut visited = HashSet::new();
+        visited.insert(from);
+
+        while let Some((current, path, cum_conf)) = queue.pop_front() {
+            if result.paths.len() >= max_paths { break; }
+            if path.len() > 10 { continue; } // max depth safety
+
+            for edge_ref in self.graph.edges_directed(current, Direction::Outgoing) {
+                let target = edge_ref.target();
+                let edge_conf = edge_ref.weight().confidence;
+                let new_conf = cum_conf * edge_conf; // product = weakest link chain
+
+                if target == to {
+                    let mut full_path = path.clone();
+                    full_path.push(to);
+                    result.paths.push(ConfidencePath {
+                        nodes: full_path,
+                        cumulative_confidence: new_conf,
+                    });
+                    continue;
+                }
+
+                if visited.insert(target) {
+                    let mut new_path = path.clone();
+                    new_path.push(target);
+                    queue.push_back((target, new_path, new_conf));
+                }
+            }
+
+            // Also traverse incoming edges (undirected search).
+            for edge_ref in self.graph.edges_directed(current, Direction::Incoming) {
+                let source = edge_ref.source();
+                let edge_conf = edge_ref.weight().confidence;
+                let new_conf = cum_conf * edge_conf;
+
+                if source == to {
+                    let mut full_path = path.clone();
+                    full_path.push(to);
+                    result.paths.push(ConfidencePath {
+                        nodes: full_path,
+                        cumulative_confidence: new_conf,
+                    });
+                    continue;
+                }
+
+                if visited.insert(source) {
+                    let mut new_path = path.clone();
+                    new_path.push(source);
+                    queue.push_back((source, new_path, new_conf));
+                }
+            }
+        }
+
+        // Sort paths by confidence (highest first).
+        result.paths.sort_by(|a, b| b.cumulative_confidence
+            .partial_cmp(&a.cumulative_confidence).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Collect all nodes and edges from found paths.
+        let mut node_set = HashSet::new();
+        for path in &result.paths {
+            for &idx in &path.nodes {
+                node_set.insert(idx);
+            }
+        }
+        for &idx in &node_set {
+            let node = &self.graph[idx];
+            result.nodes.push((idx, node.clone(), 1.0));
+        }
+        result
+    }
+
+    /// Query: "What decisions have we made?" — filter by node kind.
+    pub fn query_by_kind(&self, kind: &NodeKind) -> QueryResult {
+        let mut result = QueryResult::default();
+        for idx in self.graph.node_indices() {
+            if &self.graph[idx].kind == kind {
+                let node = &self.graph[idx];
+                // Score by average outgoing edge confidence.
+                let avg_conf: f64 = {
+                    let confs: Vec<f64> = self.graph.edges(idx)
+                        .map(|e| e.weight().confidence)
+                        .collect();
+                    if confs.is_empty() { 0.5 } else { confs.iter().sum::<f64>() / confs.len() as f64 }
+                };
+                result.nodes.push((idx, node.clone(), avg_conf));
+
+                // Include edges from these nodes.
+                for edge_ref in self.graph.edges_directed(idx, Direction::Outgoing) {
+                    result.edges.push(WeightedEdge {
+                        from: idx,
+                        to: edge_ref.target(),
+                        edge: edge_ref.weight().clone(),
+                        path_confidence: edge_ref.weight().confidence,
+                    });
+                }
+            }
+        }
+        result.nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        result
+    }
+
+    /// Query: "What's uncertain?" — edges below a confidence threshold.
+    pub fn query_uncertain(&self, threshold: f64) -> QueryResult {
+        let mut result = QueryResult::default();
+        let mut node_set = HashSet::new();
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            if edge.confidence < threshold && edge.confidence >= MIN_PROMPT_CONFIDENCE {
+                if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                    result.edges.push(WeightedEdge {
+                        from: src, to: tgt,
+                        edge: edge.clone(),
+                        path_confidence: edge.confidence,
+                    });
+                    node_set.insert(src);
+                    node_set.insert(tgt);
+                }
+            }
+        }
+        for &idx in &node_set {
+            result.nodes.push((idx, self.graph[idx].clone(), 0.5));
+        }
+        result
+    }
+
+    /// Render a QueryResult as natural language.
+    pub fn render_query_result(&self, result: &QueryResult, max_chars: usize) -> String {
+        let mut output = String::new();
+
+        // Render paths first (if any).
+        if !result.paths.is_empty() {
+            for path in &result.paths {
+                let labels: Vec<&str> = path.nodes.iter()
+                    .filter_map(|&idx| self.graph.node_weight(idx).map(|n| n.label.as_str()))
+                    .collect();
+                let bar = confidence_bar(path.cumulative_confidence);
+                output.push_str(&format!("{} [{} {:.0}%]\n",
+                    labels.join(" → "), bar, path.cumulative_confidence * 100.0));
+            }
+            output.push('\n');
+        }
+
+        // Render nodes with their edges.
+        for (idx, node, score) in &result.nodes {
+            let bar = confidence_bar(*score);
+            output.push_str(&format!("- {} ({}): {} [{}]\n",
+                node.label, node.kind, node.summary, bar));
+            for edge in &result.edges {
+                if &edge.from == idx {
+                    if let Some(target) = self.graph.node_weight(edge.to) {
+                        let ebar = confidence_bar(edge.edge.confidence);
+                        output.push_str(&format!("  → {} → {} [{} {:.0}%]\n",
+                            edge.edge.relation, target.label,
+                            ebar, edge.edge.confidence * 100.0));
+                    }
+                }
+            }
+
+            if output.len() > max_chars {
+                output.push_str("...\n");
+                break;
+            }
+        }
+
+        output
+    }
+
+    // --- Layer 2: Context-aware retrieval (keyword-based fallback) ---
 
     /// Extract relevant node indices based on message keywords.
     /// Returns nodes sorted by relevance (most keyword hits first),
@@ -797,12 +1095,79 @@ impl CachedGraph {
             return String::new();
         }
         if graph.node_count() <= 30 {
-            graph.render_full(max_chars)
+            return graph.render_full(max_chars);
+        }
+
+        // For larger graphs: try structured query first (extract entity names
+        // from the message and do graph traversal), fall back to keyword subgraph.
+        let keywords = extract_keywords(message);
+        let mut result = QueryResult::default();
+
+        // Try each keyword as a potential entity label.
+        for kw in &keywords {
+            let about = graph.query_about(kw, 1);
+            if !about.nodes.is_empty() {
+                // Merge into result (dedup by node index).
+                let existing: HashSet<usize> = result.nodes.iter().map(|(idx, _, _)| idx.index()).collect();
+                for (idx, node, score) in about.nodes {
+                    if !existing.contains(&idx.index()) {
+                        result.nodes.push((idx, node, score));
+                    }
+                }
+                result.edges.extend(about.edges);
+            }
+        }
+
+        if !result.nodes.is_empty() {
+            let mut r = graph.render_query_result(&result, max_chars);
+            r.push_str("\n(Query-based context. Read knowledge.json for full graph.)\n");
+            r
         } else {
+            // Fallback to keyword-based subgraph.
             let relevant = graph.relevant_subgraph(message, 50);
             let mut r = graph.render_subgraph(&relevant, max_chars);
-            r.push_str("\n(Showing relevant context. Read knowledge.json for full graph.)\n");
+            r.push_str("\n(Keyword-based context. Read knowledge.json for full graph.)\n");
             r
+        }
+    }
+
+    /// Run a structured query against the cached graph.
+    #[allow(dead_code)]
+    pub fn query_about(&self, label: &str, depth: usize) -> QueryResult {
+        self.maybe_reload();
+        match self.graph.lock() {
+            Ok(g) => g.query_about(label, depth),
+            Err(_) => QueryResult::default(),
+        }
+    }
+
+    /// Find paths between two entities.
+    #[allow(dead_code)]
+    pub fn query_path(&self, from: &str, to: &str, max_paths: usize) -> QueryResult {
+        self.maybe_reload();
+        match self.graph.lock() {
+            Ok(g) => g.query_path(from, to, max_paths),
+            Err(_) => QueryResult::default(),
+        }
+    }
+
+    /// Query by node kind.
+    #[allow(dead_code)]
+    pub fn query_by_kind(&self, kind: &NodeKind) -> QueryResult {
+        self.maybe_reload();
+        match self.graph.lock() {
+            Ok(g) => g.query_by_kind(kind),
+            Err(_) => QueryResult::default(),
+        }
+    }
+
+    /// Query uncertain edges.
+    #[allow(dead_code)]
+    pub fn query_uncertain(&self, threshold: f64) -> QueryResult {
+        self.maybe_reload();
+        match self.graph.lock() {
+            Ok(g) => g.query_uncertain(threshold),
+            Err(_) => QueryResult::default(),
         }
     }
 
@@ -1528,5 +1893,173 @@ mod tests {
         assert!(labels_match("Roy", "roy"));
         assert!(!labels_match("Anthill", "Beehive"));
         assert!(labels_match("AI", "ai")); // exact case-insensitive
+    }
+
+    fn build_test_graph(path: &Path) -> KnowledgeGraph {
+        let mut kg = KnowledgeGraph::load(path);
+        let roy = kg.graph.add_node(KnowledgeNode {
+            label: "Roy".into(), kind: NodeKind::Person, summary: "Architect".into(),
+            created: "2026-03-20".into(), updated: "2026-03-20".into(), tags: vec![],
+        });
+        let anthill = kg.graph.add_node(KnowledgeNode {
+            label: "Anthill".into(), kind: NodeKind::Project, summary: "AI colony".into(),
+            created: "2026-03-10".into(), updated: "2026-03-20".into(), tags: vec!["rust".into()],
+        });
+        let alfred = kg.graph.add_node(KnowledgeNode {
+            label: "Alfred".into(), kind: NodeKind::Server, summary: "Production server".into(),
+            created: "2026-03-15".into(), updated: "2026-03-20".into(), tags: vec!["linux".into()],
+        });
+        let rust = kg.graph.add_node(KnowledgeNode {
+            label: "Rust".into(), kind: NodeKind::Tool, summary: "Programming language".into(),
+            created: "2026-03-10".into(), updated: "2026-03-20".into(), tags: vec![],
+        });
+        let mut e1 = KnowledgeEdge::new("works_on", "Lead dev", "2026-03-10", Basis::Observed);
+        e1.confidence = 0.85;
+        e1.tests = 10;
+        e1.survived = 9;
+        kg.graph.add_edge(roy, anthill, e1);
+        let mut e2 = KnowledgeEdge::new("deployed_on", "", "2026-03-15", Basis::Told);
+        e2.confidence = 0.72;
+        kg.graph.add_edge(anthill, alfred, e2);
+        let mut e3 = KnowledgeEdge::new("written_in", "", "2026-03-10", Basis::Observed);
+        e3.confidence = 0.9;
+        kg.graph.add_edge(anthill, rust, e3);
+        kg.rebuild_index();
+        kg
+    }
+
+    #[test]
+    fn query_about_traverses_from_node() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-qabout");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let kg = build_test_graph(&dir.join("knowledge.json"));
+
+        // Query about Roy — should find Roy + his connections.
+        let result = kg.query_about("Roy", 2);
+        let labels: Vec<&str> = result.nodes.iter().map(|(_, n, _)| n.label.as_str()).collect();
+        assert!(labels.contains(&"Roy"));
+        assert!(labels.contains(&"Anthill")); // 1 hop
+        assert!(labels.contains(&"Alfred")); // 2 hops
+        assert!(!result.edges.is_empty());
+
+        // Root node should have score 1.0.
+        let roy_score = result.nodes.iter().find(|(_, n, _)| n.label == "Roy").unwrap().2;
+        assert!((roy_score - 1.0).abs() < 0.01);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn query_about_fuzzy_match() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-qfuzzy");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let kg = build_test_graph(&dir.join("knowledge.json"));
+
+        // "ant" should fuzzy-match "Anthill".
+        let result = kg.query_about("ant", 1);
+        assert!(!result.nodes.is_empty());
+        let labels: Vec<&str> = result.nodes.iter().map(|(_, n, _)| n.label.as_str()).collect();
+        assert!(labels.contains(&"Anthill"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn query_path_finds_connections() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-qpath");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let kg = build_test_graph(&dir.join("knowledge.json"));
+
+        // Path from Roy to Alfred: Roy → Anthill → Alfred.
+        let result = kg.query_path("Roy", "Alfred", 3);
+        assert!(!result.paths.is_empty());
+        let path = &result.paths[0];
+        assert_eq!(path.nodes.len(), 3); // Roy, Anthill, Alfred
+        // Cumulative confidence: 0.85 * 0.72 = 0.612.
+        assert!((path.cumulative_confidence - 0.612).abs() < 0.01);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn query_path_no_connection() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-qnopath");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut kg = build_test_graph(&dir.join("knowledge.json"));
+        // Add an isolated node.
+        kg.graph.add_node(KnowledgeNode {
+            label: "Unrelated".into(), kind: NodeKind::Fact, summary: "No connections".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        kg.rebuild_index();
+
+        let result = kg.query_path("Roy", "Unrelated", 3);
+        assert!(result.paths.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn query_by_kind_filters() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-qkind");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let kg = build_test_graph(&dir.join("knowledge.json"));
+
+        let result = kg.query_by_kind(&NodeKind::Server);
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].1.label, "Alfred");
+
+        let result = kg.query_by_kind(&NodeKind::Decision);
+        assert_eq!(result.nodes.len(), 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn query_uncertain_finds_weak_edges() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-quncertain");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut kg = build_test_graph(&dir.join("knowledge.json"));
+
+        // Add a weak edge.
+        let roy = kg.find_by_label("Roy").unwrap();
+        let alfred = kg.find_by_label("Alfred").unwrap();
+        let mut weak = KnowledgeEdge::new("may_admin", "uncertain", "", Basis::Assumed);
+        weak.confidence = 0.3;
+        kg.graph.add_edge(roy, alfred, weak);
+
+        let result = kg.query_uncertain(0.5);
+        assert!(!result.edges.is_empty());
+        // Should include the weak edge but not the strong ones.
+        let weak_edges: Vec<&WeightedEdge> = result.edges.iter()
+            .filter(|e| e.edge.relation == "may_admin")
+            .collect();
+        assert_eq!(weak_edges.len(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn render_query_result_includes_confidence() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-qrender");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let kg = build_test_graph(&dir.join("knowledge.json"));
+
+        let result = kg.query_about("Roy", 1);
+        let rendered = kg.render_query_result(&result, 4096);
+        // Should contain confidence indicators.
+        assert!(rendered.contains("●"));
+        assert!(rendered.contains("Roy"));
+        assert!(rendered.contains("works_on"));
+        assert!(rendered.contains("%"));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
