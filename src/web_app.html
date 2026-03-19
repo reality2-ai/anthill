@@ -600,7 +600,7 @@
     <div id="qr-join-section" style="display:none;text-align:center;margin-bottom:16px;padding:16px;background:var(--bg);border-radius:8px">
       <div id="qr-join-svg" style="display:inline-block;background:white;padding:12px;border-radius:8px"></div>
       <div id="qr-join-code" style="margin-top:8px;font-family:var(--mono);font-size:18px;letter-spacing:2px;color:var(--accent)"></div>
-      <div style="margin-top:4px;font-size:12px;color:var(--text-dim)">Scan with phone camera to join. Expires in 5 minutes.</div>
+      <div id="qr-join-timer" style="margin-top:4px;font-size:12px;color:var(--text-dim)"></div>
     </div>
     <div style="display:flex;justify-content:space-between">
       <button onclick="showQrJoin()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Add Device (QR)</button>
@@ -1455,15 +1455,22 @@ async function showDevicesModal() {
   await loadDevices();
 }
 
+let qrTimerInterval = null;
+
 function hideDevicesModal() {
   document.getElementById('devices-modal').style.display = 'none';
+  // Reset QR section so it doesn't persist.
+  document.getElementById('qr-join-section').style.display = 'none';
+  if (qrTimerInterval) { clearInterval(qrTimerInterval); qrTimerInterval = null; }
 }
 
 async function showQrJoin() {
   const section = document.getElementById('qr-join-section');
   const svgEl = document.getElementById('qr-join-svg');
   const codeEl = document.getElementById('qr-join-code');
+  const timerEl = document.getElementById('qr-join-timer');
   svgEl.innerHTML = '<div style="color:#666;padding:20px">Generating...</div>';
+  timerEl.textContent = '';
   section.style.display = 'block';
 
   try {
@@ -1472,6 +1479,29 @@ async function showQrJoin() {
     const data = await resp.json();
     svgEl.innerHTML = data.svg;
     codeEl.textContent = data.code;
+
+    // Start countdown timer (5 minutes = 300 seconds).
+    let remaining = 300;
+    const updateTimer = () => {
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      timerEl.textContent = remaining > 0
+        ? `Scan to join. Expires in ${m}:${s.toString().padStart(2, '0')}`
+        : 'Expired — tap Add Device (QR) for a new code';
+      if (remaining <= 0) {
+        clearInterval(qrTimerInterval);
+        qrTimerInterval = null;
+        timerEl.style.color = 'var(--red)';
+      } else if (remaining <= 60) {
+        timerEl.style.color = 'var(--yellow)';
+      } else {
+        timerEl.style.color = 'var(--text-dim)';
+      }
+      remaining--;
+    };
+    updateTimer();
+    if (qrTimerInterval) clearInterval(qrTimerInterval);
+    qrTimerInterval = setInterval(updateTimer, 1000);
   } catch (e) {
     svgEl.innerHTML = '<div style="color:red">' + e.message + '</div>';
   }
