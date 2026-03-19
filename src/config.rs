@@ -90,6 +90,9 @@ pub struct ClaudeConfig {
     /// When true, a message sent via Telegram also appears in Slack and the web dashboard.
     /// Default: false (security — don't leak messages across channels).
     pub sync_channels: bool,
+    /// Encrypt memory/ and files/ in git backups using the colony trust key.
+    /// Safe for public repos. Default: false.
+    pub encrypt_backups: bool,
     /// Auto-backup: commit working dir changes to git periodically.
     /// Set to 0 to disable. Default: 0 (disabled).
     pub backup_interval_hours: u32,
@@ -106,6 +109,7 @@ impl Default for ClaudeConfig {
             system_prompt: None,
             skip_permissions: false,
             sync_channels: false,
+            encrypt_backups: false,
             backup_interval_hours: 0,
             backup_remote: String::new(),
         }

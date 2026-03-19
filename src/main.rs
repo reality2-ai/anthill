@@ -63,12 +63,73 @@ struct Args {
     /// Generate a join code for a new device to join the colony.
     #[arg(long, default_missing_value = "~/.config/anthill", num_args = 0..=1)]
     join_code: Option<PathBuf>,
+
+    /// Export the colony key (for backup to 1Password, etc).
+    #[arg(long)]
+    export_key: bool,
+
+    /// Import a colony key (restore from backup).
+    #[arg(long)]
+    import_key: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
+
+    // Export colony key.
+    if args.export_key {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let key_path = format!("{}/.config/anthill/colony.key", home);
+        match std::fs::read_to_string(&key_path) {
+            Ok(key) => {
+                println!();
+                println!("  Colony key: {}", key.trim());
+                println!();
+                println!("  Store this in a password manager (1Password, Bitwarden, etc).");
+                println!("  This key encrypts backups and derives all device credentials.");
+                println!("  If lost, you cannot decrypt backups or regenerate credentials.");
+                println!();
+            }
+            Err(_) => {
+                println!("  No colony key found. Run anthill --supervise first to generate one.");
+            }
+        }
+        return Ok(());
+    }
+
+    // Import colony key.
+    if let Some(ref key) = args.import_key {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let config_dir = format!("{}/.config/anthill", home);
+        std::fs::create_dir_all(&config_dir)?;
+        let key_path = format!("{}/colony.key", config_dir);
+
+        if std::path::Path::new(&key_path).exists() {
+            println!();
+            println!("  WARNING: colony.key already exists at {}", key_path);
+            println!("  Overwriting will invalidate all existing device credentials.");
+            println!("  Existing devices will need new join codes.");
+            println!();
+            print!("  Overwrite? (y/N): ");
+            use std::io::Write;
+            std::io::stdout().flush()?;
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            if !input.trim().eq_ignore_ascii_case("y") {
+                println!("  Cancelled.");
+                return Ok(());
+            }
+        }
+
+        std::fs::write(&key_path, key.trim())?;
+        println!();
+        println!("  Colony key imported to {}", key_path);
+        println!("  Restart anthill to use the new key.");
+        println!();
+        return Ok(());
+    }
 
     // Generate join code.
     if let Some(ref raw_dir) = args.join_code {

@@ -3,15 +3,18 @@
 //! Initialises a git repo in the working dir (if not already one),
 //! and periodically commits all changes with a timestamp message.
 //! Optionally pushes to a remote.
+//!
+//! When a colony key is provided, files in memory/ and files/ are
+//! encrypted (AES-256-GCM) before commit and decrypted after.
+//! Git history contains only encrypted content — safe even in public repos.
+//! The working directory stays plaintext for the ANT and web dashboard.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 /// Ensure the working directory is a git repo.
-/// Creates one if it doesn't exist.
 pub fn ensure_git_repo(working_dir: &Path) -> anyhow::Result<()> {
-    // Ensure .gitignore excludes repos (they have their own git history).
     let gitignore_path = working_dir.join(".gitignore");
     let needs_update = if gitignore_path.exists() {
         let contents = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
@@ -51,7 +54,6 @@ pub fn ensure_git_repo(working_dir: &Path) -> anyhow::Result<()> {
         );
     }
 
-    // Create initial commit.
     let _ = Command::new("git")
         .args(["add", "-A"])
         .current_dir(working_dir)
@@ -64,14 +66,66 @@ pub fn ensure_git_repo(working_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run a single backup: stage all changes, commit, optionally push.
-fn run_backup(working_dir: &Path, remote: &str) -> anyhow::Result<bool> {
+/// Encrypt files in memory/ and files/ directories before git commit.
+/// Returns the list of files that were encrypted (to decrypt after commit).
+fn encrypt_for_backup(working_dir: &Path, credential: &str) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut originals = Vec::new();
+    let dirs_to_encrypt = ["memory", "files"];
+
+    for dir_name in &dirs_to_encrypt {
+        let dir = working_dir.join(dir_name);
+        if !dir.exists() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                if let Ok(plaintext) = std::fs::read(&path) {
+                    // Save original content for restoration after commit.
+                    originals.push((path.clone(), plaintext.clone()));
+
+                    // Encrypt and overwrite.
+                    match crate::trust::encrypt_payload(credential, &plaintext) {
+                        Ok(encrypted) => {
+                            let _ = std::fs::write(&path, encrypted.as_bytes());
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to encrypt {}: {}", path.display(), e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    originals
+}
+
+/// Restore plaintext files after git commit.
+fn restore_after_backup(originals: &[(PathBuf, Vec<u8>)]) {
+    for (path, content) in originals {
+        let _ = std::fs::write(path, content);
+    }
+}
+
+/// Run a single backup: encrypt → stage → commit → decrypt → optionally push.
+fn run_backup(working_dir: &Path, remote: &str, credential: &str) -> anyhow::Result<bool> {
+    // Encrypt files for backup (if credential provided).
+    let originals = if !credential.is_empty() {
+        encrypt_for_backup(working_dir, credential)
+    } else {
+        Vec::new()
+    };
+
     // Stage all changes.
     let output = Command::new("git")
         .args(["add", "-A"])
         .current_dir(working_dir)
         .output()?;
     if !output.status.success() {
+        restore_after_backup(&originals);
         anyhow::bail!("git add failed");
     }
 
@@ -82,16 +136,25 @@ fn run_backup(working_dir: &Path, remote: &str) -> anyhow::Result<bool> {
         .output()?;
     let status_text = String::from_utf8_lossy(&status.stdout);
     if status_text.trim().is_empty() {
-        return Ok(false); // Nothing to commit.
+        restore_after_backup(&originals);
+        return Ok(false);
     }
 
     // Commit with timestamp.
     let timestamp = chrono_timestamp();
-    let msg = format!("anthill backup — {}", timestamp);
+    let msg = if credential.is_empty() {
+        format!("anthill backup — {}", timestamp)
+    } else {
+        format!("anthill backup (encrypted) — {}", timestamp)
+    };
     let output = Command::new("git")
         .args(["commit", "-m", &msg])
         .current_dir(working_dir)
         .output()?;
+
+    // Restore plaintext immediately after commit.
+    restore_after_backup(&originals);
+
     if !output.status.success() {
         anyhow::bail!(
             "git commit failed: {}",
@@ -126,19 +189,20 @@ pub async fn backup_loop(
     working_dir: String,
     interval_hours: u32,
     remote: String,
+    credential: String,
 ) {
     let interval = Duration::from_secs(interval_hours as u64 * 3600);
     let dir = std::path::PathBuf::from(&working_dir);
 
     log::info!(
-        "Backup task started — every {}h, dir={}",
-        interval_hours, working_dir
+        "Backup task started — every {}h, dir={}, encrypted={}",
+        interval_hours, working_dir, !credential.is_empty()
     );
 
     loop {
         tokio::time::sleep(interval).await;
 
-        match run_backup(&dir, &remote) {
+        match run_backup(&dir, &remote, &credential) {
             Ok(true) => {}
             Ok(false) => log::debug!("Backup: nothing to commit"),
             Err(e) => log::error!("Backup failed: {}", e),
@@ -146,7 +210,6 @@ pub async fn backup_loop(
     }
 }
 
-/// Simple timestamp without pulling in chrono.
 fn chrono_timestamp() -> String {
     let output = Command::new("date")
         .args(["+%Y-%m-%d %H:%M:%S"])

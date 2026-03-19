@@ -162,10 +162,19 @@ pub async fn run_bot(
             ));
 
             if cfg.claude.backup_interval_hours > 0 {
+                // Read colony key for encrypted backups if enabled.
+                let backup_credential = if cfg.claude.encrypt_backups {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                    let key_path = format!("{}/.config/anthill/colony.key", home);
+                    std::fs::read_to_string(&key_path).unwrap_or_default().trim().to_string()
+                } else {
+                    String::new()
+                };
                 tokio::spawn(backup::backup_loop(
                     backup_working_dir,
                     cfg.claude.backup_interval_hours,
                     cfg.claude.backup_remote.clone(),
+                    backup_credential,
                 ));
             }
         }
