@@ -6,6 +6,7 @@
 
 use ed25519_dalek::{Signer, SigningKey, Verifier};
 use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -145,13 +146,19 @@ impl ColonyTrust {
 
     /// Generate a join code (valid for 5 minutes).
     ///
-    /// Returns a human-readable hex string (e.g. "a1b2c3d4-e5f6a7b8-...").
+    /// Returns a short human-readable hex string (e.g. "a1b2-c3d4-e5f6").
     /// Persists to disk so the running server can see CLI-generated codes.
     pub fn generate_join_code(&mut self) -> String {
         let mut rng = OsRng;
         let now = now_secs();
-        let code = self.group.generate_join_code(&mut rng, now, DEFAULT_JOIN_CODE_TTL_SECS);
+
+        // Generate a short code: 6 random bytes + 10 zero bytes.
+        // This gives 48 bits of entropy — plenty for a 5-minute single-use code.
+        let mut value = [0u8; 16];
+        rng.fill_bytes(&mut value[..6]);
+        let code = r2_trust::join::JoinCode::from_raw(value, now + DEFAULT_JOIN_CODE_TTL_SECS);
         let formatted = format_join_code(code.value());
+        self.group.inject_join_code(code);
         self.save_join_codes();
         formatted
     }
@@ -505,19 +512,28 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Format 16-byte join code as human-readable "xxxx-xxxx-xxxx-xxxx".
+/// Format 16-byte join code as short human-readable "xxxx-xxxx-xxxx".
+/// Only shows the first 6 bytes (48 bits) — plenty for a 5-minute single-use code.
 fn format_join_code(raw: &[u8; 16]) -> String {
-    let hex = hex_encode(raw);
-    format!("{}-{}-{}-{}", &hex[0..8], &hex[8..16], &hex[16..24], &hex[24..32])
+    let hex = hex_encode(&raw[..6]);
+    format!("{}-{}-{}", &hex[0..4], &hex[4..8], &hex[8..12])
 }
 
 /// Parse human-readable join code back to 16 bytes.
+/// Supports both short (xxxx-xxxx-xxxx) and full (xxxx-xxxx-xxxx-xxxx) formats.
 fn parse_join_code(code: &str) -> Option<[u8; 16]> {
     let stripped: String = code.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     let bytes = hex_decode(&stripped).ok()?;
-    if bytes.len() != 16 { return None; }
     let mut out = [0u8; 16];
-    out.copy_from_slice(&bytes);
+    if bytes.len() == 6 {
+        // Short format — pad remaining bytes with zeros.
+        out[..6].copy_from_slice(&bytes);
+    } else if bytes.len() == 16 {
+        // Full format (backwards compat).
+        out.copy_from_slice(&bytes);
+    } else {
+        return None;
+    }
     Some(out)
 }
 
@@ -615,11 +631,22 @@ mod tests {
 
     #[test]
     fn join_code_format_roundtrip() {
+        // Short format: first 6 bytes displayed, rest zeroed.
+        let mut raw = [0u8; 16];
+        raw[..6].copy_from_slice(&[0x01, 0x23, 0x45, 0x67, 0x89, 0xab]);
+        let formatted = format_join_code(&raw);
+        assert_eq!(formatted, "0123-4567-89ab");
+        let parsed = parse_join_code(&formatted).expect("parse");
+        assert_eq!(parsed, raw);
+    }
+
+    #[test]
+    fn join_code_full_format_compat() {
+        // Full 16-byte format still parses (backwards compat).
         let raw = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
                     0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10];
-        let formatted = format_join_code(&raw);
-        assert_eq!(formatted, "01234567-89abcdef-fedcba98-76543210");
-        let parsed = parse_join_code(&formatted).expect("parse");
+        let full = "01234567-89abcdef-fedcba98-76543210";
+        let parsed = parse_join_code(full).expect("parse full");
         assert_eq!(parsed, raw);
     }
 
