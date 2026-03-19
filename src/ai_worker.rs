@@ -231,6 +231,21 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
     }
 }
 
+/// Check if an error response indicates we should try a different backend.
+fn is_retriable_error(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("rate limit")
+        || lower.contains("quota")
+        || lower.contains("insufficient")
+        || lower.contains("billing")
+        || lower.contains("credits")
+        || lower.contains("exceeded")
+        || lower.contains("overloaded")
+        || lower.contains("capacity")
+        || lower.contains("timeout")
+        || lower.contains("api error")
+}
+
 /// Run the AI worker loop.
 ///
 /// Each incoming request is spawned as a concurrent task. Multiple
@@ -273,18 +288,12 @@ pub async fn ai_worker_loop(
             &config.working_dir,
             &config.repos_dir,
         );
-        // Use the first configured backend (multi-backend race is future).
-        let backend_name = config.backends.first()
-            .map(|s| s.as_str())
-            .unwrap_or("claude");
-        let (cmd_name, args) = build_backend_command(
-            backend_name,
-            &req.message,
-            &system_prompt,
-            &config.working_dir,
-            config.skip_permissions,
-            !req.new_session,
-        );
+        let backends = config.backends.clone();
+        let message_for_backends = req.message.clone();
+        let system_prompt_for_backends = system_prompt.clone();
+        let working_dir_for_backends = config.working_dir.clone();
+        let skip_perms = config.skip_permissions;
+        let continue_session = !req.new_session;
 
         let working_dir = config.working_dir.clone();
         let input_len = req.message.len() as u64;
@@ -347,61 +356,105 @@ pub async fn ai_worker_loop(
                 }
             });
 
-            let mut cmd = tokio::process::Command::new(&cmd_name);
-            cmd.args(&args);
-            cmd.current_dir(&working_dir);
-            cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::piped());
+            // Try each backend in order — fallback on failure.
+            let backend_list = if backends.is_empty() {
+                vec!["claude".to_string()]
+            } else {
+                backends.clone()
+            };
+            let mut response_text = String::new();
+            let mut _used_backend = String::new();
 
-            let response_text = match cmd.spawn() {
-                Ok(mut child) => {
-                    let stdout = child.stdout.take();
-                    let mut result_text = String::new();
+            for (idx, backend) in backend_list.iter().enumerate() {
+                let (cmd_name, args) = build_backend_command(
+                    backend,
+                    &message_for_backends,
+                    &system_prompt_for_backends,
+                    &working_dir_for_backends,
+                    skip_perms,
+                    continue_session,
+                );
 
-                    if let Some(stdout) = stdout {
-                        use tokio::io::{AsyncBufReadExt, BufReader};
-                        let mut reader = BufReader::new(stdout).lines();
+                let mut cmd = tokio::process::Command::new(&cmd_name);
+                cmd.args(&args);
+                cmd.current_dir(&working_dir);
+                cmd.stdout(std::process::Stdio::piped());
+                cmd.stderr(std::process::Stdio::piped());
 
-                        while let Ok(Some(line)) = reader.next_line().await {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                let (progress, result) = parse_backend_line(&cmd_name, &json);
+                let result = match cmd.spawn() {
+                    Ok(mut child) => {
+                        let stdout = child.stdout.take();
+                        let mut result_text = String::new();
 
-                                if let Some((kind, detail)) = progress {
-                                    if let Some(ref tx) = etx {
-                                        let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                            bot: bname.clone(),
-                                            task_id,
-                                            kind,
-                                            detail,
-                                        });
+                        if let Some(stdout) = stdout {
+                            use tokio::io::{AsyncBufReadExt, BufReader};
+                            let mut reader = BufReader::new(stdout).lines();
+
+                            while let Ok(Some(line)) = reader.next_line().await {
+                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                    let (progress, result) = parse_backend_line(&cmd_name, &json);
+
+                                    if let Some((kind, detail)) = progress {
+                                        if let Some(ref tx) = etx {
+                                            let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                                bot: bname.clone(),
+                                                task_id,
+                                                kind,
+                                                detail,
+                                            });
+                                        }
                                     }
-                                }
 
-                                if let Some(text) = result {
-                                    if !text.is_empty() {
-                                        result_text = text;
+                                    if let Some(text) = result {
+                                        if !text.is_empty() {
+                                            result_text = text;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // Wait for process to finish.
-                    let status = child.wait().await;
+                        let status = child.wait().await;
+                        let success = status.as_ref().map(|s| s.success()).unwrap_or(false);
 
-                    if result_text.is_empty() {
-                        // Fallback: read stderr.
-                        match status {
-                            Ok(s) if s.success() => "(no output)".to_string(),
-                            Ok(s) => format!("Process exited with code {}", s),
-                            Err(e) => format!("Error: {}", e),
+                        if !result_text.is_empty() && success {
+                            Ok(result_text)
+                        } else if is_retriable_error(&result_text) || !success {
+                            Err(format!("{} failed: {}", backend, result_text))
+                        } else if result_text.is_empty() {
+                            Err(format!("{}: no output", backend))
+                        } else {
+                            Ok(result_text)
                         }
-                    } else {
-                        result_text
+                    }
+                    Err(e) => Err(format!("Failed to run {}: {}", backend, e)),
+                };
+
+                match result {
+                    Ok(text) => {
+                        response_text = text;
+                        _used_backend = backend.clone();
+                        break;
+                    }
+                    Err(err) => {
+                        log::warn!("[{}] Backend '{}' failed: {}", bname, backend, err);
+                        if idx + 1 < backend_list.len() {
+                            log::info!("[{}] Falling back to '{}'", bname, backend_list[idx + 1]);
+                            if let Some(ref tx) = etx {
+                                let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                    bot: bname.clone(),
+                                    task_id,
+                                    kind: "fallback".into(),
+                                    detail: format!("{} failed, trying {}...", backend, backend_list[idx + 1]),
+                                });
+                            }
+                        } else {
+                            response_text = format!("All backends failed. Last error: {}", err);
+                            _used_backend = backend.clone();
+                        }
                     }
                 }
-                Err(e) => format!("Failed to run claude: {}", e),
-            };
+            }
 
             typing_handle.abort();
 
