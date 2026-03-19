@@ -1623,6 +1623,26 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// Modal keyboard shortcuts: Escape to close, Enter to submit.
+document.addEventListener('keydown', (e) => {
+  // Don't intercept Enter in textareas or when composing.
+  const inTextarea = e.target.tagName === 'TEXTAREA';
+
+  if (e.key === 'Escape') {
+    if (document.getElementById('config-modal').style.display === 'flex') { hideConfigModal(); return; }
+    if (document.getElementById('create-modal').style.display === 'flex') { hideModal(); return; }
+    if (document.getElementById('devices-modal').style.display === 'flex') { hideDevicesModal(); return; }
+  }
+
+  if (e.key === 'Enter' && !inTextarea) {
+    // Join screen.
+    if (document.getElementById('join-screen').style.display !== 'none') { joinColony(); return; }
+    // Create ANT modal.
+    if (document.getElementById('create-modal').style.display === 'flex') { submitCreate(); return; }
+    // Config modal — don't submit on Enter (has textareas for system prompt).
+  }
+});
+
 // Check for #join=<code> in URL (from QR scan).
 function checkHashJoin() {
   const hash = window.location.hash;
