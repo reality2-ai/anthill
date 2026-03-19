@@ -36,13 +36,42 @@ anthill --qr-join                # show QR code — scan with phone to join
 
 **Events carry decisions** (< 256 bytes). **Plugins carry data** (unlimited). This separation is enforced by design — the 256-byte limit ensures sentants never see raw content, making prompt injection via the event bus structurally impossible.
 
-![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBQbHVnaW5zW1BsdWdpbnMgLSBhbGwgSS9PXQogICAgICAgICAgICBXUFtXZWJQbHVnaW5dCiAgICAgICAgICAgIFRQW1RlbGVncmFtUGx1Z2luXQogICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgQVBbQUlQbHVnaW5dCiAgICAgICAgZW5kCiAgICAgICAgc3ViZ3JhcGggRlNNc1tTZW50YW50cyAtIHB1cmUgRlNNc10KICAgICAgICAgICAgQ1NbQ29uZHVjdG9yXQogICAgICAgIGVuZAogICAgICAgIE9MW09sbGFtYV06OjpmdXR1cmUKICAgIGVuZAoKICAgIHN1YmdyYXBoIEV4dGVybmFsW0V4dGVybmFsIEFJXQogICAgICAgIENsYXVkZVtDbGF1ZGVdCiAgICAgICAgT0FJW09wZW5BSV06OjpmdXR1cmUKICAgIGVuZAoKICAgIFBob25lIDwtLT58dHJ1c3QgZ3JvdXAgYXV0aHwgV1AKICAgIExhcHRvcCA8LS0+fHRydXN0IGdyb3VwIGF1dGh8IFdQCiAgICBURyA8LS0+IFRQCiAgICBTTCA8LS0+IFNQCiAgICBXUCA8LS0+fGV2ZW50c3wgQ1MKICAgIFRQIDwtLT58ZXZlbnRzfCBDUwogICAgU1AgPC0tPnxldmVudHN8IENTCiAgICBDUyA8LS0+fHBsdWdpbl9jYWxsfCBBUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBTUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBXUAogICAgQVAgPC0tPiBDbGF1ZGUKICAgIEFQIC0uLXxjb21pbmcgc29vbnwgT0FJCiAgICBBUCAtLi18Y29taW5nIHNvb258IE9MCgogICAgY2xhc3NEZWYgZnV0dXJlIHN0cm9rZS1kYXNoYXJyYXk6IDUgNSxvcGFjaXR5OjAuNQ==)
+![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBBTlRbRWFjaCBBTlRdCiAgICAgICAgICAgIHN1YmdyYXBoIEZTTXNbU2VudGFudCAtIHB1cmUgRlNNXQogICAgICAgICAgICAgICAgQ1NbQ29uZHVjdG9yXQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgc3ViZ3JhcGggUGx1Z2luc1tQbHVnaW5zIC0gYWxsIEkvT10KICAgICAgICAgICAgICAgIEFQW0FJUGx1Z2luXQogICAgICAgICAgICAgICAgVFBbVGVsZWdyYW1QbHVnaW5dCiAgICAgICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgZW5kCiAgICAgICAgICAgIHN1YmdyYXBoIE1lbW9yeVtNZW1vcnldCiAgICAgICAgICAgICAgICBLR1tLbm93bGVkZ2UgR3JhcGhdCiAgICAgICAgICAgICAgICBFUFtFcGlzb2Rlc10KICAgICAgICAgICAgICAgIFVNW1VzZXIgTWVtb3J5XQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgV1tXb3JrZXIgKyBXYXRjaGRvZ10KICAgICAgICBlbmQKICAgICAgICBTVVBbU3VwZXJ2aXNvcl0KICAgICAgICBUUlVTVFtSMi1UUlVTVCBDb2xvbnldCiAgICAgICAgV0VCW1dlYiBTZXJ2ZXJdCiAgICBlbmQKCiAgICBzdWJncmFwaCBCYWNrZW5kc1tBSSBCYWNrZW5kc10KICAgICAgICBDbGF1ZGVbQ2xhdWRlIENvZGVdCiAgICAgICAgQ29kZXhbT3BlbkFJIENvZGV4XQogICAgICAgIE9MW09sbGFtYV06OjpmdXR1cmUKICAgIGVuZAoKICAgIFBob25lIDwtLT58dHJ1c3QgZ3JvdXAgYXV0aHwgV0VCCiAgICBMYXB0b3AgPC0tPnx0cnVzdCBncm91cCBhdXRofCBXRUIKICAgIFRHIDwtLT4gVFAKICAgIFNMIDwtLT4gU1AKICAgIFdFQiA8LS0+fGV2ZW50c3wgQ1MKICAgIFRQIDwtLT58ZXZlbnRzfCBDUwogICAgU1AgPC0tPnxldmVudHN8IENTCiAgICBDUyA8LS0+fHBsdWdpbl9jYWxsfCBBUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBTUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBXRUIKICAgIEFQIC0tPiBXCiAgICBXIDwtLT4gQ2xhdWRlCiAgICBXIDwtLT4gQ29kZXgKICAgIFcgLS4tPnxjb21pbmcgc29vbnwgT0wKICAgIFcgLS0+IEtHCiAgICBXIC0tPiBFUAoKICAgIGNsYXNzRGVmIGZ1dHVyZSBzdHJva2UtZGFzaGFycmF5OiA1IDUsb3BhY2l0eTowLjUK)
 
-| Sentants (pure FSMs — zero I/O) | Plugins (all I/O) |
-|---|---|
-| Conductor — dispatches, routes, commands | AIPlugin — Claude, Codex (+ Ollama, Gemini coming) |
-| | TelegramPlugin — Bot API, message classification |
-| | SlackPlugin — Socket Mode, message routing |
+## Memory: Popperian knowledge graph
+
+Each ANT maintains a **knowledge graph** where all relationships are **conjectures** — not facts. Following Karl Popper's epistemology, knowledge gains strength through surviving refutation, not through confirmation.
+
+```
+Roy (person)
+  → works_on → Anthill [●●●● 85%, 12× tested]
+  → prefers → Rust     [●●●○ 62%, 3× tested]
+
+Anthill (project)
+  → deployed_on → Alfred  [●●●○ 72%]
+  → written_in → Rust     [●●●● 90%]
+  → may_target → ESP32-S3 [●●○○ 35%, assumed, untested]
+```
+
+**How confidence works:**
+- New conjectures start at 0.3–0.7 depending on how they were formed (observed > told > inferred > assumed)
+- Surviving a test (encountered in conversation, no contradiction) → confidence increases
+- Failing a test (evidence weakens it) → confidence decreases
+- Direct contradiction → confidence drops 70%
+- Untested conjectures decay ~5% per month
+- Below 15% → hidden from the AI prompt. Below 10% → archived
+
+Three memory systems work together:
+
+| System | File | Purpose |
+|---|---|---|
+| **Knowledge graph** | `memory/knowledge.json` | Entities and conjectural relationships (shared across all users) |
+| **Episodic memory** | `memory/episodes.json` | Timestamped conversation summaries — what happened, not just what's true |
+| **Per-user memory** | `memory/{chat_id}.md` | Individual preferences, name, role |
+
+The AI actively maintains all three after every response — adding entities, testing conjectures, writing episode summaries. A **graph query API** supports traversal ("what do I know about X?"), path-finding ("how is X connected to Y?"), and uncertainty queries ("what am I unsure about?").
+
+See [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) for the full specification.
 
 ## Features
 

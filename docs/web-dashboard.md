@@ -40,14 +40,19 @@ HTTPS is recommended because:
 
 ## Features
 
-- **Sidebar** — lists all ANTS with live status indicators (green = running, red = stopped)
+- **Sidebar** — lists all ANTS with status (green = running, grey = configured, red = stopped)
 - **Chat interface** — markdown rendering with headings, code blocks, tables, links
+- **Reply-to-message** — hover any message → ↩ button → quote bar above input. Select text first to quote a specific part
 - **Code blocks** — syntax highlighted with copy buttons (appear on hover)
-- **Task panel** — shows running workers with durations and cancel buttons
+- **Workers tab** — live progress per worker (tool use, stall warnings, questions), follow-up input, cancel
+- **Files tab** — browse workspace, upload/download (auth-aware), preview, delete
+- **Device management** — "Add Device (QR)" with 5-minute countdown timer, device list, revoke
+- **ANT settings** — full config editor: backends, personality, sync, backups, timeout
 - **Chat history** — persists to disk, loads on connect from any device
 - **Cross-device sync** — messages from Telegram appear in the web UI and vice versa
-- **Auto-reconnecting WebSocket** — reconnects automatically if the connection drops
-- **Responsive** — works on mobile phones, tablets, and desktops
+- **Auto-reconnecting WebSocket** — reconnects with exponential backoff
+- **Responsive** — scales fonts for mobile/tablet/desktop
+- **Keyboard shortcuts** — Escape closes modals, Enter submits join/create dialogs
 
 ## Install as a PWA
 

@@ -17,18 +17,14 @@ The 256-byte event limit isn't a constraint to work around. It's the design. It 
 
 Every sentant in Anthill is a pure FSM. No channels, no shared state, no I/O. Given the same sequence of events, a sentant always produces the same sequence of actions.
 
-| Sentant | States | Role |
-|---|---|---|
-| ClaudeCliSentant | Ready | Dispatches messages, routes responses, handles /help /ants /cancel |
-| AiSentant | Idle → Translating → Executing → Summarising | NL→command→summary pipeline (ai mode) |
-| ChunkerSentant | Idle → Buffering | Output batching with debounce (raw mode) |
-| TerminalSentant | Idle → Active | PTY lifecycle, input/output routing |
-| TelegramSentant | Ready | Session event routing (PTY exit messages) |
+| Sentant | Role |
+|---|---|
+| Conductor | Classifies commands, dispatches to plugin calls. Routes /help, /status, /cancel, /followup, /new. |
 
 A sentant's `handle_event` method does three things:
 1. Match the event hash
-2. Decide what to do (state transition, which plugin command)
-3. Push `Action::plugin_call()` or `Action::send()` into the action buffer
+2. Decide what to do (which plugin command, with what parameters)
+3. Push `Action::plugin_call()` into the action buffer
 
 That's it. No `send_telegram()`, no `pop_response()`, no mutex locks. Pure logic.
 
@@ -38,34 +34,65 @@ Plugins handle everything the sentants can't: network calls, file access, proces
 
 | Plugin | Manages |
 |---|---|
-| AIPlugin | AI backend worker (Claude, Codex, Ollama), task map, stats, message queue |
-| AiMediationPlugin | Claude API calls, output buffering, conversation history (ai mode) |
-| ChunkerPlugin | ANSI stripping, output chunking, Telegram sends (raw mode) |
+| AIPlugin | Worker dispatch, task tracking, stats, follow-up queue, message queue |
 | TelegramPlugin | Bot API polling, message classification, outgoing sender, data plane queue |
-| PtyPlugin | Pseudo-terminal spawning, I/O, process lifecycle |
+| SlackPlugin | Socket Mode WebSocket, message classification, data plane queue |
 
 Plugins communicate with each other through the **data plane** — shared `Arc<Mutex<VecDeque>>` queues, `mpsc` channels. For example:
 
 - TelegramPlugin stores the full message text in a `MessageQueue`
-- ClaudeCliPlugin reads from that same queue when the sentant tells it to dispatch
+- AIPlugin reads from that same queue when the sentant tells it to dispatch
 - The event between them carries only `{cmd_type: 0, chat_id: 123}` — 12 bytes
+
+## Worker and supervision
+
+Each AI request spawns a **worker** — a tokio task running an AI backend process. Workers are supervised:
+
+- **Watchdog** per worker: monitors stdout activity, warns at 2 minutes idle, kills at configurable timeout
+- **Stderr capture**: read concurrently with stdout to prevent pipe deadlock, included in error messages
+- **Process groups**: `process_group(0)` + `kill_on_drop` ensures cancel kills the entire process tree
+- **Follow-up queue**: messages queued for running tasks, dispatched with session continuity when the task completes
+- **Multi-backend fallback**: try each configured backend in order; fall back on failure/rate limits
+
+## Memory architecture
+
+Each ANT has three memory systems:
+
+### Knowledge graph (`memory/knowledge.json`)
+
+A directed graph of entities and conjectural relationships, following **Popperian epistemology**. All edges are conjectures with confidence weights that strengthen through surviving refutation.
+
+- **Cached in memory** — loaded once, reloaded when the AI modifies the file
+- **Graph query API** — traversal (BFS), path-finding (shortest paths with cumulative confidence), kind filtering, uncertainty queries
+- **Context-aware prompt** — for small graphs, full render; for large graphs, entity extraction from user message + graph traversal
+- **Consolidation** — periodic deduplication, parallel edge merging, chain collapsing, contradiction detection
+- **Archiving** — low-confidence edges moved to `knowledge-archive.json`
+
+### Episodic memory (`memory/episodes.json`)
+
+Timestamped conversation summaries — what happened, who was involved, what was decided. The knowledge graph captures facts; episodes capture stories.
+
+### Per-user memory (`memory/{chat_id}.md`)
+
+Freeform notes about individual users — name, role, preferences.
 
 ## Trust group security
 
-The colony implements R2-TRUST provisioning:
+The colony implements R2-TRUST provisioning with Ed25519 device identity:
 
-1. **Colony root secret** — generated on first run, stored in `colony.key`
-2. **Join codes** — short-lived (5 min), derived from root, one-use
-3. **Device credentials** — permanent, derived at join time, stored in `devices.toml`
+1. **Colony key** — Ed25519 signing key, generated on first run (`colony.key`)
+2. **Join codes** — 48-bit single-use tokens (`xxxx-xxxx-xxxx`), valid 5 minutes
+3. **Device credentials** — Ed25519 private key seed, issued at join time
 4. **Auth middleware** — every API call verified via `X-Credential` header
+5. **WebSocket signing** — HMAC-SHA256 envelopes for transport integrity
 
-The server is the **queen** — it exists the moment Anthill starts. Browsers and phones are **viewers** that join via join codes. This is the same provisioning ceremony that would bring an ESP32 into a sensor trust group.
+The server is the **queen** — it exists the moment Anthill starts. Browsers and phones are **viewers** that join via join codes or QR scans.
 
-## Event flow (claude mode)
+## Event flow
 
-![Event Flow](https://mermaid.ink/img/c2VxdWVuY2VEaWFncmFtCiAgICBwYXJ0aWNpcGFudCBVc2VyIGFzIFVzZXIKICAgIHBhcnRpY2lwYW50IFRQIGFzIFRlbGVncmFtUGx1Z2luCiAgICBwYXJ0aWNpcGFudCBNUSBhcyBNZXNzYWdlUXVldWUKICAgIHBhcnRpY2lwYW50IEJ1cyBhcyBFdmVudCBCdXMKICAgIHBhcnRpY2lwYW50IFMgYXMgQ2xhdWRlQ2xpU2VudGFudAogICAgcGFydGljaXBhbnQgQ1AgYXMgQ2xhdWRlQ2xpUGx1Z2luCiAgICBwYXJ0aWNpcGFudCBDIGFzIENsYXVkZSBDb2RlCgogICAgVXNlci0+PlRQOiBleHBsYWluIHRoaXMgY29kZQogICAgVFAtPj5NUTogc3RvcmUgZnVsbCB0ZXh0CiAgICBUUC0+PkJ1czogUkVMQVlfQ09NTUFORCBjbWQ6MCBjaGF0OjEyMwogICAgQnVzLT4+UzogZXZlbnQgMTIgYnl0ZXMKICAgIFMtPj5CdXM6IHBsdWdpbl9jYWxsIENNRF9ESVNQQVRDSAogICAgQnVzLT4+Q1A6IGV4ZWN1dGUgQ01EX0RJU1BBVENICiAgICBDUC0+Pk1ROiBwb3AgZnVsbCB0ZXh0CiAgICBDUC0+PlRQOiBUaGlua2luZy4uLgogICAgQ1AtPj5DOiBjbGF1ZGUgLXAKICAgIE5vdGUgb3ZlciBDOiBXb3JraW5nLi4uCiAgICBDLT4+Q1A6IHJlc3BvbnNlIHRleHQKICAgIENQLT4+QnVzOiBSRUxBWV9BSV9SRUFEWQogICAgQnVzLT4+UzogZXZlbnQgMTIgYnl0ZXMKICAgIFMtPj5CdXM6IHBsdWdpbl9jYWxsIENNRF9SRVBMWQogICAgQnVzLT4+Q1A6IGV4ZWN1dGUgQ01EX1JFUExZCiAgICBDUC0+PlRQOiByZXNwb25zZSB2aWEgZGF0YSBwbGFuZQogICAgVFAtPj5Vc2VyOiBmb3JtYXR0ZWQgcmVzcG9uc2U=)
+![Event Flow](https://mermaid.ink/img/c2VxdWVuY2VEaWFncmFtCiAgICBwYXJ0aWNpcGFudCBVc2VyIGFzIFVzZXIKICAgIHBhcnRpY2lwYW50IFRQIGFzIFRlbGVncmFtUGx1Z2luCiAgICBwYXJ0aWNpcGFudCBNUSBhcyBNZXNzYWdlUXVldWUKICAgIHBhcnRpY2lwYW50IEJ1cyBhcyBFdmVudCBCdXMKICAgIHBhcnRpY2lwYW50IFMgYXMgQ29uZHVjdG9yCiAgICBwYXJ0aWNpcGFudCBDUCBhcyBBSVBsdWdpbgogICAgcGFydGljaXBhbnQgVyBhcyBXb3JrZXIrV2F0Y2hkb2cKICAgIHBhcnRpY2lwYW50IEMgYXMgQ2xhdWRlIENvZGUKICAgIHBhcnRpY2lwYW50IEtHIGFzIEtub3dsZWRnZSBHcmFwaAoKICAgIFVzZXItPj5UUDogZXhwbGFpbiB0aGlzIGNvZGUKICAgIFRQLT4+TVE6IHN0b3JlIGZ1bGwgdGV4dAogICAgVFAtPj5CdXM6IFJFTEFZX0NPTU1BTkQgY21kOjAgY2hhdDoxMjMKICAgIEJ1cy0+PlM6IGV2ZW50IDEyIGJ5dGVzCiAgICBTLT4+QnVzOiBwbHVnaW5fY2FsbCBDTURfRElTUEFUQ0gKICAgIEJ1cy0+PkNQOiBleGVjdXRlIENNRF9ESVNQQVRDSAogICAgQ1AtPj5NUTogcG9wIGZ1bGwgdGV4dAogICAgQ1AtPj5XOiBDbGlSZXF1ZXN0CiAgICBXLT4+S0c6IGxvYWQgcmVsZXZhbnQgY29udGV4dAogICAgVy0+PkM6IGNsYXVkZSAtcCAod2l0aCBrbm93bGVkZ2UgZ3JhcGggaW4gcHJvbXB0KQogICAgTm90ZSBvdmVyIEM6IFdvcmtpbmcuLi4KICAgIEMtLT4+Vzogc3RyZWFtLWpzb24gcHJvZ3Jlc3MKICAgIFctLT4+Q1A6IFRhc2tQcm9ncmVzcyBldmVudHMKICAgIEMtPj5XOiByZXN1bHQgdGV4dAogICAgVy0+PktHOiB1cGRhdGUgY29uamVjdHVyZXMKICAgIFctPj5DUDogQ2xpUmVzcG9uc2UKICAgIENQLT4+QnVzOiBSRUxBWV9BSV9SRUFEWQogICAgQnVzLT4+UzogZXZlbnQgMTIgYnl0ZXMKICAgIFMtPj5CdXM6IHBsdWdpbl9jYWxsIENNRF9SRVBMWQogICAgQnVzLT4+Q1A6IGV4ZWN1dGUgQ01EX1JFUExZCiAgICBDUC0+PlRQOiByZXNwb25zZSB2aWEgZGF0YSBwbGFuZQogICAgVFAtPj5Vc2VyOiBmb3JtYXR0ZWQgcmVzcG9uc2UK)
 
-The sentant touches zero bytes of message text. It only routes IDs.
+The sentant touches zero bytes of message text. It only routes IDs. The knowledge graph is consulted before each request (relevant context injected into the prompt) and updated after each response (AI maintains conjectures).
 
 ## Supervisor
 
@@ -75,9 +102,10 @@ In production mode (`--supervise`), the supervisor:
 2. Spawns each ANT on a dedicated thread (EventBus is `!Send`)
 3. Starts the web server with auth middleware
 4. Starts the history recorder (listens to broadcast events)
-5. Monitors ANT tasks, restarts crashed ones with backoff
+5. Monitors ANT tasks, restarts crashed ones with exponential backoff
+6. Periodically consolidates knowledge graphs and archives stale conjectures
 
-ANTS register their handles with a shared `BotRegistry`, which the web server reads for the dashboard.
+ANTS register their handles with a shared `BotRegistry`, which the web server reads for the dashboard. ANTS that exist on disk but aren't running show as "Configured" in the UI.
 
 ## Why R2?
 
