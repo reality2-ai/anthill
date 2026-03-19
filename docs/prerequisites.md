@@ -14,22 +14,23 @@ source ~/.cargo/env
 cargo --version
 ```
 
-## 2. [Node.js](https://nodejs.org/) (required for Claude Code)
+## 2. AI backend
+
+Anthill currently uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as its AI backend. Support for [OpenAI](https://openai.com/), [Ollama](https://ollama.com/) (local/private), and other providers is coming soon.
+
+### Claude Code setup
+
+Requires [Node.js](https://nodejs.org/) and an [Anthropic account](https://console.anthropic.com/) (or Claude Pro/Team subscription).
 
 ```bash
+# Install Node.js
 # Arch/Manjaro
 sudo pacman -S nodejs npm
-
 # Ubuntu/Debian
 sudo apt install nodejs npm
-
 # macOS
 brew install node
 ```
-
-## 3. [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-
-You need an [Anthropic account](https://console.anthropic.com/) or a Claude Pro/Team subscription.
 
 **Install:**
 
