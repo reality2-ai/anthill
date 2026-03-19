@@ -52,6 +52,7 @@ HTTPS is recommended because:
 - **Cross-device sync** — messages from Telegram appear in the web UI and vice versa
 - **Auto-reconnecting WebSocket** — reconnects with exponential backoff
 - **Responsive** — scales fonts for mobile/tablet/desktop
+- **Slash command autocomplete** — type `/` to see all commands with descriptions, arrow keys to navigate, Tab/Enter to select
 - **Keyboard shortcuts** — Escape closes modals, Enter submits join/create dialogs
 
 ## Install as a PWA

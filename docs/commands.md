@@ -1,5 +1,7 @@
 # Commands
 
+Type `/` in the web dashboard to see the autocomplete menu with all available commands.
+
 ## Anthill commands
 
 Handled locally by the conductor — always responsive, even while workers are running.
@@ -15,6 +17,30 @@ Handled locally by the conductor — always responsive, even while workers are r
 | `/cancel all` | Cancel all running workers |
 | `/followup <text>` | Queue a message for when the current task finishes (session continuity) |
 | `/new` | Start a fresh conversation |
+
+## Analysis commands
+
+AI-driven pipelines using thematic analysis methodology.
+
+| Command | Description |
+|---|---|
+| `/analyse <file>` | Run thematic analysis on a document — extract entities, themes, relationships → knowledge graph |
+| `/reflect` | Meta-analysis of the knowledge graph itself — find patterns, test conjectures, consolidate |
+| `/specify <file>` | Generate a formal specification (RFC 2119 style) from source code |
+| `/test-vectors <file>` | Generate test cases from source code or a specification |
+
+### How analysis commands work
+
+All four follow the same thematic analysis pattern (Braun & Clarke, 2022):
+
+1. **Familiarise** — read and chunk the source material
+2. **Code** — extract entities, behaviors, or concepts
+3. **Theme** — group codes into higher-level patterns
+4. **Review** — validate against the source
+5. **Refine** — name, merge, build relationships
+6. **Integrate** — write to knowledge graph, spec file, or test file
+
+`/analyse` and `/reflect` update the knowledge graph. `/specify` writes a spec to `specs/`. `/test-vectors` outputs test cases and Rust `#[test]` stubs.
 
 ## AI backend commands
 

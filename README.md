@@ -73,21 +73,48 @@ The AI actively maintains all three after every response — adding entities, te
 
 See [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) for the full specification.
 
+## Analysis toolkit
+
+Anthill includes AI-driven pipelines built on [Braun & Clarke's thematic analysis](https://www.thematicanalysis.net/) (2022):
+
+| Command | What it does |
+|---|---|
+| `/analyse <file>` | Run thematic analysis on a document — extract entities, themes, and relationships into the knowledge graph |
+| `/reflect` | Meta-analysis: the AI reviews its own knowledge graph, finding patterns, contradictions, and opportunities to consolidate |
+| `/specify <file>` | Generate a formal RFC 2119 specification from source code — behaviors, invariants, security considerations |
+| `/test-vectors <file>` | Generate test cases from code or specs — normal, edge, error, and security categories with Rust `#[test]` stubs |
+
+These all follow the same thematic analysis pattern: **familiarise → code → theme → review → refine → integrate**. The output is always structured knowledge with confidence levels, not just text.
+
 ## Features
 
-- **Multiple ANTS** — each with its own personality, workspace, and optional Telegram/Slack
-- **Popperian knowledge graph** — structured memory where relationships are conjectures that strengthen through surviving refutation, not confirmation
-- **Episodic memory** — conversation summaries capture the narrative, not just facts
-- **Graph query API** — traversal, path-finding, kind filtering, uncertainty queries — all with confidence scores
+**Memory and knowledge:**
+- **Popperian knowledge graph** — relationships are conjectures that strengthen through surviving refutation
+- **Episodic memory** — conversation summaries capture narrative, not just facts
+- **Graph query API** — traversal, path-finding, kind filtering, uncertainty queries — all with confidence
+- **Automatic maintenance** — the AI updates the graph after every response; periodic consolidation merges duplicates and archives weak conjectures
+
+**Analysis:**
+- **Thematic analysis** — convert documents into structured knowledge (Braun & Clarke methodology)
+- **Specification generation** — extract formal specs from code
+- **Test vector generation** — generate test cases from code or specs
+- **Graph reflection** — the AI reviews and refines its own knowledge
+
+**AI and workers:**
 - **Multi-backend AI** — Claude Code, OpenAI Codex (Ollama, Gemini coming). Automatic fallback on failure/rate limits
 - **Worker supervision** — watchdog per task, stall detection, timeout killing, stderr capture
 - **Follow-up queue** — inject context into running tasks; answers routed to the right worker
-- **Web dashboard** — responsive PWA, real-time progress, reply-to-message, file browser
-- **QR device provisioning** — scan to join the colony from any phone
-- **Trust group security** — R2-TRUST Ed25519 identity, HMAC-signed WebSocket, join codes
 - **Concurrent tasks** — multiple workers per ANT; `/status` shows live progress per worker
-- **Git-backed workspace** — auto-committed on schedule, optionally encrypted and pushed
+
+**Interface:**
+- **Web dashboard** — responsive PWA, real-time progress, reply-to-message, slash command autocomplete
+- **QR device provisioning** — scan to join the colony from any phone
+- **File browser** — upload, download, preview, delete files in the ANT workspace
 - **Cross-channel sync** — messages forwarded between web, Telegram, and Slack (opt-in)
+
+**Infrastructure:**
+- **Trust group security** — R2-TRUST Ed25519 identity, HMAC-signed WebSocket, join codes
+- **Git-backed workspace** — auto-committed on schedule, optionally encrypted and pushed
 - **Auto-restart** — supervisor with exponential backoff, hot-add of new ANTS
 - **Cross-platform** — Linux (systemd), macOS (launchd), FreeBSD (rc.d)
 
@@ -115,6 +142,7 @@ Formal specifications for Anthill's architecture, following the R2-specification
 | [ANTHILL-INTRO](specs/ANTHILL-INTRO.md) | Vision, R2 relationship, design principles |
 | [ANTHILL-COLONY](specs/ANTHILL-COLONY.md) | Supervisor, ANT lifecycle, trust groups, provisioning |
 | [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) | Popperian knowledge graph, episodic memory, query API |
+| [ANTHILL-THEMATIC](specs/ANTHILL-THEMATIC.md) | Thematic analysis, spec generation, test vectors |
 | [ANTHILL-WORKER](specs/ANTHILL-WORKER.md) | AI worker lifecycle, multi-backend, supervision |
 | [ANTHILL-WEB](specs/ANTHILL-WEB.md) | Web dashboard, WebSocket protocol, REST API |
 

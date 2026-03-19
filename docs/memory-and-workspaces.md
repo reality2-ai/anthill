@@ -62,6 +62,16 @@ For small graphs (≤30 nodes), the full graph is shown. For larger graphs, the 
 
 Each section is capped (graph: 4K, episodes: 2K, user memory: 4K) to avoid bloating the prompt.
 
+## Populating the knowledge graph
+
+The graph is populated in three ways:
+
+1. **Automatic** — the AI updates the graph after every conversation turn (adding entities, testing conjectures)
+2. **Document analysis** — `/analyse <file>` runs thematic analysis (Braun & Clarke) on a document and extracts structured knowledge
+3. **Reflection** — `/reflect` performs meta-analysis on the graph itself, finding patterns, contradictions, and opportunities to consolidate
+
+For migrating existing flat memory (`ant.md`) to the graph: `/analyse memory/ant.md`
+
 ## Conversation continuity
 
 Sessions survive restarts — the AI backend resumes the most recent conversation in the working directory. Use `/new` to start fresh.

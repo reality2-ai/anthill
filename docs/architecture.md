@@ -76,6 +76,19 @@ Timestamped conversation summaries — what happened, who was involved, what was
 
 Freeform notes about individual users — name, role, preferences.
 
+## Analysis pipelines
+
+Anthill includes AI-driven analysis pipelines built on Braun & Clarke's thematic analysis methodology (2022). The same pattern — familiarise, code, theme, review, refine, integrate — applies to different inputs:
+
+| Pipeline | Input | Output |
+|---|---|---|
+| `/analyse <file>` | Any document | Entities, themes, relationships → knowledge graph |
+| `/reflect` | The knowledge graph itself | Patterns, contradictions, consolidation → refined graph |
+| `/specify <file>` | Source code | Behaviors, invariants → formal RFC 2119 specification |
+| `/test-vectors <file>` | Code or spec | Test cases (normal, edge, error, security) → Rust `#[test]` stubs |
+
+The key insight: **codes** in thematic analysis map to **graph nodes** (entities, behaviors), **themes** map to **higher-level concept nodes**, and **relationships** map to **conjectural edges** with confidence levels. This makes the thematic analysis → Popperian graph pipeline natural.
+
 ## Trust group security
 
 The colony implements R2-TRUST provisioning with Ed25519 device identity:
