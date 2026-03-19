@@ -64,6 +64,7 @@ pub async fn run_web_server(
         .route("/api/auth/devices", get(auth_list_devices))
         .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
         .route("/api/auth/join-code", post(auth_generate_join_code))
+        .route("/api/auth/qr-join", get(auth_qr_join))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -573,6 +574,46 @@ async fn auth_generate_join_code(
     Json(serde_json::json!({
         "code": code,
         "expires_in_seconds": 300,
+    })).into_response()
+}
+
+/// GET /api/auth/qr-join — generate join code + QR SVG (auth via middleware).
+async fn auth_qr_join(
+    State(state): State<AppState>,
+    req: axum::http::Request<axum::body::Body>,
+) -> impl IntoResponse {
+    let mut trust = match state.trust.lock() {
+        Ok(t) => t,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let code = trust.generate_join_code();
+    log::info!("QR join code generated: {}", code);
+
+    // Build URL from the request's Host header.
+    let host = req.headers()
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:3000");
+    let url = format!("http://{}/#join={}", host, code);
+
+    // Render QR as SVG.
+    let svg = match qrcode::QrCode::new(url.as_bytes()) {
+        Ok(qr) => {
+            let image = qr.render::<qrcode::render::svg::Color>()
+                .min_dimensions(200, 200)
+                .dark_color(qrcode::render::svg::Color("#000000"))
+                .light_color(qrcode::render::svg::Color("#ffffff"))
+                .build();
+            image
+        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    Json(serde_json::json!({
+        "code": code,
+        "url": url,
+        "svg": svg,
     })).into_response()
 }
 
