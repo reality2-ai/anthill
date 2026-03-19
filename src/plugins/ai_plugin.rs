@@ -155,6 +155,33 @@ impl AiPlugin {
             self.send_telegram(chat_id, &format!("[{}] {}", label, text));
         }
 
+        // Auto-followup: if exactly one task is running for this chat,
+        // queue the message as a follow-up instead of starting a new task.
+        if let Ok(map) = self.tasks.lock() {
+            let running_for_chat: Vec<u32> = map.values()
+                .filter(|t| t.chat_id == chat_id)
+                .map(|t| t.task_id)
+                .collect();
+            if running_for_chat.len() == 1 {
+                let target_task = running_for_chat[0];
+                drop(map);
+                if let Ok(mut fq) = self.follow_ups.lock() {
+                    fq.entry(target_task).or_default().push(
+                        crate::ai_worker::FollowUp {
+                            chat_id,
+                            message: text,
+                            source,
+                        }
+                    );
+                }
+                self.send_telegram(chat_id, &format!(
+                    "📋 Queued as follow-up for task #{}.",
+                    target_task
+                ));
+                return;
+            }
+        }
+
         let task_id = self.next_task_id;
         self.next_task_id += 1;
 
