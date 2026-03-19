@@ -36,6 +36,31 @@
     height: 100dvh;
     display: flex;
     overflow: hidden;
+    font-size: 14px;
+  }
+
+  /* Scale up fonts on larger screens */
+  @media (min-width: 768px) {
+    body { font-size: 16px; }
+    #sidebar h1 { font-size: 20px; }
+    .bot-name { font-size: 15px; }
+    .bot-meta { font-size: 13px; }
+    #header h2 { font-size: 18px; }
+    .tab { font-size: 14px; }
+    .msg { font-size: 15px; }
+    .msg pre code { font-size: 14px; }
+    #input { font-size: 15px; }
+    .field-input { font-size: 15px; }
+    .field-label { font-size: 14px; }
+    .task-preview { font-size: 14px; }
+    .file-name { font-size: 15px; }
+  }
+
+  @media (min-width: 1200px) {
+    body { font-size: 17px; }
+    .msg { font-size: 16px; }
+    .msg pre code { font-size: 15px; }
+    #input { font-size: 16px; }
   }
 
   /* Sidebar */
