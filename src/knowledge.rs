@@ -421,12 +421,18 @@ impl KnowledgeGraph {
                         if edge.confidence < MIN_PROMPT_CONFIDENCE { continue; }
                         let target_node = &self.graph[target];
                         let conf_str = if edge.confidence >= 0.8 {
-                            String::new() // established — no qualifier needed
+                            if edge.tests > 0 {
+                                format!(" [{}×]", edge.tests)
+                            } else {
+                                String::new()
+                            }
                         } else {
-                            format!(" ({}, {:.0}%{})",
-                                edge.confidence_label(),
+                            // Use visual confidence bar + percentage (language-agnostic).
+                            let bar = confidence_bar(edge.confidence);
+                            format!(" [{} {:.0}%{}]",
+                                bar,
                                 edge.confidence * 100.0,
-                                if edge.tests > 0 { format!(", {}× tested", edge.tests) } else { String::new() })
+                                if edge.tests > 0 { format!(" {}×", edge.tests) } else { String::new() })
                         };
                         output.push_str(&format!(
                             "  → {} → {}{}\n",
@@ -448,47 +454,66 @@ impl KnowledgeGraph {
 }
 
 // --- Keyword extraction (Layer 2) ---
+// Language-agnostic: uses word length filtering instead of language-specific
+// stop words. Works for English, French, German, Māori, etc.
 
 /// Extract meaningful keywords from a message.
+/// Language-agnostic: filters by length and produces both the original
+/// word and common suffix-stripped variants for fuzzy matching.
 pub fn extract_keywords(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-        .filter(|w| w.len() > 2)
-        .filter(|w| !is_stop_word(w))
-        .map(|w| stem(w))
-        .collect()
+    let mut keywords = Vec::new();
+    for word in tokenize(text) {
+        // Add the word itself.
+        keywords.push(word.clone());
+        // Add suffix-stripped variants for fuzzy matching (language-agnostic).
+        // This catches plurals, conjugations, etc. across many languages.
+        for len in [1, 2, 3] {
+            if word.len() > len + 3 {
+                keywords.push(word[..word.len() - len].to_string());
+            }
+        }
+    }
+    keywords.sort();
+    keywords.dedup();
+    keywords
 }
 
 /// Tokenize text into lowercase words.
+/// Language-agnostic: splits on non-alphanumeric, filters short words.
 fn tokenize(text: &str) -> Vec<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-        .filter(|w| w.len() > 2)
-        .filter(|w| !is_stop_word(w))
-        .map(|w| stem(w))
+        .filter(|w| w.chars().count() > 2) // char count, not byte count (for unicode)
+        .filter(|w| !is_function_word(w))
+        .map(|w| w.to_string())
         .collect()
 }
 
-/// Minimal stemming: strip common English suffixes.
-fn stem(word: &str) -> String {
-    let w = word.to_lowercase();
-    if w.len() > 5 {
-        if let Some(base) = w.strip_suffix("ing") {
-            return base.to_string();
-        }
-        if let Some(base) = w.strip_suffix("tion") {
-            return base.to_string();
-        }
-        if let Some(base) = w.strip_suffix("ed") {
-            return base.to_string();
-        }
-    }
-    if w.len() > 3 {
-        if let Some(base) = w.strip_suffix('s') {
-            return base.to_string();
-        }
-    }
-    w
+/// Filter common function words across multiple languages.
+/// Short list: only the most universal, high-frequency words.
+fn is_function_word(w: &str) -> bool {
+    matches!(
+        w,
+        // English
+        "the" | "and" | "for" | "are" | "was" | "not" | "but" | "you" | "has" | "had"
+        | "his" | "her" | "its" | "our" | "can" | "did" | "all" | "will" | "been"
+        // French
+        | "les" | "des" | "une" | "est" | "pas" | "que" | "qui" | "dans" | "pour" | "avec"
+        // German
+        | "die" | "der" | "das" | "und" | "ein" | "ist" | "den" | "von" | "mit" | "auf"
+        // Spanish
+        | "los" | "las" | "del" | "por" | "con" | "una"
+        // Common across romance languages
+        | "non"
+    )
+}
+
+/// Visual confidence bar (language-agnostic).
+/// ●●●●○ for 80%, ●●○○○ for 40%, etc.
+fn confidence_bar(confidence: f64) -> String {
+    let filled = (confidence * 5.0).round() as usize;
+    let empty = 5 - filled.min(5);
+    format!("{}{}", "●".repeat(filled.min(5)), "○".repeat(empty))
 }
 
 fn capitalize(s: &str) -> String {
@@ -497,24 +522,6 @@ fn capitalize(s: &str) -> String {
         None => String::new(),
         Some(f) => f.to_uppercase().to_string() + c.as_str(),
     }
-}
-
-fn is_stop_word(w: &str) -> bool {
-    matches!(
-        w,
-        "the" | "this" | "that" | "these" | "those"
-            | "and" | "but" | "for" | "nor" | "not" | "yet" | "also"
-            | "are" | "was" | "were" | "been" | "being" | "have" | "has" | "had"
-            | "does" | "did" | "will" | "would" | "could" | "should" | "may" | "might"
-            | "can" | "shall" | "must"
-            | "its" | "his" | "her" | "our" | "your" | "their" | "who" | "whom"
-            | "what" | "which" | "when" | "where" | "how" | "why"
-            | "with" | "from" | "into" | "about" | "between" | "through"
-            | "during" | "before" | "after" | "above" | "below" | "over" | "under"
-            | "then" | "than" | "some" | "such" | "each" | "every" | "all" | "any"
-            | "both" | "few" | "more" | "most" | "other" | "very" | "just" | "too"
-            | "here" | "there" | "now" | "well" | "only"
-    )
 }
 
 #[cfg(test)]
@@ -586,8 +593,7 @@ mod tests {
         assert!(kw.contains(&"anthill".to_string()));
         assert!(kw.contains(&"project".to_string()));
         assert!(kw.contains(&"architecture".to_string()));
-        assert!(!kw.contains(&"the".to_string())); // stop word
-        assert!(!kw.contains(&"what".to_string())); // stop word
+        assert!(!kw.contains(&"the".to_string())); // function word
     }
 
     #[test]
@@ -768,12 +774,32 @@ mod tests {
     }
 
     #[test]
-    fn stemming() {
-        assert_eq!(stem("running"), "runn");
-        assert_eq!(stem("projects"), "project");
-        assert_eq!(stem("deployed"), "deploy");
-        assert_eq!(stem("configuration"), "configura");
-        assert_eq!(stem("architecture"), "architecture"); // no matching suffix
-        assert_eq!(stem("ai"), "ai"); // too short to stem
+    fn fuzzy_matching_via_suffix_variants() {
+        // "projects" should generate "project" (suffix strip) for matching.
+        let kw = extract_keywords("Tell me about the Anthill projects");
+        assert!(kw.contains(&"anthill".to_string()));
+        assert!(kw.contains(&"project".to_string())); // "projects" minus 1 char
+    }
+
+    #[test]
+    fn multilingual_keywords() {
+        // French: function words filtered, content words kept.
+        let kw = extract_keywords("Quel est le projet Anthill?");
+        assert!(kw.contains(&"projet".to_string()));
+        assert!(kw.contains(&"anthill".to_string()));
+        assert!(!kw.contains(&"est".to_string())); // French function word
+
+        // German.
+        let kw = extract_keywords("Was ist das Anthill Projekt?");
+        assert!(kw.contains(&"anthill".to_string()));
+        assert!(kw.contains(&"projekt".to_string()));
+        assert!(!kw.contains(&"das".to_string())); // German function word
+    }
+
+    #[test]
+    fn confidence_bar_rendering() {
+        assert_eq!(confidence_bar(1.0), "●●●●●");
+        assert_eq!(confidence_bar(0.6), "●●●○○");
+        assert_eq!(confidence_bar(0.0), "○○○○○");
     }
 }
