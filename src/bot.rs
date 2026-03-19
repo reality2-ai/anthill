@@ -144,6 +144,7 @@ pub async fn run_bot(
                 repos_dir,
                 system_prompt: cfg.claude.system_prompt.clone(),
                 skip_permissions: cfg.claude.skip_permissions,
+                sync_channels: cfg.claude.sync_channels,
             };
 
             // Forward events to the global broadcast if in supervisor mode.

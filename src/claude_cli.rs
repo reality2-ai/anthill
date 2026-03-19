@@ -40,6 +40,7 @@ pub struct CliWorkerConfig {
     pub repos_dir: PathBuf,
     pub system_prompt: Option<String>,
     pub skip_permissions: bool,
+    pub sync_channels: bool,
 }
 
 /// Per-user usage statistics (shared with sentant for /usage command).
@@ -155,6 +156,16 @@ pub async fn claude_cli_worker(
                 text: req.message.clone(),
                 source: req.source.clone(),
             });
+        }
+
+        // Forward user message to Telegram if from another channel and sync is enabled.
+        if config.sync_channels && req.source != "telegram" {
+            let label = match req.source.as_str() {
+                "web" => "🌐 web",
+                "slack" => "💬 slack",
+                _ => &req.source,
+            };
+            let _ = ttx.send((chat_id, format!("_{} says:_ {}", label, req.message)));
         }
 
         // Broadcast task started event.
