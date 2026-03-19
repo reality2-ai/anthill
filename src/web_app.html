@@ -434,7 +434,7 @@
     <img src="/logo.svg" alt="Anthill" style="width:280px;margin-bottom:16px">
     <p style="color:var(--text-dim);margin-bottom:24px">Enter a join code to connect to this colony.</p>
     <div class="field">
-      <input id="join-code" class="field-input" placeholder="Enter join code (e.g. a1b-c2d)" style="text-align:center;font-size:18px;letter-spacing:2px;font-family:var(--mono)">
+      <input id="join-code" class="field-input" placeholder="xxxx-xxxx-xxxx" style="text-align:center;font-size:18px;letter-spacing:2px;font-family:var(--mono)">
     </div>
     <div class="field">
       <input id="join-name" class="field-input" placeholder="Device name (e.g. My Phone)" style="text-align:center">
@@ -843,7 +843,8 @@ function renderChat() {
   }
 
   addCopyButtons();
-  chat.scrollTop = chat.scrollHeight;
+  // Scroll after layout to ensure new content is measured.
+  requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
 }
 
 function renderTasks() {
