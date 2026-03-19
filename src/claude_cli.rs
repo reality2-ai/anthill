@@ -41,6 +41,7 @@ pub struct CliWorkerConfig {
     pub system_prompt: Option<String>,
     pub skip_permissions: bool,
     pub sync_channels: bool,
+    pub backends: Vec<String>,
 }
 
 /// Per-user usage statistics (shared with sentant for /usage command).
@@ -85,7 +86,151 @@ Your working directory has the following structure:\
 The repos/ folder is excluded from these backups via .gitignore since cloned repos \
 already have their own version control.";
 
-/// Run the Claude CLI worker loop.
+/// Detect which AI backends are installed on this system.
+pub fn detect_backends() -> Vec<(String, bool)> {
+    let backends = vec![
+        ("claude", "claude"),
+        ("codex", "codex"),
+        ("ollama", "ollama"),
+    ];
+    backends
+        .iter()
+        .map(|(name, cmd)| {
+            let installed = std::process::Command::new("which")
+                .arg(cmd)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            (name.to_string(), installed)
+        })
+        .collect()
+}
+
+/// Build command args for a specific backend.
+fn build_backend_command(
+    backend: &str,
+    message: &str,
+    system_prompt: &str,
+    _working_dir: &str,
+    skip_permissions: bool,
+    continue_session: bool,
+) -> (String, Vec<String>) {
+    match backend {
+        "codex" => {
+            let mut args = vec!["exec".to_string(), "--json".to_string()];
+            args.push(message.to_string());
+            ("codex".to_string(), args)
+        }
+        _ => {
+            // Claude (default).
+            let mut args = vec![
+                "-p".to_string(),
+                "--verbose".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+            ];
+            if skip_permissions {
+                args.push("--dangerously-skip-permissions".to_string());
+            }
+            if continue_session {
+                args.push("-c".to_string());
+            }
+            args.push("--append-system-prompt".to_string());
+            args.push(system_prompt.to_string());
+            args.push(message.to_string());
+            ("claude".to_string(), args)
+        }
+    }
+}
+
+/// Parse a response line from any backend. Returns (progress_detail, result_text) if applicable.
+fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(String, String)>, Option<String>) {
+    match backend {
+        "codex" => {
+            let msg_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            match msg_type {
+                "item.completed" => {
+                    let item_type = json.pointer("/item/type").and_then(|t| t.as_str()).unwrap_or("");
+                    match item_type {
+                        "agent_message" => {
+                            let text = json.pointer("/item/text").and_then(|t| t.as_str()).unwrap_or("");
+                            (None, Some(text.to_string()))
+                        }
+                        "command_execution" => {
+                            let cmd = json.pointer("/item/command").and_then(|c| c.as_str()).unwrap_or("");
+                            let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                            (Some(("tool_use".into(), format!("Running: {}", short))), None)
+                        }
+                        _ => (None, None)
+                    }
+                }
+                "item.started" => {
+                    let item_type = json.pointer("/item/type").and_then(|t| t.as_str()).unwrap_or("");
+                    if item_type == "command_execution" {
+                        let cmd = json.pointer("/item/command").and_then(|c| c.as_str()).unwrap_or("");
+                        let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                        (Some(("tool_use".into(), format!("Running: {}", short))), None)
+                    } else {
+                        (None, None)
+                    }
+                }
+                _ => (None, None)
+            }
+        }
+        _ => {
+            // Claude stream-json parsing.
+            let msg_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            match msg_type {
+                "assistant" => {
+                    if let Some(content) = json.pointer("/message/content") {
+                        if let Some(arr) = content.as_array() {
+                            for block in arr {
+                                let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                if block_type == "tool_use" {
+                                    let tool = block.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+                                    let detail = match tool {
+                                        "Bash" => {
+                                            let cmd = block.pointer("/input/command").and_then(|c| c.as_str()).unwrap_or("");
+                                            let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                                            format!("Running: {}", short)
+                                        }
+                                        "Read" => {
+                                            let path = block.pointer("/input/file_path").and_then(|p| p.as_str()).unwrap_or("");
+                                            format!("Reading: {}", path.rsplit('/').next().unwrap_or(path))
+                                        }
+                                        "Edit" | "Write" => {
+                                            let path = block.pointer("/input/file_path").and_then(|p| p.as_str()).unwrap_or("");
+                                            format!("Writing: {}", path.rsplit('/').next().unwrap_or(path))
+                                        }
+                                        "Glob" | "Grep" => {
+                                            let pattern = block.pointer("/input/pattern").and_then(|p| p.as_str()).unwrap_or("");
+                                            format!("Searching: {}", pattern)
+                                        }
+                                        "Agent" => {
+                                            let desc = block.pointer("/input/description").and_then(|d| d.as_str()).unwrap_or("sub-task");
+                                            format!("Spawned agent: {}", desc)
+                                        }
+                                        _ => format!("Using: {}", tool),
+                                    };
+                                    let kind = if tool == "Agent" { "agent_spawn" } else { "tool_use" };
+                                    return (Some((kind.into(), detail)), None);
+                                }
+                            }
+                        }
+                    }
+                    (None, None)
+                }
+                "result" => {
+                    let text = json.get("result").and_then(|r| r.as_str()).unwrap_or("");
+                    (None, Some(text.to_string()))
+                }
+                _ => (None, None)
+            }
+        }
+    }
+}
+
+/// Run the AI worker loop.
 ///
 /// Each incoming request is spawned as a concurrent task. Multiple
 /// requests can be in flight simultaneously.
@@ -120,29 +265,25 @@ pub async fn claude_cli_worker(
             let _ = std::fs::write(&memory_file, header);
         }
 
-        // Build the command.
-        let mut args = vec![
-            "-p".to_string(),
-            "--verbose".to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-        ];
-        if config.skip_permissions {
-            args.push("--dangerously-skip-permissions".to_string());
-        }
-        if !req.new_session {
-            args.push("-c".to_string());
-        }
-
+        // Build the command for the selected backend.
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
             &memory_file,
             &config.working_dir,
             &config.repos_dir,
         );
-        args.push("--append-system-prompt".to_string());
-        args.push(system_prompt);
-        args.push(req.message.clone());
+        // Use the first configured backend (multi-backend race is future).
+        let backend_name = config.backends.first()
+            .map(|s| s.as_str())
+            .unwrap_or("claude");
+        let (cmd_name, args) = build_backend_command(
+            backend_name,
+            &req.message,
+            &system_prompt,
+            &config.working_dir,
+            config.skip_permissions,
+            !req.new_session,
+        );
 
         let working_dir = config.working_dir.clone();
         let input_len = req.message.len() as u64;
@@ -205,7 +346,7 @@ pub async fn claude_cli_worker(
                 }
             });
 
-            let mut cmd = tokio::process::Command::new("claude");
+            let mut cmd = tokio::process::Command::new(&cmd_name);
             cmd.args(&args);
             cmd.current_dir(&working_dir);
             cmd.stdout(std::process::Stdio::piped());
@@ -221,64 +362,24 @@ pub async fn claude_cli_worker(
                         let mut reader = BufReader::new(stdout).lines();
 
                         while let Ok(Some(line)) = reader.next_line().await {
-                            // Parse stream-json line.
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                let msg_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                let (progress, result) = parse_backend_line(&cmd_name, &json);
 
-                                match msg_type {
-                                    "assistant" => {
-                                        // Check for tool_use in content.
-                                        if let Some(content) = json.pointer("/message/content") {
-                                            if let Some(arr) = content.as_array() {
-                                                for block in arr {
-                                                    let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                                                    if block_type == "tool_use" {
-                                                        let tool = block.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
-                                                        let detail = match tool {
-                                                            "Bash" => {
-                                                                let cmd = block.pointer("/input/command").and_then(|c| c.as_str()).unwrap_or("");
-                                                                let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
-                                                                format!("Running: {}", short)
-                                                            }
-                                                            "Read" => {
-                                                                let path = block.pointer("/input/file_path").and_then(|p| p.as_str()).unwrap_or("");
-                                                                format!("Reading: {}", path.rsplit('/').next().unwrap_or(path))
-                                                            }
-                                                            "Edit" | "Write" => {
-                                                                let path = block.pointer("/input/file_path").and_then(|p| p.as_str()).unwrap_or("");
-                                                                format!("Writing: {}", path.rsplit('/').next().unwrap_or(path))
-                                                            }
-                                                            "Glob" | "Grep" => {
-                                                                let pattern = block.pointer("/input/pattern").and_then(|p| p.as_str()).unwrap_or("");
-                                                                format!("Searching: {}", pattern)
-                                                            }
-                                                            "Agent" => {
-                                                                let desc = block.pointer("/input/description").and_then(|d| d.as_str()).unwrap_or("sub-task");
-                                                                format!("Spawned agent: {}", desc)
-                                                            }
-                                                            _ => format!("Using: {}", tool),
-                                                        };
+                                if let Some((kind, detail)) = progress {
+                                    if let Some(ref tx) = etx {
+                                        let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                            bot: bname.clone(),
+                                            task_id,
+                                            kind,
+                                            detail,
+                                        });
+                                    }
+                                }
 
-                                                        if let Some(ref tx) = etx {
-                                                            let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                                                bot: bname.clone(),
-                                                                task_id,
-                                                                kind: if tool == "Agent" { "agent_spawn".into() } else { "tool_use".into() },
-                                                                detail,
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                if let Some(text) = result {
+                                    if !text.is_empty() {
+                                        result_text = text;
                                     }
-                                    "result" => {
-                                        // Final result — extract the text.
-                                        if let Some(text) = json.get("result").and_then(|r| r.as_str()) {
-                                            result_text = text.to_string();
-                                        }
-                                    }
-                                    _ => {}
                                 }
                             }
                         }

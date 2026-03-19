@@ -60,6 +60,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/upload/{*path}", post(upload_file))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/ants/reload", post(reload_ants))
+        .route("/api/backends", get(list_backends))
         .route("/api/auth/devices", get(auth_list_devices))
         .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
         .route("/api/auth/join-code", post(auth_generate_join_code))
@@ -431,6 +432,14 @@ async fn delete_ant(
         Ok(()) => (StatusCode::OK, "ANT deleted").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
+}
+
+/// GET /api/backends — list available AI backends.
+async fn list_backends() -> impl IntoResponse {
+    let backends = crate::claude_cli::detect_backends();
+    Json(backends.iter().map(|(name, installed)| {
+        serde_json::json!({ "name": name, "installed": installed })
+    }).collect::<Vec<_>>())
 }
 
 /// POST /api/ants/reload — tell the supervisor to scan for new ants.

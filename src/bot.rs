@@ -116,6 +116,7 @@ pub async fn run_bot(
         system_prompt: cfg.claude.system_prompt.clone(),
         skip_permissions: cfg.claude.skip_permissions,
         sync_channels: cfg.claude.sync_channels,
+        backends: cfg.claude.backends.clone(),
     };
 
     // Forward events to the global broadcast if in supervisor mode.

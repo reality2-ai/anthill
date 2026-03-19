@@ -42,6 +42,10 @@ pub struct SlackConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ClaudeConfig {
+    /// AI backends: ["claude"], ["codex"], ["claude", "codex"], etc.
+    /// When multiple are listed, responses are returned from whichever finishes first.
+    /// Default: ["claude"]
+    pub backends: Vec<String>,
     /// Working directory. Defaults to ~/.config/anthill/ants/<id>/working.
     pub working_dir: Option<String>,
     /// Per-user memory directory (relative to working_dir).
@@ -65,6 +69,7 @@ pub struct ClaudeConfig {
 impl Default for ClaudeConfig {
     fn default() -> Self {
         Self {
+            backends: vec!["claude".into()],
             working_dir: None,
             memory_dir: "memory".into(),
             repos_dir: "repos".into(),
