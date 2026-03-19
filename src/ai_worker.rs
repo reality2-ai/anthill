@@ -111,7 +111,15 @@ Knowledge graph JSON format:\n\
 Initial confidence by basis: observed=0.7, told=0.6, inferred=0.4, assumed=0.3\n\
 Confidence formula: blend(basis_prior, survived/tests) weighted by test count.\n\
 Edges below 0.15 confidence are hidden from this prompt but kept in the graph.\n\
-Keep nodes concise. Use tags for searchability. Date everything.";
+Importance: edges have an 'importance' field (0-1) and 'references' count.\n\
+Set importance higher for knowledge central to the project. It grows with references.\n\
+Keep nodes concise. Use tags for searchability. Date everything.\n\n\
+EPISODIC MEMORY — memory/episodes.json:\n\
+After significant conversations (not trivial questions), append an episode:\n\
+{\"date\": \"YYYY-MM-DD\", \"participants\": [...], \"summary\": \"2-3 sentences\",\n\
+ \"outcomes\": [\"key decisions or results\"], \"tags\": [\"searchable\", \"keywords\"]}\n\
+Episodes capture WHAT HAPPENED — the narrative, not just facts.\n\
+Recent episodes are shown below as [EPISODES].";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
@@ -331,6 +339,9 @@ pub async fn ai_worker_loop(
     let knowledge_file = config.memory_dir.join("knowledge.json");
     let knowledge_cache = crate::knowledge::CachedGraph::new(&knowledge_file);
 
+    // Episodic memory file.
+    let episodes_file = config.memory_dir.join("episodes.json");
+
     // Periodic archiving of low-confidence edges (every 100 requests).
     let mut request_count: u32 = 0;
 
@@ -354,12 +365,19 @@ pub async fn ai_worker_loop(
         }
 
         // Build the command for the selected backend.
-        // Knowledge graph + user memory pre-loaded into the prompt.
+        // Knowledge graph + episodes + user memory pre-loaded into the prompt.
         let kg_rendered = knowledge_cache.render_for_prompt(&req.message, 4096);
+
+        // Load relevant episodes.
+        let episodes_mem = crate::knowledge::EpisodicMemory::load(&episodes_file);
+        let relevant_episodes = episodes_mem.search(&req.message, 5);
+        let episodes_rendered = episodes_mem.render(&relevant_episodes, 2048);
+
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
             &knowledge_file,
             &kg_rendered,
+            &episodes_rendered,
             &user_memory_file,
             &config.working_dir,
             &config.repos_dir,
@@ -765,6 +783,7 @@ fn build_system_prompt(
     custom: Option<&str>,
     knowledge_file: &Path,
     kg_rendered: &str,
+    episodes_rendered: &str,
     user_memory_file: &Path,
     working_dir: &str,
     repos_dir: &Path,
@@ -795,6 +814,13 @@ fn build_system_prompt(
         prompt.push_str("\n[KNOWLEDGE GRAPH]\n");
         prompt.push_str(kg_rendered);
         prompt.push_str("[/KNOWLEDGE GRAPH]\n");
+    }
+
+    // Include relevant episodes.
+    if !episodes_rendered.is_empty() {
+        prompt.push_str("\n[EPISODES]\n");
+        prompt.push_str(episodes_rendered);
+        prompt.push_str("[/EPISODES]\n");
     }
 
     // Pre-load user memory.

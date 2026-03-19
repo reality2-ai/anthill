@@ -1,8 +1,11 @@
-//! Knowledge graph — structured memory for ANTs.
+//! Knowledge graph + episodic memory for ANTs.
 //!
-//! Stores entities (people, projects, tools, concepts) and relationships
-//! as a directed graph. Persisted to JSON. Context-aware retrieval extracts
-//! relevant subgraphs for the AI prompt based on message keywords.
+//! Two memory systems:
+//! 1. Knowledge graph — entities and conjectural relationships (Popperian)
+//! 2. Episodic memory — timestamped conversation summaries
+//!
+//! Both persisted to JSON. Context-aware retrieval extracts relevant
+//! subgraphs and episodes for the AI prompt.
 
 use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::visit::EdgeRef;
@@ -115,9 +118,21 @@ pub struct KnowledgeEdge {
     /// When this conjecture was last tested or reinforced.
     #[serde(default)]
     pub last_tested: String,
+
+    // --- Importance ---
+
+    /// How important this relationship is (0.0–1.0).
+    /// High importance = shown prominently even at lower confidence.
+    /// Set by the AI based on how central this is to the project/user.
+    #[serde(default = "default_importance")]
+    pub importance: f64,
+    /// How many times this edge has been referenced in conversations.
+    #[serde(default)]
+    pub references: u32,
 }
 
 fn default_confidence() -> f64 { 0.5 }
+fn default_importance() -> f64 { 0.5 }
 
 #[allow(dead_code)]
 impl KnowledgeEdge {
@@ -133,7 +148,23 @@ impl KnowledgeEdge {
             survived: 0,
             basis,
             last_tested: String::new(),
+            importance: 0.5,
+            references: 0,
         }
+    }
+
+    /// Record that this edge was referenced in a conversation.
+    /// Importance grows logarithmically with reference count.
+    pub fn reference(&mut self) {
+        self.references += 1;
+        // Importance grows with references: 0.5 at 0 refs, ~0.8 at 10 refs, ~0.9 at 50 refs.
+        self.importance = 0.5 + 0.5 * (1.0 - 1.0 / (1.0 + self.references as f64 / 10.0));
+        self.importance = self.importance.clamp(0.0, 1.0);
+    }
+
+    /// Combined score: confidence × importance. Used for prompt prioritisation.
+    pub fn relevance_score(&self) -> f64 {
+        self.confidence * self.importance
     }
 
     /// The conjecture survived a refutation attempt — strengthen it.
@@ -420,32 +451,34 @@ impl KnowledgeGraph {
                 output.push('\n');
 
                 // Show edges to/from this node (within the subgraph).
-                // Only show edges above the minimum confidence threshold.
-                for edge_idx in self.graph.edges_directed(idx, Direction::Outgoing) {
+                // Sort by relevance (confidence × importance), filter low-confidence.
+                let mut edges: Vec<_> = self.graph.edges_directed(idx, Direction::Outgoing)
+                    .filter(|e| idx_set.contains(&e.target()))
+                    .filter(|e| e.weight().confidence >= MIN_PROMPT_CONFIDENCE)
+                    .collect();
+                edges.sort_by(|a, b| b.weight().relevance_score()
+                    .partial_cmp(&a.weight().relevance_score()).unwrap_or(std::cmp::Ordering::Equal));
+                for edge_idx in edges {
                     let target = edge_idx.target();
-                    if idx_set.contains(&target) {
-                        let edge = edge_idx.weight();
-                        if edge.confidence < MIN_PROMPT_CONFIDENCE { continue; }
-                        let target_node = &self.graph[target];
-                        let conf_str = if edge.confidence >= 0.8 {
-                            if edge.tests > 0 {
-                                format!(" [{}×]", edge.tests)
-                            } else {
-                                String::new()
-                            }
+                    let edge = edge_idx.weight();
+                    let target_node = &self.graph[target];
+                    let conf_str = if edge.confidence >= 0.8 {
+                        if edge.tests > 0 {
+                            format!(" [{}×]", edge.tests)
                         } else {
-                            // Use visual confidence bar + percentage (language-agnostic).
-                            let bar = confidence_bar(edge.confidence);
-                            format!(" [{} {:.0}%{}]",
-                                bar,
-                                edge.confidence * 100.0,
-                                if edge.tests > 0 { format!(" {}×", edge.tests) } else { String::new() })
-                        };
-                        output.push_str(&format!(
-                            "  → {} → {}{}\n",
-                            edge.relation, target_node.label, conf_str
-                        ));
-                    }
+                            String::new()
+                        }
+                    } else {
+                        let bar = confidence_bar(edge.confidence);
+                        format!(" [{} {:.0}%{}]",
+                            bar,
+                            edge.confidence * 100.0,
+                            if edge.tests > 0 { format!(" {}×", edge.tests) } else { String::new() })
+                    };
+                    output.push_str(&format!(
+                        "  → {} → {}{}\n",
+                        edge.relation, target_node.label, conf_str
+                    ));
                 }
 
                 if output.len() > max_chars {
@@ -603,6 +636,104 @@ impl CachedGraph {
     #[allow(dead_code)]
     pub fn node_count(&self) -> usize {
         self.graph.lock().map(|g| g.node_count()).unwrap_or(0)
+    }
+}
+
+// --- Episodic memory ---
+
+/// A conversation episode — a summary of what happened in a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Episode {
+    /// When this episode occurred.
+    pub date: String,
+    /// Who was involved (user identifier or name).
+    #[serde(default)]
+    pub participants: Vec<String>,
+    /// 2-3 sentence summary of what happened.
+    pub summary: String,
+    /// Key outcomes or decisions.
+    #[serde(default)]
+    pub outcomes: Vec<String>,
+    /// Tags for searchability.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// Episodic memory store — append-only log of conversation summaries.
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct EpisodicMemory {
+    pub episodes: Vec<Episode>,
+}
+
+impl EpisodicMemory {
+    /// Load from JSON file, or create empty.
+    pub fn load(path: &Path) -> Self {
+        if path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                if let Ok(mem) = serde_json::from_str(&contents) {
+                    return mem;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    /// Save to JSON file (atomic write).
+    #[allow(dead_code)]
+    pub fn save(&self, path: &Path) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, &json).is_ok() {
+                let _ = std::fs::rename(&tmp, path);
+            }
+        }
+    }
+
+    /// Retrieve recent episodes (last N).
+    pub fn recent(&self, n: usize) -> &[Episode] {
+        let start = self.episodes.len().saturating_sub(n);
+        &self.episodes[start..]
+    }
+
+    /// Search episodes by keywords in summary, outcomes, and tags.
+    pub fn search(&self, message: &str, max_results: usize) -> Vec<&Episode> {
+        let keywords = extract_keywords(message);
+        if keywords.is_empty() {
+            return self.recent(max_results).iter().collect();
+        }
+
+        let mut scored: Vec<(&Episode, u32)> = self.episodes.iter().map(|ep| {
+            let text = format!("{} {} {}",
+                ep.summary,
+                ep.outcomes.join(" "),
+                ep.tags.join(" "));
+            let tokens = extract_keywords(&text);
+            let score: u32 = keywords.iter()
+                .filter(|kw| tokens.contains(kw))
+                .count() as u32;
+            (ep, score)
+        }).filter(|(_, s)| *s > 0).collect();
+
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        scored.into_iter().take(max_results).map(|(ep, _)| ep).collect()
+    }
+
+    /// Render episodes as natural language for the prompt.
+    pub fn render(&self, episodes: &[&Episode], max_chars: usize) -> String {
+        if episodes.is_empty() { return String::new(); }
+        let mut output = String::new();
+        for ep in episodes {
+            output.push_str(&format!("- [{}] {}", ep.date, ep.summary));
+            for outcome in &ep.outcomes {
+                output.push_str(&format!("\n  → {}", outcome));
+            }
+            output.push('\n');
+            if output.len() > max_chars {
+                output.push_str("... (more episodes in episodes.json)\n");
+                break;
+            }
+        }
+        output
     }
 }
 
