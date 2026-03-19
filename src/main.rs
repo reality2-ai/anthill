@@ -11,6 +11,7 @@ mod config;
 mod events;
 mod history;
 mod knowledge;
+mod thematic;
 mod plugins;
 mod registry;
 mod sentants;

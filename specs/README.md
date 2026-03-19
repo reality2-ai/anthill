@@ -18,8 +18,11 @@ Anthill is built on [Reality2 (R2)](https://github.com/reality2-ai/r2-specificat
 ### Workers and AI
 4. [ANTHILL-WORKER](ANTHILL-WORKER.md) — AI worker lifecycle, multi-backend, supervision, follow-ups
 
+### Document Analysis
+5. [ANTHILL-THEMATIC](ANTHILL-THEMATIC.md) — Thematic analysis pipeline for document→graph conversion
+
 ### Interfaces
-5. [ANTHILL-WEB](ANTHILL-WEB.md) — Web dashboard, WebSocket protocol, authentication
+6. [ANTHILL-WEB](ANTHILL-WEB.md) — Web dashboard, WebSocket protocol, authentication
 
 ## Specification Confidence
 
@@ -41,6 +44,9 @@ How well-tested and stable is each area? Confidence grows through implementation
 | ANTHILL-WORKER | Follow-up queue | ●●○○○ | Implemented | Needs more real-world testing |
 | ANTHILL-WORKER | Question relay | ●○○○○ | Implemented | Depends on AskUserQuestion usage |
 | ANTHILL-WORKER | Stream-json parsing | ●●●●○ | Claude + Codex formats | Text block fallback added |
+| ANTHILL-THEMATIC | Document chunking | ●●●○○ | Short/long docs, paragraph breaks | Overlap + progress guarantee |
+| ANTHILL-THEMATIC | Phase prompts + parsing | ●●○○○ | JSON parse, fence stripping | Needs real document testing |
+| ANTHILL-THEMATIC | Graph integration | ●○○○○ | Prompt template only | AI does the integration |
 | ANTHILL-WEB | Dashboard SPA | ●●●●○ | Running in production | Responsive, PWA |
 | ANTHILL-WEB | WebSocket protocol | ●●●○○ | HMAC signing, snapshot, events | Unsigned fallback for HTTP |
 | ANTHILL-WEB | File management | ●●○○○ | Upload, download, delete | Auth-aware download fixed |
