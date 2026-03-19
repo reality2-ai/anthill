@@ -247,13 +247,17 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
             if handle.is_finished() {
                 log::warn!("Ant '{}' has stopped", name);
 
-                // Update registry status.
+                // Update registry status and notify web clients.
                 {
                     let bots = registry.bots.read().await;
                     if let Some(bot_handle) = bots.get(name) {
                         *bot_handle.status.write().await = BotStatusKind::Stopped;
                     }
                 }
+                let _ = registry.global_tx.send(crate::registry::WsEvent::BotStatus {
+                    bot: name.clone(),
+                    status: "stopped".into(),
+                });
 
                 if !sup_cfg.restart_on_crash {
                     continue;
@@ -284,6 +288,10 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                     Arc::clone(&registry),
                 );
                 log::info!("Ant '{}' restarted", name);
+                let _ = registry.global_tx.send(crate::registry::WsEvent::BotStatus {
+                    bot: name.clone(),
+                    status: "running".into(),
+                });
             }
         }
     }

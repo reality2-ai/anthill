@@ -917,7 +917,30 @@ async fn handle_ws(
                                 ).await;
                                 if !handled {
                                     // Regular message → dispatch to AI worker.
-                                    registry.send_message(&bot, cid, message).await;
+                                    let sent = registry.send_message(&bot, cid, message).await;
+                                    if !sent {
+                                        // ANT not running — tell the user.
+                                        let status = {
+                                            let bots = registry.bots.read().await;
+                                            if bots.contains_key(&bot) {
+                                                "stopped or crashed"
+                                            } else {
+                                                "not running (configured but not started)"
+                                            }
+                                        };
+                                        let _ = registry.global_tx.send(
+                                            crate::registry::WsEvent::Message {
+                                                bot: bot.clone(),
+                                                chat_id: cid,
+                                                text: format!(
+                                                    "⚠️ ANT '{}' is {} — message not delivered.\n\n\
+                                                    Check the server logs or restart the service.",
+                                                    bot, status
+                                                ),
+                                                task_id: 0,
+                                            }
+                                        );
+                                    }
                                 }
                             }
                             WsCommand::Cancel { bot, task_id } => {
@@ -1094,19 +1117,18 @@ async fn handle_web_command(
     };
 
     if let Some(text) = response {
-        // Broadcast as a bot message so the web client receives it.
-        let _ = handle.event_tx.send(crate::registry::WsEvent::Message {
-            bot: bot_name.into(),
-            chat_id,
-            text,
-            task_id: 0,
-        });
-        // Also broadcast the user message for history.
-        let _ = handle.event_tx.send(crate::registry::WsEvent::UserMessage {
+        // Broadcast via the global channel (WebSocket subscribes here).
+        let _ = registry.global_tx.send(crate::registry::WsEvent::UserMessage {
             bot: bot_name.into(),
             chat_id,
             text: trimmed.into(),
             source: "web".into(),
+        });
+        let _ = registry.global_tx.send(crate::registry::WsEvent::Message {
+            bot: bot_name.into(),
+            chat_id,
+            text,
+            task_id: 0,
         });
         return true;
     }
