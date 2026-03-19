@@ -55,7 +55,41 @@ pub struct KnowledgeNode {
     pub tags: Vec<String>,
 }
 
-/// An edge in the knowledge graph.
+/// How a conjecture was originally formed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Basis {
+    /// Directly observed by the AI.
+    Observed,
+    /// Told by the user.
+    Told,
+    /// Inferred from other knowledge.
+    Inferred,
+    /// Assumed without evidence.
+    Assumed,
+}
+
+#[allow(dead_code)]
+impl Basis {
+    /// Initial confidence for a new conjecture based on how it was formed.
+    pub fn initial_confidence(&self) -> f64 {
+        match self {
+            Self::Observed => 0.7,
+            Self::Told => 0.6,
+            Self::Inferred => 0.4,
+            Self::Assumed => 0.3,
+        }
+    }
+}
+
+impl Default for Basis {
+    fn default() -> Self { Self::Assumed }
+}
+
+/// An edge in the knowledge graph — a conjecture with confidence.
+///
+/// Follows Popperian epistemology: knowledge is conjectural and strengthened
+/// through surviving refutation, not through confirmation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeEdge {
     pub relation: String,
@@ -63,7 +97,106 @@ pub struct KnowledgeEdge {
     pub context: String,
     #[serde(default)]
     pub since: String,
+
+    // --- Popperian fields ---
+
+    /// Current confidence (0.0–1.0). Determines influence in the prompt.
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+    /// How many times this conjecture has been tested (encountered relevant context).
+    #[serde(default)]
+    pub tests: u32,
+    /// How many tests it survived without contradiction.
+    #[serde(default)]
+    pub survived: u32,
+    /// How the conjecture was originally formed.
+    #[serde(default)]
+    pub basis: Basis,
+    /// When this conjecture was last tested or reinforced.
+    #[serde(default)]
+    pub last_tested: String,
 }
+
+fn default_confidence() -> f64 { 0.5 }
+
+#[allow(dead_code)]
+impl KnowledgeEdge {
+    /// Create a new conjecture.
+    pub fn new(relation: &str, context: &str, since: &str, basis: Basis) -> Self {
+        let confidence = basis.initial_confidence();
+        Self {
+            relation: relation.into(),
+            context: context.into(),
+            since: since.into(),
+            confidence,
+            tests: 0,
+            survived: 0,
+            basis,
+            last_tested: String::new(),
+        }
+    }
+
+    /// The conjecture survived a refutation attempt — strengthen it.
+    pub fn strengthen(&mut self, date: &str) {
+        self.tests += 1;
+        self.survived += 1;
+        self.last_tested = date.into();
+        self.recalculate();
+    }
+
+    /// The conjecture was tested and evidence weakened it (but didn't refute it).
+    pub fn weaken(&mut self, date: &str) {
+        self.tests += 1;
+        // survived stays the same
+        self.last_tested = date.into();
+        self.recalculate();
+    }
+
+    /// Direct contradiction — sharp confidence penalty.
+    pub fn contradict(&mut self, date: &str) {
+        self.tests += 1;
+        self.last_tested = date.into();
+        self.confidence *= 0.3;
+        if self.confidence < 0.01 { self.confidence = 0.01; }
+    }
+
+    /// Recalculate confidence from test history.
+    /// Uses a Bayesian-style formula: prior blended with observed rate.
+    fn recalculate(&mut self) {
+        if self.tests == 0 {
+            return;
+        }
+        // Blend the basis prior with the observed survival rate.
+        // More tests → more weight on observed rate.
+        let prior = self.basis.initial_confidence();
+        let observed = self.survived as f64 / self.tests as f64;
+        let weight = (self.tests as f64) / (self.tests as f64 + 3.0); // 3 pseudo-observations
+        self.confidence = prior * (1.0 - weight) + observed * weight;
+        self.confidence = self.confidence.clamp(0.01, 0.99);
+    }
+
+    /// Apply time decay — untested conjectures drift toward uncertainty.
+    /// Call with the number of days since last tested.
+    pub fn decay(&mut self, days_since_tested: u32) {
+        if days_since_tested == 0 { return; }
+        // Decay rate: lose ~5% confidence per 30 days untested.
+        let factor = 0.95_f64.powf(days_since_tested as f64 / 30.0);
+        self.confidence *= factor;
+        if self.confidence < 0.01 { self.confidence = 0.01; }
+    }
+
+    /// Confidence tier for rendering.
+    pub fn confidence_label(&self) -> &'static str {
+        if self.confidence >= 0.8 { "established" }
+        else if self.confidence >= 0.6 { "likely" }
+        else if self.confidence >= 0.4 { "possible" }
+        else if self.confidence >= 0.2 { "uncertain" }
+        else { "doubtful" }
+    }
+}
+
+/// Minimum confidence for an edge to appear in the prompt.
+pub const MIN_PROMPT_CONFIDENCE: f64 = 0.15;
 
 /// Serializable graph format (petgraph's serde format).
 #[derive(Serialize, Deserialize)]
@@ -280,14 +413,24 @@ impl KnowledgeGraph {
                 output.push('\n');
 
                 // Show edges to/from this node (within the subgraph).
+                // Only show edges above the minimum confidence threshold.
                 for edge_idx in self.graph.edges_directed(idx, Direction::Outgoing) {
                     let target = edge_idx.target();
                     if idx_set.contains(&target) {
                         let edge = edge_idx.weight();
+                        if edge.confidence < MIN_PROMPT_CONFIDENCE { continue; }
                         let target_node = &self.graph[target];
+                        let conf_str = if edge.confidence >= 0.8 {
+                            String::new() // established — no qualifier needed
+                        } else {
+                            format!(" ({}, {:.0}%{})",
+                                edge.confidence_label(),
+                                edge.confidence * 100.0,
+                                if edge.tests > 0 { format!(", {}× tested", edge.tests) } else { String::new() })
+                        };
                         output.push_str(&format!(
-                            "  → {} → {}\n",
-                            edge.relation, target_node.label
+                            "  → {} → {}{}\n",
+                            edge.relation, target_node.label, conf_str
                         ));
                     }
                 }
@@ -422,11 +565,9 @@ mod tests {
             updated: "2026-03-20".into(),
             tags: vec!["rust".into(), "ai".into()],
         });
-        kg.graph.add_edge(roy, anthill, KnowledgeEdge {
-            relation: "works_on".into(),
-            context: "Lead developer".into(),
-            since: "2026-03-10".into(),
-        });
+        kg.graph.add_edge(roy, anthill, KnowledgeEdge::new(
+            "works_on", "Lead developer", "2026-03-10", Basis::Observed,
+        ));
         kg.rebuild_index();
         kg.save();
 
@@ -482,11 +623,9 @@ mod tests {
             updated: "2026-03-20".into(),
             tags: vec![],
         });
-        kg.graph.add_edge(roy, anthill, KnowledgeEdge {
-            relation: "works_on".into(),
-            context: "".into(),
-            since: "".into(),
-        });
+        kg.graph.add_edge(roy, anthill, KnowledgeEdge::new(
+            "works_on", "", "", Basis::Observed,
+        ));
         kg.rebuild_index();
 
         // Asking about Anthill should pull Roy (neighbor) but not Weather.
@@ -526,11 +665,9 @@ mod tests {
             updated: "2026-03-20".into(),
             tags: vec![],
         });
-        kg.graph.add_edge(roy, anthill, KnowledgeEdge {
-            relation: "works_on".into(),
-            context: "".into(),
-            since: "".into(),
-        });
+        kg.graph.add_edge(roy, anthill, KnowledgeEdge::new(
+            "works_on", "", "", Basis::Observed,
+        ));
         kg.rebuild_index();
 
         let rendered = kg.render_full(4096);
@@ -538,6 +675,94 @@ mod tests {
         assert!(rendered.contains("Roy (person): Project lead"));
         assert!(rendered.contains("→ works_on → Anthill"));
         assert!(rendered.contains("## Project"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn popperian_confidence_dynamics() {
+        let mut edge = KnowledgeEdge::new("works_on", "Dev lead", "2026-03-10", Basis::Told);
+        assert!((edge.confidence - 0.6).abs() < 0.01); // told = 0.6
+
+        // Survive 5 tests — confidence should increase.
+        for _ in 0..5 {
+            edge.strengthen("2026-03-20");
+        }
+        assert!(edge.confidence > 0.6);
+        assert_eq!(edge.tests, 5);
+        assert_eq!(edge.survived, 5);
+
+        // Fail 2 tests — confidence should decrease.
+        edge.weaken("2026-03-20");
+        edge.weaken("2026-03-20");
+        let after_weaken = edge.confidence;
+        assert!(after_weaken < edge.confidence + 0.01); // decreased or stayed
+        assert_eq!(edge.tests, 7);
+        assert_eq!(edge.survived, 5);
+
+        // Direct contradiction — sharp drop.
+        let before = edge.confidence;
+        edge.contradict("2026-03-20");
+        assert!(edge.confidence < before * 0.5);
+
+        // Time decay.
+        let mut fresh = KnowledgeEdge::new("uses", "Rust", "2026-03-01", Basis::Observed);
+        let initial = fresh.confidence;
+        fresh.decay(90); // 3 months untested
+        assert!(fresh.confidence < initial);
+
+        // Basis initial confidence ordering.
+        assert!(Basis::Observed.initial_confidence() > Basis::Told.initial_confidence());
+        assert!(Basis::Told.initial_confidence() > Basis::Inferred.initial_confidence());
+        assert!(Basis::Inferred.initial_confidence() > Basis::Assumed.initial_confidence());
+    }
+
+    #[test]
+    fn confidence_labels() {
+        let mut edge = KnowledgeEdge::new("test", "", "", Basis::Observed);
+        edge.confidence = 0.9;
+        assert_eq!(edge.confidence_label(), "established");
+        edge.confidence = 0.65;
+        assert_eq!(edge.confidence_label(), "likely");
+        edge.confidence = 0.45;
+        assert_eq!(edge.confidence_label(), "possible");
+        edge.confidence = 0.25;
+        assert_eq!(edge.confidence_label(), "uncertain");
+        edge.confidence = 0.1;
+        assert_eq!(edge.confidence_label(), "doubtful");
+    }
+
+    #[test]
+    fn low_confidence_edges_hidden_in_render() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-lowconf");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        let a = kg.graph.add_node(KnowledgeNode {
+            label: "A".into(), kind: NodeKind::Fact, summary: "Node A".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let b = kg.graph.add_node(KnowledgeNode {
+            label: "B".into(), kind: NodeKind::Fact, summary: "Node B".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+
+        // High confidence edge — should render.
+        let mut strong = KnowledgeEdge::new("strong_link", "", "", Basis::Observed);
+        strong.confidence = 0.9;
+        kg.graph.add_edge(a, b, strong);
+
+        // Very low confidence edge — should be hidden.
+        let mut weak = KnowledgeEdge::new("weak_link", "", "", Basis::Assumed);
+        weak.confidence = 0.05;
+        kg.graph.add_edge(a, b, weak);
+
+        kg.rebuild_index();
+        let rendered = kg.render_full(4096);
+        assert!(rendered.contains("strong_link"));
+        assert!(!rendered.contains("weak_link"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

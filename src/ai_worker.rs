@@ -90,17 +90,27 @@ const MEMORY_PREAMBLE: &str = "\
 You have a knowledge graph and a per-user memory file:\n\
 - Knowledge graph (shared, structured): memory/knowledge.json — shown below as [KNOWLEDGE GRAPH]\n\
 - User memory (per-user, freeform): shown below as [USER MEMORY]\n\n\
-IMPORTANT — after EVERY response, silently update your memory:\n\
-  1. New entity (person, project, server, tool, concept)? → add a node to knowledge.json\n\
-  2. New relationship between entities? → add an edge to knowledge.json\n\
-  3. Decision made or event occurred? → add a decision/event node with edges\n\
-  4. User-specific fact (name, role, preferences)? → append to user memory file\n\
-  5. Anything outdated? → update or remove it\n\
+THE KNOWLEDGE GRAPH IS POPPERIAN — all edges are conjectures with confidence weights.\n\
+Edges gain strength by surviving refutation, not by confirmation.\n\n\
+AFTER EVERY RESPONSE, silently review and update the knowledge graph:\n\
+  1. New entity? → add a node\n\
+  2. New relationship? → add an edge as a CONJECTURE with appropriate basis and confidence\n\
+  3. Does this conversation CONFIRM an existing edge? → increment 'survived' and 'tests'\n\
+  4. Does this conversation CONTRADICT an existing edge? → increment 'tests' only (weakens it)\n\
+  5. Direct contradiction with strong evidence? → set confidence *= 0.3\n\
+  6. User-specific fact? → append to user memory file\n\
 Do this WITHOUT telling the user — just quietly read, modify, and write the files.\n\n\
 Knowledge graph JSON format:\n\
   nodes: [{\"label\": \"...\", \"kind\": \"person|project|server|tool|concept|decision|event|fact\",\n\
-           \"summary\": \"one line\", \"created\": \"YYYY-MM-DD\", \"updated\": \"YYYY-MM-DD\", \"tags\": [...]}]\n\
-  edges: [[from_index, to_index, {\"relation\": \"...\", \"context\": \"...\", \"since\": \"YYYY-MM-DD\"}]]\n\
+           \"summary\": \"...\", \"created\": \"YYYY-MM-DD\", \"updated\": \"YYYY-MM-DD\", \"tags\": [...]}]\n\
+  edges: [[from_idx, to_idx, {\n\
+    \"relation\": \"...\", \"context\": \"...\", \"since\": \"YYYY-MM-DD\",\n\
+    \"confidence\": 0.0-1.0, \"tests\": N, \"survived\": N,\n\
+    \"basis\": \"observed|told|inferred|assumed\", \"last_tested\": \"YYYY-MM-DD\"\n\
+  }]]\n\
+Initial confidence by basis: observed=0.7, told=0.6, inferred=0.4, assumed=0.3\n\
+Confidence formula: blend(basis_prior, survived/tests) weighted by test count.\n\
+Edges below 0.15 confidence are hidden from this prompt but kept in the graph.\n\
 Keep nodes concise. Use tags for searchability. Date everything.";
 
 const WORKSPACE_PREAMBLE: &str = "\
