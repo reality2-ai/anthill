@@ -75,6 +75,14 @@ struct Args {
     /// Import a colony key (restore from backup).
     #[arg(long)]
     import_key: Option<String>,
+
+    /// Generate a join QR code — scan with a phone to open the web app and join.
+    #[arg(long, default_missing_value = "~/.config/anthill", num_args = 0..=1)]
+    qr_join: Option<PathBuf>,
+
+    /// Hostname override for QR join URL (default: auto-detect).
+    #[arg(long)]
+    hostname: Option<String>,
 }
 
 #[tokio::main]
@@ -163,6 +171,53 @@ async fn main() -> anyhow::Result<()> {
         println!("  Expires in: 5 minutes");
         println!();
         println!("  Enter this in the Anthill web dashboard to join the colony.");
+        println!();
+        return Ok(());
+    }
+
+    // QR join — generate join code + QR with URL.
+    if let Some(ref raw_dir) = args.qr_join {
+        let config_dir = if raw_dir.starts_with("~") {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            PathBuf::from(raw_dir.to_string_lossy().replacen("~", &home, 1))
+        } else {
+            raw_dir.clone()
+        };
+
+        // Load supervisor config for the HTTP port.
+        let sup_toml = config_dir.join("supervisor.toml");
+        let port: u16 = if sup_toml.exists() {
+            let contents = std::fs::read_to_string(&sup_toml)?;
+            toml::from_str::<toml::Value>(&contents)
+                .ok()
+                .and_then(|v| v.get("http_port")?.as_integer())
+                .map(|p| p as u16)
+                .unwrap_or(3000)
+        } else {
+            3000
+        };
+
+        // Detect hostname.
+        let hostname = args.hostname.clone().unwrap_or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|h| h.trim().to_string())
+                .unwrap_or_else(|| "localhost".into())
+        });
+
+        let mut trust_state = trust::ColonyTrust::load(&config_dir)?;
+        let code = trust_state.generate_join_code();
+        let url = format!("http://{}:{}/#join={}", hostname, port, code);
+
+        println!();
+        println!("  Scan this QR code to join the colony:");
+        println!();
+        print_qr(&url);
+        println!();
+        println!("  URL: {}", url);
+        println!("  Code: {}  (expires in 5 minutes)", code);
         println!();
         return Ok(());
     }

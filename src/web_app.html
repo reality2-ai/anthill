@@ -1576,8 +1576,29 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
-// Start — check auth first.
+// Check for #join=<code> in URL (from QR scan).
+function checkHashJoin() {
+  const hash = window.location.hash;
+  if (hash.startsWith('#join=')) {
+    const code = hash.slice(6);
+    if (code) {
+      // Pre-fill the join code and show join screen.
+      setTimeout(() => {
+        const input = document.getElementById('join-code');
+        if (input) {
+          input.value = code;
+          input.focus();
+        }
+      }, 100);
+      // Clear the hash so it doesn't persist on reload.
+      history.replaceState(null, '', window.location.pathname);
+    }
+  }
+}
+
+// Start — check auth first, then check for join code in URL.
 checkAuth();
+checkHashJoin();
 </script>
 </body>
 </html>
