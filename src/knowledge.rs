@@ -1118,7 +1118,7 @@ impl CachedGraph {
             }
         }
 
-        if !result.nodes.is_empty() {
+        let mut meta_result = if !result.nodes.is_empty() {
             let mut r = graph.render_query_result(&result, max_chars);
             r.push_str("\n(Query-based context. Read knowledge.json for full graph.)\n");
             r
@@ -1128,7 +1128,47 @@ impl CachedGraph {
             let mut r = graph.render_subgraph(&relevant, max_chars);
             r.push_str("\n(Keyword-based context. Read knowledge.json for full graph.)\n");
             r
+        };
+
+        // Also scan topic graphs in memory/graphs/ for relevant context.
+        let graphs_dir = self.file_path.parent()
+            .map(|p| p.join("graphs"));
+        if let Some(dir) = graphs_dir {
+            if dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    let remaining = max_chars.saturating_sub(meta_result.len());
+                    if remaining > 200 {
+                        let mut topic_context = String::new();
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                                let topic_graph = KnowledgeGraph::load(&path);
+                                if topic_graph.node_count() == 0 { continue; }
+                                let topic_name = path.file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                // Check if this topic is relevant to the message.
+                                let relevant = topic_graph.relevant_subgraph(message, 10);
+                                if !relevant.is_empty() {
+                                    topic_context.push_str(&format!("\n### {} ({})\n",
+                                        topic_name, path.display()));
+                                    topic_context.push_str(&topic_graph.render_subgraph(
+                                        &relevant,
+                                        remaining.saturating_sub(topic_context.len()) / 2,
+                                    ));
+                                }
+                                if topic_context.len() > remaining { break; }
+                            }
+                        }
+                        if !topic_context.is_empty() {
+                            meta_result.push_str(&topic_context);
+                        }
+                    }
+                }
+            }
         }
+
+        meta_result
     }
 
     /// Run a structured query against the cached graph.

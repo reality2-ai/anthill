@@ -150,7 +150,22 @@ All findings are CONJECTURES. Confidence reflects how well-evidenced they are:\n
   - Your interpretation → assumed (0.3)\n\
 This applies to ALL analytical work — code review, document analysis, research,\n\
 architecture assessment, debugging, planning. Always structure your findings as\n\
-a knowledge graph update, not just prose.";
+a knowledge graph update, not just prose.\n\n\
+KNOWLEDGE GRAPH ORGANISATION:\n\
+- memory/knowledge.json is the META-GRAPH — an index of all knowledge graphs.\n\
+  Its nodes represent topics/projects/domains. Its edges show how they relate.\n\
+- memory/graphs/<topic>.json — per-topic graphs for major subjects.\n\
+  Create a new graph when a subject is substantial enough to warrant its own namespace.\n\
+- The meta-graph should contain:\n\
+  - A node for each topic graph (kind: 'concept', tags: ['graph'])\n\
+  - Edges showing relationships between topics (depends_on, related_to, part_of)\n\
+  - A summary of what each topic graph contains\n\
+- When analysing something new, decide:\n\
+  - Does this fit an existing topic graph? → add to it\n\
+  - Is this a new major subject? → create memory/graphs/<topic>.json\n\
+    and add a node for it in the meta-graph\n\
+  - Is this a cross-cutting concern? → add to the meta-graph directly\n\
+- Ensure mkdir -p memory/graphs/ before creating the first topic graph.";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
