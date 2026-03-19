@@ -167,6 +167,16 @@
   }
 
   .msg h1, .msg h2, .msg h3, .msg h4 { margin: 12px 0 6px; }
+  .msg { position: relative; }
+  .reply-btn {
+    position: absolute; top: 6px; right: 6px;
+    background: none; border: 1px solid transparent; border-radius: 4px;
+    color: var(--text-dim); cursor: pointer; font-size: 14px;
+    padding: 2px 6px; opacity: 0; transition: opacity 0.15s;
+  }
+  .msg:hover .reply-btn { opacity: 0.6; }
+  .reply-btn:hover { opacity: 1 !important; border-color: var(--accent); color: var(--accent); }
+
   .msg h1 { font-size: 1.2em; }
   .msg h2 { font-size: 1.1em; }
   .msg h3 { font-size: 1em; font-style: italic; }
@@ -639,9 +649,15 @@
   </div>
   <div id="tasks-panel"></div>
   <div id="input-area" style="display:none">
-    <textarea id="input" placeholder="Send a message..." rows="1"
-      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
-    <button id="send-btn" onclick="sendMessage()">Send</button>
+    <div id="quote-bar" style="display:none;padding:6px 14px;background:var(--bg);border-left:3px solid var(--accent);margin:0 0 6px 0;border-radius:0 6px 6px 0;font-size:13px;color:var(--text-dim);position:relative;max-height:60px;overflow:hidden">
+      <span id="quote-text"></span>
+      <button onclick="clearQuote()" style="position:absolute;top:4px;right:6px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;line-height:1" title="Remove quote">&times;</button>
+    </div>
+    <div style="display:flex;gap:10px">
+      <textarea id="input" placeholder="Send a message..." rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
   </div>
 </div>
 
@@ -773,17 +789,49 @@ function handleEvent(msg) {
   }
 }
 
+// --- Reply / Quote ---
+let pendingQuote = '';
+
+function replyTo(msgIndex) {
+  const msgs = state.messages[state.activeBot] || [];
+  const msg = msgs[msgIndex];
+  if (!msg) return;
+
+  // Use text selection if any, otherwise the full message (truncated).
+  const sel = window.getSelection().toString().trim();
+  let quote = sel || msg.text;
+  if (quote.length > 300) quote = quote.slice(0, 297) + '...';
+
+  pendingQuote = quote;
+  document.getElementById('quote-text').textContent = quote;
+  document.getElementById('quote-bar').style.display = 'block';
+  document.getElementById('input').focus();
+}
+
+function clearQuote() {
+  pendingQuote = '';
+  document.getElementById('quote-bar').style.display = 'none';
+}
+
 // --- Sending ---
 function sendMessage() {
   const input = document.getElementById('input');
   const text = input.value.trim();
   if (!text || !state.activeBot || !state.ws) return;
 
+  // Prepend quoted context if replying.
+  let fullMessage = text;
+  if (pendingQuote) {
+    const quoted = pendingQuote.split('\n').map(l => '> ' + l).join('\n');
+    fullMessage = quoted + '\n\n' + text;
+    clearQuote();
+  }
+
   // Message will appear via the user_message broadcast event.
   wsSendSigned({
     type: 'chat',
     bot: state.activeBot,
-    message: text,
+    message: fullMessage,
   });
 
   input.value = '';
@@ -830,11 +878,12 @@ function selectBot(id) {
 function renderChat() {
   const chat = document.getElementById('chat');
   const msgs = state.messages[state.activeBot] || [];
-  chat.innerHTML = msgs.map(m => {
+  chat.innerHTML = msgs.map((m, i) => {
+    const replyBtn = `<button class="reply-btn" onclick="replyTo(${i})" title="Reply">↩</button>`;
     if (m.role === 'bot') {
-      return `<div class="msg bot">${formatMarkdown(m.text)}</div>`;
+      return `<div class="msg bot">${formatMarkdown(m.text)}${replyBtn}</div>`;
     }
-    return `<div class="msg user">${escapeHtml(m.text)}</div>`;
+    return `<div class="msg user">${escapeHtml(m.text)}${replyBtn}</div>`;
   }).join('');
 
   // Show typing if active
