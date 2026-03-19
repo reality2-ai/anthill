@@ -188,6 +188,8 @@ impl Plugin for TelegramPlugin {
                 let queue_text = match cmd_type {
                     8 => msg.text.trim().strip_prefix("/followup").unwrap_or(&msg.text).trim().to_string(),
                     9 => msg.text.trim().strip_prefix("/analyse").or_else(|| msg.text.trim().strip_prefix("/analyze")).unwrap_or(&msg.text).trim().to_string(),
+                    11 => msg.text.trim().strip_prefix("/specify").unwrap_or(&msg.text).trim().to_string(),
+                    12 => msg.text.trim().strip_prefix("/test-vectors").or_else(|| msg.text.trim().strip_prefix("/testvectors")).unwrap_or(&msg.text).trim().to_string(),
                     _ => msg.text,
                 };
                 if let Ok(mut q) = self.message_queue.lock() {
@@ -233,6 +235,8 @@ fn classify_command(text: &str) -> u8 {
         s if s == "/followup" || s.starts_with("/followup ") => 8,
         s if s.starts_with("/analyse ") || s.starts_with("/analyze ") => 9,
         "/reflect" => 10,
+        s if s.starts_with("/specify ") => 11,
+        s if s.starts_with("/test-vectors ") || s.starts_with("/testvectors ") => 12,
         _ => 0, // regular message
     }
 }

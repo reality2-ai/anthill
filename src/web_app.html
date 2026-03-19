@@ -168,6 +168,8 @@
 
   .msg h1, .msg h2, .msg h3, .msg h4 { margin: 12px 0 6px; }
   .msg { position: relative; }
+  .slash-item:hover, .slash-item.selected { background: var(--surface2); }
+
   .reply-btn {
     position: absolute; top: 6px; right: 6px;
     background: none; border: 1px solid transparent; border-radius: 4px;
@@ -659,9 +661,10 @@
       <span id="quote-text"></span>
       <button onclick="clearQuote()" style="position:absolute;top:4px;right:6px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;line-height:1" title="Remove quote">&times;</button>
     </div>
+    <div id="slash-menu" style="display:none;background:var(--surface);border:1px solid #444;border-radius:8px;padding:4px 0;margin-bottom:4px;max-height:200px;overflow-y:auto;font-size:13px"></div>
     <div id="input-row">
       <textarea id="input" placeholder="Send a message..." rows="1"
-        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+        onkeydown="handleInputKey(event)" oninput="handleSlashMenu()"></textarea>
       <button id="send-btn" onclick="sendMessage()">Send</button>
     </div>
   </div>
@@ -793,6 +796,83 @@ function handleEvent(msg) {
       renderBotList();
       break;
   }
+}
+
+// --- Slash command menu ---
+const SLASH_COMMANDS = [
+  { cmd: '/help', desc: 'Show available commands' },
+  { cmd: '/status', desc: 'Live view of each worker' },
+  { cmd: '/ants', desc: 'Show running workers' },
+  { cmd: '/usage', desc: 'Session statistics' },
+  { cmd: '/cancel', desc: 'Cancel a running task' },
+  { cmd: '/cancel all', desc: 'Cancel all tasks' },
+  { cmd: '/followup', desc: 'Queue context for running task' },
+  { cmd: '/new', desc: 'Fresh conversation' },
+  { cmd: '/analyse', desc: 'Thematic analysis of a file → graph' },
+  { cmd: '/reflect', desc: 'Review and consolidate knowledge graph' },
+  { cmd: '/specify', desc: 'Generate specification from code' },
+  { cmd: '/test-vectors', desc: 'Generate test vectors from code' },
+];
+
+function handleInputKey(event) {
+  const menu = document.getElementById('slash-menu');
+  if (menu.style.display !== 'none') {
+    if (event.key === 'Escape') { menu.style.display = 'none'; return; }
+    if (event.key === 'Tab' || (event.key === 'Enter' && menu.querySelector('.selected'))) {
+      event.preventDefault();
+      const selected = menu.querySelector('.selected') || menu.querySelector('.slash-item');
+      if (selected) {
+        const input = document.getElementById('input');
+        input.value = selected.dataset.cmd + ' ';
+        menu.style.display = 'none';
+        input.focus();
+      }
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const items = Array.from(menu.querySelectorAll('.slash-item'));
+      const current = items.findIndex(i => i.classList.contains('selected'));
+      items.forEach(i => i.classList.remove('selected'));
+      const next = event.key === 'ArrowDown' ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+      items[next].classList.add('selected');
+      items[next].scrollIntoView({ block: 'nearest' });
+      return;
+    }
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
+  }
+}
+
+function handleSlashMenu() {
+  const input = document.getElementById('input');
+  const menu = document.getElementById('slash-menu');
+  const text = input.value;
+
+  if (text.startsWith('/') && !text.includes(' ')) {
+    const filter = text.toLowerCase();
+    const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(filter));
+    if (matches.length > 0 && text.length > 0) {
+      menu.innerHTML = matches.map((c, i) =>
+        `<div class="slash-item${i === 0 ? ' selected' : ''}" data-cmd="${c.cmd}" onclick="selectSlashCmd('${c.cmd}')" style="padding:6px 12px;cursor:pointer;display:flex;justify-content:space-between">
+          <span style="font-weight:600;color:var(--accent)">${c.cmd}</span>
+          <span style="color:var(--text-dim);margin-left:12px">${c.desc}</span>
+        </div>`
+      ).join('');
+      menu.style.display = 'block';
+      return;
+    }
+  }
+  menu.style.display = 'none';
+}
+
+function selectSlashCmd(cmd) {
+  const input = document.getElementById('input');
+  input.value = cmd + ' ';
+  document.getElementById('slash-menu').style.display = 'none';
+  input.focus();
 }
 
 // --- Reply / Quote ---

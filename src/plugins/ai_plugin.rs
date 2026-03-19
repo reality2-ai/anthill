@@ -31,6 +31,8 @@ pub const CMD_STATUS: u8 = 0x09;    // Show live status of workers
 pub const CMD_FOLLOWUP: u8 = 0x0A;  // Queue follow-up for a running task
 pub const CMD_ANALYSE: u8 = 0x0B;   // Thematic analysis of a file
 pub const CMD_REFLECT: u8 = 0x0C;   // Meta-analysis / reflect on knowledge graph
+pub const CMD_SPECIFY: u8 = 0x0D;   // Generate spec from code
+pub const CMD_TEST_VECTORS: u8 = 0x0E; // Generate test vectors from code/spec
 
 const HELP_TEXT: &str = "\
 **anthill commands:**
@@ -42,8 +44,10 @@ const HELP_TEXT: &str = "\
 /cancel — cancel a running task (or /cancel <id>, /cancel all)
 /followup — queue a message for when the current task finishes
 /new — start a fresh conversation
-/analyse <file> — run thematic analysis on a file → knowledge graph
+/analyse <file> — thematic analysis on a file → knowledge graph
 /reflect — review and consolidate the knowledge graph
+/specify <file> — generate a specification from code
+/test-vectors <file> — generate test vectors from code
 
 **AI commands** (passed through to the active backend):
 
@@ -498,6 +502,68 @@ impl AiPlugin {
         });
     }
 
+    fn handle_specify(&mut self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        let (_, text, source) = match self.message_queue.lock().ok().and_then(|mut q| q.pop_front()) {
+            Some(msg) => msg,
+            None => {
+                self.send_telegram(chat_id, "Usage: /specify <file path>\nGenerates a formal specification from source code.");
+                return;
+            }
+        };
+
+        let file_path = text.trim().to_string();
+        if file_path.is_empty() {
+            self.send_telegram(chat_id, "Usage: /specify <file path>");
+            return;
+        }
+
+        self.send_telegram(chat_id, &format!("📝 Generating specification from '{}'...", file_path));
+
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+
+        let _ = self.request_tx.send(CliRequest {
+            chat_id,
+            message: format!("/specify {}", file_path),
+            new_session: false,
+            task_id,
+            source,
+        });
+    }
+
+    fn handle_test_vectors(&mut self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        let (_, text, source) = match self.message_queue.lock().ok().and_then(|mut q| q.pop_front()) {
+            Some(msg) => msg,
+            None => {
+                self.send_telegram(chat_id, "Usage: /test-vectors <file path>\nGenerates test vectors from source code or a specification.");
+                return;
+            }
+        };
+
+        let file_path = text.trim().to_string();
+        if file_path.is_empty() {
+            self.send_telegram(chat_id, "Usage: /test-vectors <file path>");
+            return;
+        }
+
+        self.send_telegram(chat_id, &format!("🧪 Generating test vectors from '{}'...", file_path));
+
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+
+        let _ = self.request_tx.send(CliRequest {
+            chat_id,
+            message: format!("/test-vectors {}", file_path),
+            new_session: false,
+            task_id,
+            source,
+        });
+    }
+
 }
 
 fn format_duration(secs: u64) -> String {
@@ -557,6 +623,8 @@ impl Plugin for AiPlugin {
             CMD_FOLLOWUP => { self.handle_followup(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_ANALYSE => { self.handle_analyse(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_REFLECT => { self.handle_reflect(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_SPECIFY => { self.handle_specify(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_TEST_VECTORS => { self.handle_test_vectors(data); PluginResult::Ok(PluginResponse::empty()) }
             _ => PluginResult::Error(PluginError::new(0xFF, "unknown command")),
         }
     }

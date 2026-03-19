@@ -224,6 +224,10 @@ pub fn parse_relationships(output: &str) -> Vec<Relationship> {
 }
 
 /// Strip markdown code fences (```json ... ```) from AI output.
+pub fn strip_markdown_fences_pub(s: &str) -> String {
+    strip_markdown_fences(s)
+}
+
 fn strip_markdown_fences(s: &str) -> String {
     let s = s.trim();
     let s = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")).unwrap_or(s);

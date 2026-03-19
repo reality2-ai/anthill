@@ -380,12 +380,18 @@ pub async fn ai_worker_loop(
             knowledge_cache.archive_stale();
         }
 
-        // --- Special commands: /analyse and /reflect ---
+        // --- Special commands ---
         let actual_message = if req.message.starts_with("/analyse ") {
             let file_path = req.message.strip_prefix("/analyse ").unwrap().trim();
             build_analyse_message(file_path, &config.working_dir, &knowledge_file)
         } else if req.message == "/reflect" {
             build_reflect_message(&knowledge_file)
+        } else if req.message.starts_with("/specify ") {
+            let file_path = req.message.strip_prefix("/specify ").unwrap().trim();
+            build_specify_message(file_path, &config.working_dir)
+        } else if req.message.starts_with("/test-vectors ") {
+            let file_path = req.message.strip_prefix("/test-vectors ").unwrap().trim();
+            build_test_vectors_message(file_path, &config.working_dir)
         } else {
             req.message.clone()
         };
@@ -977,5 +983,100 @@ The graph currently has approximately {node_count} nodes. Perform meta-analysis:
 Current graph location: {path}"#,
         node_count = node_count,
         path = knowledge_file.display()
+    )
+}
+
+/// Build the message for /specify <file> — generate a specification from code.
+fn build_specify_message(file_path: &str, working_dir: &str) -> String {
+    let full_path = if file_path.starts_with('/') {
+        std::path::PathBuf::from(file_path)
+    } else {
+        std::path::PathBuf::from(working_dir).join(file_path)
+    };
+
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Could not read '{}': {}", file_path, e),
+    };
+
+    let file_name = full_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+
+    let spec_name = file_name.replace('.', "-").to_uppercase();
+
+    format!(
+        r#"Generate a FORMAL SPECIFICATION from this source code.
+
+Follow the Anthill specification style (RFC 2119, numbered sections, terminology table).
+
+Process:
+1. Read the code and identify all behaviors, invariants, and contracts
+2. Group them into logical specification sections
+3. Write each behavior as a normative statement (MUST/SHOULD/MAY)
+4. Include a security considerations section
+5. Save the specification as specs/{spec_name}.md
+
+Source file: {file_name}
+
+CODE:
+{content}"#,
+        spec_name = spec_name,
+        file_name = file_name,
+        content = if content.len() > 30000 { &content[..30000] } else { &content }
+    )
+}
+
+/// Build the message for /test-vectors <file> — generate test cases.
+fn build_test_vectors_message(file_path: &str, working_dir: &str) -> String {
+    let full_path = if file_path.starts_with('/') {
+        std::path::PathBuf::from(file_path)
+    } else {
+        std::path::PathBuf::from(working_dir).join(file_path)
+    };
+
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Could not read '{}': {}", file_path, e),
+    };
+
+    let file_name = full_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+
+    let is_spec = file_name.ends_with(".md") && content.contains("MUST");
+    let is_code = file_name.ends_with(".rs") || file_name.ends_with(".py")
+        || file_name.ends_with(".ts") || file_name.ends_with(".go");
+
+    let source_type = if is_spec { "specification" } else if is_code { "source code" } else { "document" };
+
+    format!(
+        r#"Generate TEST VECTORS from this {source_type}.
+
+For each behavior/requirement found, generate:
+- A normal/happy path test
+- An edge case or boundary test
+- An error/negative test (if applicable)
+- A security test (if relevant)
+
+Output format: for each test, provide:
+- Test name (snake_case, suitable for #[test])
+- Description
+- Setup / preconditions
+- Input
+- Expected output/behavior
+- Category: normal, edge, error, security
+
+If this is source code, also generate runnable Rust #[test] stubs.
+If this is a specification, generate tests that verify the spec requirements.
+
+Source file: {file_name}
+Type: {source_type}
+
+CONTENT:
+{content}"#,
+        source_type = source_type,
+        file_name = file_name,
+        content = if content.len() > 30000 { &content[..30000] } else { &content }
     )
 }
