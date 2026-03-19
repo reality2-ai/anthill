@@ -244,6 +244,7 @@ async fn get_config(
                     "backup_interval_hours": cfg.claude.backup_interval_hours,
                     "backup_remote": cfg.claude.backup_remote,
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
+                    "backends": cfg.claude.backends,
                 })).into_response(),
                 Err(_) => {
                     (StatusCode::OK, content).into_response()
@@ -259,6 +260,7 @@ async fn get_config(
 #[allow(dead_code)]
 struct ConfigUpdate {
     name: Option<String>,
+    backends: Option<Vec<String>>,
     telegram_token: Option<String>,
     telegram_allow: Option<Vec<i64>>,
     slack_bot_token: Option<String>,
@@ -286,9 +288,7 @@ async fn put_config(
             toml.push_str(&format!("name = \"{}\"\n", name));
         }
     }
-    toml.push_str("mode = \"claude\"\n\n");
-
-    toml.push_str("[telegram]\n");
+    toml.push_str("\n[telegram]\n");
     if let Some(ref token) = req.telegram_token {
         toml.push_str(&format!("token = \"{}\"\n", token));
     }
@@ -315,6 +315,10 @@ async fn put_config(
     }
 
     toml.push_str("\n[claude]\n");
+    let default_backends = vec!["claude".to_string()];
+    let backends = req.backends.as_ref().unwrap_or(&default_backends);
+    let backend_strs: Vec<String> = backends.iter().map(|b| format!("\"{}\"", b)).collect();
+    toml.push_str(&format!("backends = [{}]\n", backend_strs.join(", ")));
     if let Some(ref wd) = req.working_dir {
         if !wd.is_empty() {
             toml.push_str(&format!("working_dir = \"{}\"\n", wd));
@@ -436,7 +440,7 @@ async fn delete_ant(
 
 /// GET /api/backends — list available AI backends.
 async fn list_backends() -> impl IntoResponse {
-    let backends = crate::claude_cli::detect_backends();
+    let backends = crate::ai_worker::detect_backends();
     Json(backends.iter().map(|(name, installed)| {
         serde_json::json!({ "name": name, "installed": installed })
     }).collect::<Vec<_>>())

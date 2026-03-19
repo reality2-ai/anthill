@@ -6,7 +6,7 @@
 
 mod backup;
 mod bot;
-mod claude_cli;
+mod ai_worker;
 mod config;
 mod events;
 mod history;

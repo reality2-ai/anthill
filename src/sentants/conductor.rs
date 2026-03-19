@@ -1,7 +1,7 @@
 //! Claude CLI sentant — pure FSM conductor.
 //!
 //! Receives events, makes decisions, emits actions. No I/O, no channels,
-//! no shared state. All data handling is in the ClaudeCliPlugin.
+//! no shared state. All data handling is in the AiPlugin.
 //!
 //! The sentant only sees small event payloads (< 256 bytes):
 //!   RELAY_COMMAND: { 0: uint(cmd_type), 1: uint(chat_id) }
@@ -17,7 +17,7 @@ use r2_engine::plugin::PluginId;
 use r2_engine::sentant::{Sentant, StateId};
 
 use crate::events::*;
-use crate::plugins::claude_cli as cli_plugin;
+use crate::plugins::ai_plugin as cli_plugin;
 
 const STATE_READY: StateId = 0;
 
@@ -31,11 +31,11 @@ const CMD_TYPE_CANCEL: u8 = 4;
 const CMD_TYPE_CANCEL_ALL: u8 = 5;
 const CMD_TYPE_NEW: u8 = 6;
 
-pub struct ClaudeCliSentant {
+pub struct ConductorSentant {
     plugin_id: PluginId,
 }
 
-impl ClaudeCliSentant {
+impl ConductorSentant {
     pub fn new(plugin_id: PluginId) -> Self {
         Self { plugin_id }
     }
@@ -61,7 +61,7 @@ impl ClaudeCliSentant {
     }
 }
 
-impl Sentant for ClaudeCliSentant {
+impl Sentant for ConductorSentant {
     fn handle_event(&mut self, event: &Event, actions: &mut ActionBuf) {
         match event.hash {
             RELAY_COMMAND => {

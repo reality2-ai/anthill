@@ -235,7 +235,7 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
 ///
 /// Each incoming request is spawned as a concurrent task. Multiple
 /// requests can be in flight simultaneously.
-pub async fn claude_cli_worker(
+pub async fn ai_worker_loop(
     mut rx: mpsc::UnboundedReceiver<CliRequest>,
     response_queue: Arc<Mutex<VecDeque<CliResponse>>>,
     config: CliWorkerConfig,

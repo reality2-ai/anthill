@@ -506,6 +506,13 @@
       <span class="field-label">Display Name</span>
       <input id="c-name" class="field-input">
     </div>
+
+    <h3 class="section-title">AI Backends</h3>
+    <div id="c-backends" style="margin-bottom:8px"></div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">
+      <a href="https://github.com/reality2-ai/anthill/blob/main/docs/prerequisites.md#2-ai-backend-at-least-one" style="color:var(--accent)" target="_blank">How to install AI backends</a>
+    </div>
+
     <h3 class="section-title">Telegram (optional)</h3>
     <div class="field">
       <span class="field-label">Bot Token <span style="color:var(--text-dim)">(from @BotFather, leave empty to disable)</span></span>
@@ -1184,6 +1191,25 @@ async function showConfigModal(antId) {
       document.getElementById('c-sync-channels').checked = cfg.sync_channels || false;
       document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
       document.getElementById('c-prompt').value = cfg.system_prompt || '';
+
+      // Load available backends and render checkboxes.
+      const selectedBackends = cfg.backends || ['claude'];
+      try {
+        const bResp = await authFetch('/api/backends');
+        const allBackends = await bResp.json();
+        const container = document.getElementById('c-backends');
+        container.innerHTML = allBackends.map(b => {
+          const checked = selectedBackends.includes(b.name) ? 'checked' : '';
+          const disabled = b.installed ? '' : 'disabled';
+          const style = b.installed ? '' : 'opacity:0.4';
+          const status = b.installed ? '✓ installed' : '✗ not installed';
+          return `<label class="toggle-row" style="${style};margin-bottom:6px">
+            <input type="checkbox" class="backend-cb" value="${b.name}" ${checked} ${disabled}>
+            <span>${b.name} <span style="font-size:11px;color:${b.installed ? 'var(--green)' : 'var(--red)'}">(${status})</span></span>
+          </label>`;
+        }).join('');
+      } catch(e) {}
+
       document.getElementById('config-modal').style.display = 'flex';
     } else {
       alert('Could not load config');
@@ -1205,8 +1231,11 @@ async function saveConfig() {
   const allowStr = document.getElementById('c-allow').value.trim();
   const allow = allowStr ? allowStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
 
+  const backends = Array.from(document.querySelectorAll('.backend-cb:checked')).map(cb => cb.value);
+
   const body = {
     name: document.getElementById('c-name').value.trim(),
+    backends: backends.length > 0 ? backends : ['claude'],
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),

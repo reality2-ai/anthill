@@ -1,4 +1,4 @@
-//! ClaudeCliPlugin — manages Claude Code invocations and responses.
+//! AiPlugin — manages Claude Code invocations and responses.
 //!
 //! This plugin absorbs all I/O that was previously in the sentant:
 //! - Stores incoming messages (from Telegram plugin via data plane)
@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
-use crate::claude_cli::{CliRequest, CliResponse, StatsMap, TaskMap};
+use crate::ai_worker::{CliRequest, CliResponse, StatsMap, TaskMap};
 use crate::events::RELAY_AI_READY;
 
 /// Plugin commands from the sentant.
@@ -50,7 +50,7 @@ Multiple messages can run concurrently.";
 
 const TELEGRAM_MAX: usize = 4000;
 
-pub struct ClaudeCliPlugin {
+pub struct AiPlugin {
     id: PluginId,
     /// Response queue — worker pushes, poll() checks.
     response_queue: Arc<Mutex<VecDeque<CliResponse>>>,
@@ -73,7 +73,7 @@ pub struct ClaudeCliPlugin {
     sync_channels: bool,
 }
 
-impl ClaudeCliPlugin {
+impl AiPlugin {
     pub fn new(
         id: PluginId,
         response_queue: Arc<Mutex<VecDeque<CliResponse>>>,
@@ -351,7 +351,7 @@ fn encode_uint(buf: &mut Vec<u8>, v: u64) {
     }
 }
 
-impl Plugin for ClaudeCliPlugin {
+impl Plugin for AiPlugin {
     fn execute(&mut self, command: PluginCommand, data: &[u8]) -> PluginResult {
         match command {
             CMD_DISPATCH => { self.handle_dispatch(data); PluginResult::Ok(PluginResponse::empty()) }

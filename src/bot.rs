@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{backup, claude_cli, config, plugins, registry, sentants};
+use crate::{backup, ai_worker, config, plugins, registry, sentants};
 
 /// Run a single ANT.
 pub async fn run_bot(
@@ -51,8 +51,8 @@ pub async fn run_bot(
     // Core: AI plugin + conductor sentant.
     let response_queue = Arc::new(Mutex::new(VecDeque::new()));
     let (request_tx, request_rx) = mpsc::unbounded_channel();
-    let stats: claude_cli::StatsMap = Arc::new(Mutex::new(HashMap::new()));
-    let tasks: claude_cli::TaskMap = Arc::new(Mutex::new(HashMap::new()));
+    let stats: ai_worker::StatsMap = Arc::new(Mutex::new(HashMap::new()));
+    let tasks: ai_worker::TaskMap = Arc::new(Mutex::new(HashMap::new()));
     let (event_tx, _) = broadcast::channel::<registry::WsEvent>(256);
 
     // Working directory.
@@ -89,7 +89,7 @@ pub async fn run_bot(
     }
 
     // AI plugin — holds all I/O state.
-    let ai_plugin = plugins::claude_cli::ClaudeCliPlugin::new(
+    let ai_plugin = plugins::ai_plugin::AiPlugin::new(
         1,
         Arc::clone(&response_queue),
         request_tx,
@@ -102,14 +102,14 @@ pub async fn run_bot(
     let ai_plugin_id = bus.register_plugin(Box::new(ai_plugin));
 
     // Conductor sentant — pure FSM.
-    let conductor = sentants::claude_cli::ClaudeCliSentant::new(ai_plugin_id);
+    let conductor = sentants::conductor::ConductorSentant::new(ai_plugin_id);
     bus.register_sentant(Box::new(conductor));
 
     // Git backup.
     backup::ensure_git_repo(std::path::Path::new(&working_dir))?;
 
     let backup_working_dir = working_dir.clone();
-    let worker_config = claude_cli::CliWorkerConfig {
+    let worker_config = ai_worker::CliWorkerConfig {
         working_dir,
         memory_dir,
         repos_dir,
@@ -122,7 +122,7 @@ pub async fn run_bot(
     // Forward events to the global broadcast if in supervisor mode.
     let worker_event_tx = global_event_tx.clone().or_else(|| Some(event_tx.clone()));
 
-    tokio::spawn(claude_cli::claude_cli_worker(
+    tokio::spawn(ai_worker::ai_worker_loop(
         request_rx,
         response_queue,
         worker_config,

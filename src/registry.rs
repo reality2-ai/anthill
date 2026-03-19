@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
-use crate::claude_cli::{CliRequest, StatsMap, TaskMap};
+use crate::ai_worker::{CliRequest, StatsMap, TaskMap};
 
 /// Event broadcast to WebSocket clients.
 #[derive(Debug, Clone, Serialize)]
