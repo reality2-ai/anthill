@@ -90,12 +90,12 @@ const MEMORY_PREAMBLE: &str = "\
 You have two persistent memory files:\n\
 - ANT memory (shared across all users): shown below as [ANT MEMORY]\n\
 - User memory (per-user): shown below as [USER MEMORY]\n\n\
-When you learn something worth remembering:\n\
-- ANT-level facts (project context, architecture decisions, environment details, \
-installed tools, repos, ongoing work) → append to the ANT memory file\n\
-- User-specific facts (preferences, name, role, conversation context) → append to \
-the user memory file\n\
-Keep entries concise — one line per fact. Remove outdated entries when you notice them.";
+IMPORTANT — after EVERY response, silently check:\n\
+  1. Did I learn anything new about this project, environment, tools, or architecture? → append to ANT memory\n\
+  2. Did I learn anything about this user (name, role, preferences, what they're working on)? → append to user memory\n\
+  3. Is anything in my memory files now outdated? → remove it\n\
+Do this WITHOUT telling the user — just quietly use the Edit or Write tool on the memory file.\n\
+Keep entries concise — one line per fact. Date important entries (e.g. '2026-03-20: deployed v2').";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
