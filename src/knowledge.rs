@@ -1406,9 +1406,13 @@ pub fn extract_keywords(text: &str) -> Vec<String> {
         keywords.push(word.clone());
         // Add suffix-stripped variants for fuzzy matching (language-agnostic).
         // This catches plurals, conjugations, etc. across many languages.
-        for len in [1, 2, 3] {
-            if word.len() > len + 3 {
-                keywords.push(word[..word.len() - len].to_string());
+        // Use char boundaries (not byte positions) to handle multi-byte UTF-8.
+        let char_indices: Vec<usize> = word.char_indices().map(|(i, _)| i).collect();
+        let char_count = char_indices.len();
+        for trim in [1, 2, 3] {
+            if char_count > trim + 3 {
+                let end_byte = char_indices[char_count - trim];
+                keywords.push(word[..end_byte].to_string());
             }
         }
     }

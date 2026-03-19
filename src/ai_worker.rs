@@ -10,6 +10,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
+/// Truncate a string at a char boundary, appending "..." if truncated.
+fn truncate_safe(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes { return s.to_string(); }
+    let mut end = max_bytes.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    format!("{}...", &s[..end])
+}
+
+/// Slice a string at a char boundary (no suffix added).
+fn slice_safe(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes { return s; }
+    let mut end = max_bytes.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+    &s[..end]
+}
+
 /// A request to run claude CLI.
 #[derive(Debug)]
 pub struct CliRequest {
@@ -204,7 +220,7 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                         }
                         "command_execution" => {
                             let cmd = json.pointer("/item/command").and_then(|c| c.as_str()).unwrap_or("");
-                            let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                            let short = if cmd.len() > 60 { slice_safe(cmd, 57) } else { cmd };
                             (Some(("tool_use".into(), format!("Running: {}", short))), None)
                         }
                         _ => (None, None)
@@ -244,7 +260,7 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                                     let detail = match tool {
                                         "Bash" => {
                                             let cmd = block.pointer("/input/command").and_then(|c| c.as_str()).unwrap_or("");
-                                            let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                                            let short = if cmd.len() > 60 { slice_safe(cmd, 57) } else { cmd };
                                             format!("Running: {}", short)
                                         }
                                         "Read" => {
@@ -459,7 +475,7 @@ pub async fn ai_worker_loop(
 
         // Broadcast task started event.
         let preview = if req.message.len() > 50 {
-            format!("{}...", &req.message[..47])
+            truncate_safe(&req.message, 47)
         } else {
             req.message.clone()
         };
@@ -779,7 +795,7 @@ pub async fn ai_worker_loop(
                     for fu in follow_ups {
                         log::info!("[{}] Dispatching follow-up for task #{}: {}",
                             bname, task_id,
-                            if fu.message.len() > 50 { &fu.message[..47] } else { &fu.message });
+                            if fu.message.len() > 50 { slice_safe(&fu.message, 47) } else { &fu.message });
                         // Re-queue as a new request (with session continuity via -c).
                         let _ = rq_tx.send(CliRequest {
                             chat_id: fu.chat_id,
@@ -860,7 +876,7 @@ fn build_system_prompt(
     if !user_memory.trim().is_empty() {
         prompt.push_str("\n[USER MEMORY]\n");
         if user_memory.len() > 4096 {
-            prompt.push_str(&user_memory[..4096]);
+            prompt.push_str(slice_safe(&user_memory, 4096));
             prompt.push_str("\n... (truncated — read the full file for more)\n");
         } else {
             prompt.push_str(&user_memory);
@@ -1023,7 +1039,7 @@ CODE:
 {content}"#,
         spec_name = spec_name,
         file_name = file_name,
-        content = if content.len() > 30000 { &content[..30000] } else { &content }
+        content = if content.len() > 30000 { slice_safe(&content, 30000) } else { &content }
     )
 }
 
@@ -1077,6 +1093,6 @@ CONTENT:
 {content}"#,
         source_type = source_type,
         file_name = file_name,
-        content = if content.len() > 30000 { &content[..30000] } else { &content }
+        content = if content.len() > 30000 { slice_safe(&content, 30000) } else { &content }
     )
 }

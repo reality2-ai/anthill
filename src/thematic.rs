@@ -84,11 +84,10 @@ pub fn chunk_document(text: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut start = 0;
     while start < text.len() {
-        let end = (start + CHUNK_SIZE).min(text.len());
+        let end = snap_to_char_boundary(text, (start + CHUNK_SIZE).min(text.len()));
         // Try to break at a paragraph or sentence boundary.
         let break_at = if end < text.len() {
-            // Search in the last quarter of the chunk for a good break point.
-            let search_start = start + CHUNK_SIZE * 3 / 4;
+            let search_start = snap_to_char_boundary(text, start + CHUNK_SIZE * 3 / 4);
             text[search_start..end]
                 .rfind("\n\n")
                 .or_else(|| text[search_start..end].rfind(".\n"))
@@ -101,7 +100,7 @@ pub fn chunk_document(text: &str) -> Vec<String> {
         chunks.push(text[start..break_at].to_string());
         // Always advance by at least half a chunk to guarantee progress.
         let next_start = break_at.saturating_sub(CHUNK_OVERLAP);
-        start = next_start.max(start + CHUNK_SIZE / 2);
+        start = snap_to_char_boundary(text, next_start.max(start + CHUNK_SIZE / 2));
     }
     chunks
 }
@@ -221,6 +220,21 @@ pub fn parse_themes(output: &str) -> Vec<Theme> {
 pub fn parse_relationships(output: &str) -> Vec<Relationship> {
     let cleaned = strip_markdown_fences(output);
     serde_json::from_str(&cleaned).unwrap_or_default()
+}
+
+/// Snap a byte position to the nearest word boundary (rounding down).
+/// Falls back to char boundary if no space is found nearby.
+fn snap_to_char_boundary(s: &str, pos: usize) -> usize {
+    if pos >= s.len() { return s.len(); }
+    // First ensure we're on a char boundary.
+    let mut p = pos;
+    while p > 0 && !s.is_char_boundary(p) { p -= 1; }
+    // Then try to snap to a word boundary (space, newline) within 20 bytes.
+    let search_start = p.saturating_sub(20);
+    if let Some(space) = s[search_start..p].rfind(|c: char| c.is_whitespace()) {
+        return search_start + space + 1;
+    }
+    p
 }
 
 /// Strip markdown code fences (```json ... ```) from AI output.
