@@ -122,19 +122,33 @@ Knowledge graph JSON format:\n\
   edges: [[from_idx, to_idx, {\n\
     \"relation\": \"...\", \"context\": \"...\", \"since\": \"YYYY-MM-DD\",\n\
     \"confidence\": 0.0-1.0, \"tests\": N, \"survived\": N,\n\
-    \"basis\": \"observed|told|inferred|assumed\", \"last_tested\": \"YYYY-MM-DD\"\n\
+    \"basis\": \"observed|told|inferred|assumed\", \"last_tested\": \"YYYY-MM-DD\",\n\
+    \"valid_from\": \"YYYY-MM-DD\", \"valid_until\": \"\" (empty=current, set when superseded),\n\
+    \"view\": \"semantic|temporal|causal|entity\",\n\
+    \"source\": \"document name, conversation date, or how you know this\"\n\
   }]]\n\
 Initial confidence by basis: observed=0.7, told=0.6, inferred=0.4, assumed=0.3\n\
 Confidence formula: blend(basis_prior, survived/tests) weighted by test count.\n\
 Edges below 0.15 confidence are hidden from this prompt but kept in the graph.\n\
 Importance: edges have an 'importance' field (0-1) and 'references' count.\n\
-Set importance higher for knowledge central to the project. It grows with references.\n\
+Set importance higher for knowledge central to the project. It grows with references.\n\n\
+EDGE VIEWS (classify each edge):\n\
+  - semantic: what things mean, conceptual relationships (is_a, part_of, means)\n\
+  - temporal: when things happened, ordering, lifecycles (preceded, followed, during)\n\
+  - causal: why things happened, cause-and-effect (caused, enabled, prevented)\n\
+  - entity: structural connections (works_on, deployed_on, uses, owns)\n\n\
+TEMPORAL VALIDITY:\n\
+  - Set valid_from when a relationship starts.\n\
+  - When a relationship is superseded, set valid_until (don't delete — it becomes history).\n\
+  - Example: Anthill uses AES-256-GCM (valid_until: 2026-03-20) → Anthill uses XChaCha20 (valid_from: 2026-03-20)\n\n\
 Keep nodes concise. Use tags for searchability. Date everything.\n\n\
 EPISODIC MEMORY — memory/episodes.json:\n\
 After significant conversations (not trivial questions), append an episode:\n\
 {\"date\": \"YYYY-MM-DD\", \"participants\": [...], \"summary\": \"2-3 sentences\",\n\
- \"outcomes\": [\"key decisions or results\"], \"tags\": [\"searchable\", \"keywords\"]}\n\
+ \"outcomes\": [\"key decisions or results\"], \"tags\": [\"searchable\", \"keywords\"],\n\
+ \"entities\": [\"entity labels mentioned in this episode\"]}\n\
 Episodes capture WHAT HAPPENED — the narrative, not just facts.\n\
+Entity links enable 'what conversations involved this entity?' queries.\n\
 Recent episodes are shown below as [EPISODES].\n\n\
 DEFAULT METHODOLOGY — when asked to analyse, review, assess, or study ANYTHING:\n\
 Use THEMATIC ANALYSIS (Braun & Clarke, 2022) and record findings in the knowledge graph:\n\

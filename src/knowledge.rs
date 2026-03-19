@@ -89,6 +89,25 @@ impl Default for Basis {
     fn default() -> Self { Self::Assumed }
 }
 
+/// Edge view classification (MAGMA-inspired orthogonal perspectives).
+/// The same pair of nodes can have edges in different views.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeView {
+    /// What things mean and how they relate conceptually.
+    Semantic,
+    /// When things happened, temporal ordering, validity periods.
+    Temporal,
+    /// Why things happened, cause-and-effect chains.
+    Causal,
+    /// Which entities are involved, structural connections.
+    Entity,
+}
+
+impl Default for EdgeView {
+    fn default() -> Self { Self::Entity }
+}
+
 /// An edge in the knowledge graph — a conjecture with confidence.
 ///
 /// Follows Popperian epistemology: knowledge is conjectural and strengthened
@@ -129,6 +148,30 @@ pub struct KnowledgeEdge {
     /// How many times this edge has been referenced in conversations.
     #[serde(default)]
     pub references: u32,
+
+    // --- Temporal validity (inspired by Zep/Graphiti) ---
+
+    /// When this relationship became valid. Empty = since creation.
+    #[serde(default)]
+    pub valid_from: String,
+    /// When this relationship stopped being valid. Empty = still valid.
+    /// A non-empty valid_until means this is a historical fact, not a current one.
+    #[serde(default)]
+    pub valid_until: String,
+
+    // --- Edge view classification (inspired by MAGMA) ---
+
+    /// Which perspective this edge represents.
+    /// Enables orthogonal retrieval: query by view type, not just by keyword.
+    #[serde(default)]
+    pub view: EdgeView,
+
+    // --- Provenance ---
+
+    /// Where this conjecture came from: document name, conversation date, or "observation".
+    /// Enables "why do I believe this?" tracing.
+    #[serde(default)]
+    pub source: String,
 }
 
 fn default_confidence() -> f64 { 0.5 }
@@ -150,6 +193,10 @@ impl KnowledgeEdge {
             last_tested: String::new(),
             importance: 0.5,
             references: 0,
+            valid_from: since.into(),
+            valid_until: String::new(),
+            view: EdgeView::Entity,
+            source: String::new(),
         }
     }
 
@@ -621,6 +668,61 @@ impl KnowledgeGraph {
         result
     }
 
+    /// Query by edge view (MAGMA-inspired): "show me all causal relationships".
+    #[allow(dead_code)]
+    pub fn query_by_view(&self, view: &EdgeView) -> QueryResult {
+        let mut result = QueryResult::default();
+        let mut node_set = HashSet::new();
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            if &edge.view == view && edge.confidence >= MIN_PROMPT_CONFIDENCE {
+                if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                    result.edges.push(WeightedEdge {
+                        from: src, to: tgt,
+                        edge: edge.clone(),
+                        path_confidence: edge.confidence,
+                    });
+                    node_set.insert(src);
+                    node_set.insert(tgt);
+                }
+            }
+        }
+        for &idx in &node_set {
+            result.nodes.push((idx, self.graph[idx].clone(), 0.5));
+        }
+        result
+    }
+
+    /// Query: "what changed?" — edges with temporal validity (non-empty valid_until).
+    #[allow(dead_code)]
+    pub fn query_historical(&self) -> QueryResult {
+        let mut result = QueryResult::default();
+        let mut node_set = HashSet::new();
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            if !edge.valid_until.is_empty() {
+                if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                    result.edges.push(WeightedEdge {
+                        from: src, to: tgt,
+                        edge: edge.clone(),
+                        path_confidence: edge.confidence,
+                    });
+                    node_set.insert(src);
+                    node_set.insert(tgt);
+                }
+            }
+        }
+        for &idx in &node_set {
+            result.nodes.push((idx, self.graph[idx].clone(), 0.5));
+        }
+        result
+    }
+
+    /// Check if an edge is currently valid (no valid_until, or valid_until is in the future).
+    fn is_edge_current(edge: &KnowledgeEdge) -> bool {
+        edge.valid_until.is_empty()
+    }
+
     /// Render a QueryResult as natural language.
     pub fn render_query_result(&self, result: &QueryResult, max_chars: usize) -> String {
         let mut output = String::new();
@@ -749,10 +851,12 @@ impl KnowledgeGraph {
                 output.push('\n');
 
                 // Show edges to/from this node (within the subgraph).
-                // Sort by relevance (confidence × importance), filter low-confidence.
+                // Filter: current (not expired), above confidence threshold.
+                // Sort by relevance (confidence × importance).
                 let mut edges: Vec<_> = self.graph.edges_directed(idx, Direction::Outgoing)
                     .filter(|e| idx_set.contains(&e.target()))
                     .filter(|e| e.weight().confidence >= MIN_PROMPT_CONFIDENCE)
+                    .filter(|e| Self::is_edge_current(e.weight()))
                     .collect();
                 edges.sort_by(|a, b| b.weight().relevance_score()
                     .partial_cmp(&a.weight().relevance_score()).unwrap_or(std::cmp::Ordering::Equal));
@@ -800,6 +904,8 @@ pub struct ConsolidationReport {
     pub edges_merged: usize,
     pub chains_collapsed: usize,
     pub contradictions: Vec<String>,
+    /// Disconnected clusters found (GraphRAG-inspired community detection).
+    pub clusters: Vec<Vec<String>>,
 }
 
 impl KnowledgeGraph {
@@ -819,6 +925,9 @@ impl KnowledgeGraph {
 
         // 4. Detect contradictions.
         report.contradictions = self.detect_contradictions();
+
+        // 5. Community detection (GraphRAG-inspired) — find disconnected clusters.
+        report.clusters = self.detect_communities();
 
         self.rebuild_index();
         report
@@ -986,6 +1095,10 @@ impl KnowledgeGraph {
                 last_tested: in_w.last_tested.clone(),
                 importance: in_w.importance.max(out_w.importance),
                 references: in_w.references + out_w.references,
+                valid_from: in_w.valid_from.clone(),
+                valid_until: out_w.valid_until.clone(),
+                view: in_w.view.clone(),
+                source: in_w.source.clone(),
             };
 
             self.graph.add_edge(src, tgt, combined);
@@ -1044,6 +1157,57 @@ impl KnowledgeGraph {
         }
 
         warnings
+    }
+
+    /// Community detection (GraphRAG-inspired) — find connected components.
+    /// Returns clusters of node labels. Clusters with 3+ nodes that lack
+    /// a concept/theme node may need one.
+    fn detect_communities(&self) -> Vec<Vec<String>> {
+        use petgraph::algo::connected_components;
+        use petgraph::graph::UnGraph;
+
+        // Build an undirected view for component detection.
+        let mut undirected = UnGraph::<(), ()>::new_undirected();
+        let mut node_map: HashMap<NodeIndex, petgraph::graph::NodeIndex> = HashMap::new();
+
+        for idx in self.graph.node_indices() {
+            let u_idx = undirected.add_node(());
+            node_map.insert(idx, u_idx);
+        }
+        for edge_idx in self.graph.edge_indices() {
+            if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                if let (Some(&u_src), Some(&u_tgt)) = (node_map.get(&src), node_map.get(&tgt)) {
+                    undirected.add_edge(u_src, u_tgt, ());
+                }
+            }
+        }
+
+        let num_components = connected_components(&undirected);
+        if num_components <= 1 { return Vec::new(); }
+
+        // BFS from each unvisited node to find connected components.
+        let mut visited = HashSet::new();
+        let mut clusters = Vec::new();
+        for idx in self.graph.node_indices() {
+            if visited.contains(&idx) { continue; }
+            let mut cluster = Vec::new();
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(idx);
+            visited.insert(idx);
+            while let Some(current) = queue.pop_front() {
+                cluster.push(self.graph[current].label.clone());
+                for neighbor in self.graph.neighbors_undirected(current) {
+                    if visited.insert(neighbor) {
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+            if cluster.len() >= 2 {
+                clusters.push(cluster);
+            }
+        }
+        // Only report if there are multiple clusters (fragmented graph).
+        if clusters.len() > 1 { clusters } else { Vec::new() }
     }
 }
 
@@ -1352,6 +1516,10 @@ pub struct Episode {
     /// Tags for searchability.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Entities mentioned in this episode (links to knowledge graph nodes).
+    /// Enables "what conversations involved this entity?" queries.
+    #[serde(default)]
+    pub entities: Vec<String>,
 }
 
 /// Episodic memory store — append-only log of conversation summaries.
