@@ -20,9 +20,10 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 git clone https://github.com/reality2-ai/anthill.git
 cd anthill
 ./install.sh                     # builds, installs binary, sets up service
-anthill --join-code              # prints a code (expires in 5 min)
-# Open http://localhost:3000 (or your Tailscale hostname) → enter the code
-# Create your first ANT from the web dashboard (+  button)
+anthill --qr-join                # show QR code — scan with phone to join
+# Or: anthill --join-code        # text code for manual entry
+# Open http://localhost:3000 (or your Tailscale hostname)
+# Create your first ANT from the web dashboard (+ button)
 ```
 
 ## How it works
@@ -39,27 +40,26 @@ anthill --join-code              # prints a code (expires in 5 min)
 
 | Sentants (pure FSMs — zero I/O) | Plugins (all I/O) |
 |---|---|
-| Conductor — dispatches, routes, commands | AIPlugin — Claude (+ OpenAI, Ollama coming) |
-| AiSentant — NL→command→summary pipeline | TelegramPlugin — Bot API, message classification |
-| ChunkerSentant — output batching decisions | SlackPlugin — Socket Mode, message routing |
-| TerminalSentant — PTY lifecycle | WebPlugin — dashboard, WebSocket, file browser |
-| TelegramSentant — session routing | ChunkerPlugin, PtyPlugin — raw mode I/O |
+| Conductor — dispatches, routes, commands | AIPlugin — Claude, Codex (+ Ollama, Gemini coming) |
+| | TelegramPlugin — Bot API, message classification |
+| | SlackPlugin — Socket Mode, message routing |
 
 ## Features
 
 - **Multiple ANTS** — each with its own personality, workspace, and optional Telegram/Slack
-- **Web dashboard** — responsive, installable as PWA, accessible via Tailscale
-- **Trust group security** — join codes, device provisioning, HMAC-signed messages
-- **Concurrent tasks** — send messages while others are running; `/ants` to check progress
-- **Real-time progress** — see what each worker is doing (tool use, agent spawns)
-- **Per-user memory** — persistent across conversations and restarts
-- **File browser** — browse workspace, upload/download files, preview images and code
-- **Git-backed workspace** — auto-committed on schedule, optionally pushed to GitHub
-- **ANT management** — create, configure, delete ANTS from the dashboard
-- **Device management** — provision and revoke devices from the dashboard
+- **Popperian knowledge graph** — structured memory where relationships are conjectures that strengthen through surviving refutation, not confirmation
+- **Episodic memory** — conversation summaries capture the narrative, not just facts
+- **Graph query API** — traversal, path-finding, kind filtering, uncertainty queries — all with confidence scores
+- **Multi-backend AI** — Claude Code, OpenAI Codex (Ollama, Gemini coming). Automatic fallback on failure/rate limits
+- **Worker supervision** — watchdog per task, stall detection, timeout killing, stderr capture
+- **Follow-up queue** — inject context into running tasks; answers routed to the right worker
+- **Web dashboard** — responsive PWA, real-time progress, reply-to-message, file browser
+- **QR device provisioning** — scan to join the colony from any phone
+- **Trust group security** — R2-TRUST Ed25519 identity, HMAC-signed WebSocket, join codes
+- **Concurrent tasks** — multiple workers per ANT; `/status` shows live progress per worker
+- **Git-backed workspace** — auto-committed on schedule, optionally encrypted and pushed
 - **Cross-channel sync** — messages forwarded between web, Telegram, and Slack (opt-in)
-- **Markdown rendering** — code blocks, headings, tables, links in both Telegram and web
-- **Auto-restart** — supervisor manages ANTS with exponential backoff
+- **Auto-restart** — supervisor with exponential backoff, hot-add of new ANTS
 - **Cross-platform** — Linux (systemd), macOS (launchd), FreeBSD (rc.d)
 
 ## Documentation
@@ -72,10 +72,22 @@ anthill --join-code              # prints a code (expires in 5 min)
 | [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA, cross-device history |
 | [Configuration](docs/configuration.md) | Full reference for supervisor.toml and ant.toml |
 | [Commands](docs/commands.md) | Telegram and dashboard commands |
-| [Memory & Workspaces](docs/memory-and-workspaces.md) | Per-user memory, git backups |
+| [Memory & Workspaces](docs/memory-and-workspaces.md) | Knowledge graph, episodic memory, git backups |
 | [Architecture](docs/architecture.md) | R2 sentant engine, events, plugins |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Security](docs/security.md) | Trust groups, device provisioning, access control |
+
+## Specifications
+
+Formal specifications for Anthill's architecture, following the R2-specifications style:
+
+| Spec | What it covers |
+|---|---|
+| [ANTHILL-INTRO](specs/ANTHILL-INTRO.md) | Vision, R2 relationship, design principles |
+| [ANTHILL-COLONY](specs/ANTHILL-COLONY.md) | Supervisor, ANT lifecycle, trust groups, provisioning |
+| [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) | Popperian knowledge graph, episodic memory, query API |
+| [ANTHILL-WORKER](specs/ANTHILL-WORKER.md) | AI worker lifecycle, multi-backend, supervision |
+| [ANTHILL-WEB](specs/ANTHILL-WEB.md) | Web dashboard, WebSocket protocol, REST API |
 
 ## Security
 
@@ -87,7 +99,7 @@ Anthill implements defence in depth:
 | HTTPS | Transport encryption via Tailscale's automatic certificates | Web dashboard |
 | Trust group | Authentication — devices join with one-time codes, every request verified | Web dashboard |
 | HMAC envelopes | Message integrity — every WebSocket message signed, timestamped against replay | Web dashboard |
-| AES-256-GCM | Payload encryption (available, defence-in-depth) | Web dashboard |
+| XChaCha20-Poly1305 | Payload encryption for backups (opt-in) | Git backup |
 | R2 architecture | Structural isolation — sentants see only 12-byte decisions, never raw content | All channels |
 
 The **web dashboard** carries all six layers — use it for sensitive operations. **Telegram and Slack** are convenience channels with weaker security (third-party TLS, no message signing). See [Security](docs/security.md) for details.

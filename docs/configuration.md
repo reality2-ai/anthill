@@ -29,17 +29,16 @@ Located at `~/.config/anthill/ants/<name>/ant.toml`. One per ANT.
 
 ### Minimal config
 
-Only `mode` is required. Everything else has sensible defaults:
+Everything has sensible defaults — an empty file works:
 
 ```toml
-mode = "claude"
+name = "My ANT"
 ```
 
-- **Name** defaults to the directory name
 - **Telegram** disabled (web dashboard only)
 - **Working directory** defaults to `~/.config/anthill/ants/<id>/working`
-- **Permissions** automatically set based on mode (claude/ai = skip, raw = don't skip)
-- **Memory and repos directories** always `memory/` and `repos/` within the working directory
+- **Backend** defaults to Claude Code
+- **Memory** — knowledge graph, episodic memory, per-user memory all auto-created
 - **Backups** disabled
 
 ### Full config
@@ -47,9 +46,6 @@ mode = "claude"
 ```toml
 # Display name shown in the web dashboard (default: directory name)
 name = "My ANT"
-
-# Operating mode
-mode = "claude"     # "claude" | "ai" | "raw"
 ```
 
 ### [telegram] (optional)
@@ -96,8 +92,8 @@ The `[claude]` section configures the AI backend and workspace (named for histor
 
 ```toml
 [claude]
-# AI backends to use: "claude", "codex", "ollama" (coming soon)
-# Multiple backends can be listed — first to respond wins.
+# AI backends in priority order. Fallback on failure/rate limits.
+# Supported: "claude", "codex". Coming: "ollama", "gemini".
 backends = ["claude"]
 
 # Working directory — where the ANT operates
@@ -105,15 +101,24 @@ backends = ["claude"]
 # Default: ~/.config/anthill/ants/<id>/working
 working_dir = "/path/to/workspace"
 
-# Auto-commit workspace changes to git (hours, 0 = disabled)
+# System prompt — defines the ANT's personality
+system_prompt = """\
+You are a helpful programming assistant."""
+
+# Worker timeout — kill if no output for this many seconds (0 = no timeout)
+worker_timeout_secs = 600
+
+# Forward messages across channels: web ↔ Telegram ↔ Slack
+sync_channels = false
+
+# Auto-commit workspace to git (hours, 0 = disabled)
 backup_interval_hours = 6
 
 # Push backups to a git remote (empty = local only)
 backup_remote = "origin"
 
-# System prompt — defines the ANT's personality
-system_prompt = """\
-You are a helpful programming assistant."""
+# Encrypt memory/ and files/ in git backups (uses colony key)
+encrypt_backups = false
 ```
 
 The following are set automatically and don't normally need changing:

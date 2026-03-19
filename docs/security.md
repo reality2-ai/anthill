@@ -8,13 +8,13 @@ Anthill implements R2-TRUST — the same provisioning model designed for IoT sen
 
 ### How it works
 
-1. **Colony root secret** — generated automatically on first run (`colony.key`). This is the trust group's key material.
+1. **Colony key** — Ed25519 signing key, generated on first run (`colony.key`). The server is the key holder (the queen).
 
-2. **Join codes** — derived from the root secret, valid for 5 minutes, one-use. Generated via the CLI (`anthill --join-code`) or from the web dashboard.
+2. **Join codes** — 48-bit single-use tokens (`xxxx-xxxx-xxxx`), valid for 5 minutes. Generated via CLI (`anthill --qr-join` or `--join-code`) or from the web dashboard's Manage Devices → Add Device (QR).
 
-3. **Device credentials** — when a device joins with a valid code, it receives a permanent credential. This is stored in the browser's `localStorage` and in `devices.toml` on the server.
+3. **Device credentials** — Ed25519 private key seed. On join, the server generates a keypair, issues an R2-TRUST certificate, and returns the credential. Stored in the browser's `localStorage` and in `devices.toml` on the server.
 
-4. **Authentication** — every API call and WebSocket connection must present a valid credential. The server verifies it against `devices.toml`. No credential = rejected.
+4. **Authentication** — every API call requires `X-Credential` header. WebSocket messages are HMAC-SHA256 signed for transport integrity. No credential = 401.
 
 ### What's protected
 
@@ -29,14 +29,16 @@ Anthill implements R2-TRUST — the same provisioning model designed for IoT sen
 
 ### Managing devices
 
-From the web dashboard sidebar:
-- **Generate Join Code** — creates a code for a new device
-- **Manage Devices** — lists all provisioned devices with names, join dates, last seen
+From the web dashboard sidebar → **Manage Devices**:
+- **Add Device (QR)** — generates a QR code with 5-minute countdown timer. Scan with phone camera to join.
+- **Device list** — all provisioned devices with names, join dates, last seen
 - **Revoke** — removes a device's credential (they'll need a new code to rejoin)
 
 From the CLI:
 ```bash
-anthill --join-code    # generate a code
+anthill --qr-join                # QR code — scan with phone
+anthill --qr-join --hostname X   # QR with custom hostname
+anthill --join-code              # text code for manual entry
 ```
 
 ## Bot tokens are secrets
@@ -59,17 +61,17 @@ The join screen is the only thing visible to unauthenticated users.
 
 Anthill runs commands with the same permissions as the user running the service. Create a dedicated user if you want to limit access.
 
-## Memory files
+## Memory and knowledge graph
 
-Per-user memory files accumulate context over time — project names, file paths, preferences. They're stored in the working directory, backed up to git, but not encrypted.
+The knowledge graph (`knowledge.json`) and per-user memory files accumulate context over time — project details, relationships, preferences, conversation summaries. They're stored in the working directory and backed up to git.
+
+**Encrypted backups** are available: set `encrypt_backups = true` in `ant.toml`. This encrypts `memory/` and `files/` using XChaCha20-Poly1305 before each git commit. The working directory stays plaintext; git history contains ciphertext.
 
 ## Git backup repositories
 
-> **Warning:** If you use GitHub for workspace backups (`backup_remote`), make sure the repository is **private**. A public backup repo exposes your ANT's memory files, conversation context, and any files Claude creates — visible to the entire internet.
+> **Warning:** If you use GitHub for workspace backups (`backup_remote`), make sure the repository is **private** — or enable `encrypt_backups`. A public unencrypted repo exposes the knowledge graph, memory files, and any files the AI creates.
 
-Memory files may contain project names, credentials mentioned in conversation, file paths, and personal preferences. Always use `gh repo create --private` when creating backup repos.
-
-*Future: encrypted backups using the colony trust key (AES-256-GCM) so even public repos would be safe. The infrastructure (`encrypt_payload`/`decrypt_payload`) is already in place.*
+Always use `gh repo create --private` when creating backup repos.
 
 ## Recommendations
 
