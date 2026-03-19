@@ -228,6 +228,12 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                                             let desc = block.pointer("/input/description").and_then(|d| d.as_str()).unwrap_or("sub-task");
                                             format!("Spawned agent: {}", desc)
                                         }
+                                        "AskUserQuestion" => {
+                                            let question = block.pointer("/input/question")
+                                                .and_then(|q| q.as_str())
+                                                .unwrap_or("needs input");
+                                            return (Some(("question".into(), format!("❓ {}", question))), None);
+                                        }
                                         _ => format!("Using: {}", tool),
                                     };
                                     let kind = if tool == "Agent" { "agent_spawn" } else { "tool_use" };
@@ -240,7 +246,20 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                 }
                 "result" => {
                     let text = json.get("result").and_then(|r| r.as_str()).unwrap_or("");
-                    (None, Some(text.to_string()))
+                    // Check for permission denials — append to result so user knows.
+                    let denials = json.get("permission_denials")
+                        .and_then(|d| d.as_array())
+                        .map(|arr| arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "))
+                        .filter(|s| !s.is_empty());
+                    let result_text = if let Some(denied) = denials {
+                        format!("{}\n\n⚠️ Permission denied: {}", text, denied)
+                    } else {
+                        text.to_string()
+                    };
+                    (None, Some(result_text))
                 }
                 _ => (None, None)
             }
@@ -432,6 +451,8 @@ pub async fn ai_worker_loop(
                             let bname = bname.clone();
                             let etx = etx.clone();
                             let progress = Arc::clone(&task_live_progress);
+                            let ttx_for_reader = ttx.clone();
+                            let tg_chat_for_reader = tg_chat;
                             tokio::spawn(async move {
                                 let mut lines_result = String::new();
                                 if let Some(stdout) = stdout {
@@ -448,6 +469,11 @@ pub async fn ai_worker_loop(
                                             if let Some((kind, detail)) = prog {
                                                 if let Ok(mut p) = progress.lock() {
                                                     *p = Some(detail.clone());
+                                                }
+                                                // Forward questions to Telegram/Slack so chat users see them.
+                                                if kind == "question" && tg_chat_for_reader != 0 {
+                                                    let _ = ttx_for_reader.send((tg_chat_for_reader,
+                                                        format!("[Task #{}] {}\n\nReply with /followup <answer>", task_id, detail)));
                                                 }
                                                 if let Some(ref tx) = etx {
                                                     let _ = tx.send(crate::registry::WsEvent::TaskProgress {

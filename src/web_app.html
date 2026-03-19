@@ -706,11 +706,15 @@ function handleEvent(msg) {
         const task = state.tasks[msg.bot].find(t => t.id === msg.task_id);
         if (task) {
           task.lastProgress = msg.detail;
+          if (msg.kind === 'question') task.needsInput = true;
+          if (msg.kind === 'warning') task.warning = true;
           if (!task.progress) task.progress = [];
           task.progress.push({ kind: msg.kind, detail: msg.detail, time: Date.now() });
           // Keep last 20 progress entries.
           if (task.progress.length > 20) task.progress = task.progress.slice(-20);
           renderTasks();
+          // Auto-switch to Workers tab if a question comes in.
+          if (msg.kind === 'question' && msg.bot === state.activeBot) switchTab('workers');
         }
       }
       break;
@@ -836,7 +840,7 @@ function renderTasks() {
   panel.innerHTML = tasks.map(t => {
     const secs = Math.floor((Date.now() - t.startTime) / 1000);
     const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    const progressColor = t.error ? 'var(--red)' : (t.lastProgress && t.lastProgress.startsWith('No output') ? 'var(--yellow)' : 'var(--green)');
+    const progressColor = t.error ? 'var(--red)' : t.needsInput ? '#e090ff' : t.warning ? 'var(--yellow)' : 'var(--green)';
     const progress = t.lastProgress ? `<div style="font-size:12px;color:${progressColor};margin-top:2px">${escapeHtml(t.lastProgress)}</div>` : '';
     const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
     const agentList = agents.length ? agents.map(a =>
@@ -973,7 +977,7 @@ function renderWorkers() {
   list.innerHTML = tasks.map(t => {
     const secs = Math.floor((Date.now() - t.startTime) / 1000);
     const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    const progressColor2 = t.error ? 'var(--red)' : (t.lastProgress && t.lastProgress.startsWith('No output') ? 'var(--yellow)' : 'var(--green)');
+    const progressColor2 = t.error ? 'var(--red)' : t.needsInput ? '#e090ff' : t.warning ? 'var(--yellow)' : 'var(--green)';
     const progress = t.lastProgress ? `<div style="color:${progressColor2};font-size:13px;margin-top:4px">${escapeHtml(t.lastProgress)}</div>` : '';
     const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
     const agentList = agents.length ? agents.map(a =>
@@ -993,7 +997,7 @@ function renderWorkers() {
       ${progress}${agentList}
       ${history ? '<div style="margin-top:6px;border-top:1px solid #333;padding-top:6px">' + history + '</div>' : ''}
       <div style="margin-top:8px;display:flex;gap:6px">
-        <input id="followup-${t.id}" type="text" placeholder="Add context for this task..." style="flex:1;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:12px" onkeydown="if(event.key==='Enter')sendFollowUp(${t.id})">
+        <input id="followup-${t.id}" type="text" placeholder="${t.needsInput ? 'Answer the question above...' : 'Add context for this task...'}" style="flex:1;background:var(--bg);color:var(--text);border:1px solid ${t.needsInput ? '#e090ff' : '#444'};border-radius:4px;padding:4px 8px;font-size:12px" onkeydown="if(event.key==='Enter')sendFollowUp(${t.id})">
         <button onclick="sendFollowUp(${t.id})" style="background:none;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px">Follow-up</button>
       </div>
     </div>`;
