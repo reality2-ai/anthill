@@ -137,7 +137,7 @@ impl ClaudeCliPlugin {
                 "slack" => "💬 slack",
                 _ => &source,
             };
-            self.send_telegram(chat_id, &format!("_{} says:_ {}", label, text));
+            self.send_telegram(chat_id, &format!("[{}] {}", label, text));
         }
 
         let task_id = self.next_task_id;

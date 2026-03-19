@@ -148,6 +148,9 @@ pub async fn claude_cli_worker(
         let input_len = req.message.len() as u64;
         let chat_id = req.chat_id;
         let task_id = req.task_id;
+        let req_source = req.source.clone();
+        let sync = config.sync_channels;
+        let tg_chat = last_telegram_chat_id;
         let rq = Arc::clone(&response_queue);
         let st = Arc::clone(&stats);
         let tm = Arc::clone(&tasks);
@@ -172,7 +175,7 @@ pub async fn claude_cli_worker(
                 "slack" => "💬 slack",
                 _ => &req.source,
             };
-            let _ = ttx.send((last_telegram_chat_id, format!("_{} says:_ {}", label, req.message)));
+            let _ = ttx.send((last_telegram_chat_id, format!("[{}] {}", label, req.message)));
         }
 
         // Broadcast task started event.
@@ -319,6 +322,11 @@ pub async fn claude_cli_worker(
                     text: response_text.clone(),
                     task_id,
                 });
+            }
+
+            // Forward response to Telegram if from another channel and sync is enabled.
+            if sync && req_source != "telegram" && tg_chat != 0 {
+                let _ = ttx.send((tg_chat, response_text.clone()));
             }
 
             // Push response to R2 event bus (for Telegram plugin).
