@@ -358,9 +358,14 @@ pub async fn ai_worker_loop(
             let _ = std::fs::write(&user_memory_file, header);
         }
 
-        // Periodic archive of low-confidence edges.
+        // Periodic maintenance.
         request_count += 1;
+        if request_count % 50 == 0 {
+            // Consolidate: merge duplicate nodes, parallel edges, collapse chains.
+            knowledge_cache.consolidate();
+        }
         if request_count % 100 == 0 {
+            // Archive low-confidence edges to separate file.
             knowledge_cache.archive_stale();
         }
 

@@ -493,6 +493,274 @@ impl KnowledgeGraph {
     }
 }
 
+// --- Graph consolidation ---
+
+/// Result of a consolidation pass.
+#[derive(Debug, Default)]
+pub struct ConsolidationReport {
+    pub nodes_merged: usize,
+    pub edges_merged: usize,
+    pub chains_collapsed: usize,
+    pub contradictions: Vec<String>,
+}
+
+impl KnowledgeGraph {
+    /// Run a full consolidation pass: dedup nodes, merge parallel edges,
+    /// collapse chains, detect contradictions.
+    pub fn consolidate(&mut self) -> ConsolidationReport {
+        let mut report = ConsolidationReport::default();
+
+        // 1. Deduplicate nodes.
+        report.nodes_merged = self.dedup_nodes();
+
+        // 2. Merge parallel edges (same source, target, relation).
+        report.edges_merged = self.merge_parallel_edges();
+
+        // 3. Collapse chains: A→B→C where B has degree 2 and is a Fact.
+        report.chains_collapsed = self.collapse_chains();
+
+        // 4. Detect contradictions.
+        report.contradictions = self.detect_contradictions();
+
+        self.rebuild_index();
+        report
+    }
+
+    /// Find and merge nodes with similar labels and same kind.
+    fn dedup_nodes(&mut self) -> usize {
+        let mut merged = 0;
+        let indices: Vec<NodeIndex> = self.graph.node_indices().collect();
+
+        // Build label→index map for matching.
+        let mut to_merge: Vec<(NodeIndex, NodeIndex)> = Vec::new();
+        for i in 0..indices.len() {
+            for j in (i + 1)..indices.len() {
+                let a = indices[i];
+                let b = indices[j];
+                if !self.graph.contains_node(a) || !self.graph.contains_node(b) {
+                    continue;
+                }
+                if self.graph[a].kind != self.graph[b].kind {
+                    continue;
+                }
+                if labels_match(&self.graph[a].label, &self.graph[b].label) {
+                    to_merge.push((a, b));
+                }
+            }
+        }
+
+        for (keep, remove) in to_merge {
+            if !self.graph.contains_node(keep) || !self.graph.contains_node(remove) {
+                continue;
+            }
+            self.merge_nodes(keep, remove);
+            merged += 1;
+        }
+
+        merged
+    }
+
+    /// Merge node `remove` into `keep`: move all edges, keep the better summary.
+    fn merge_nodes(&mut self, keep: NodeIndex, remove: NodeIndex) {
+        // Keep the longer summary.
+        let remove_node = self.graph[remove].clone();
+        let keep_node = &mut self.graph[keep];
+        if remove_node.summary.len() > keep_node.summary.len() {
+            keep_node.summary = remove_node.summary;
+        }
+        // Union tags.
+        for tag in &remove_node.tags {
+            if !keep_node.tags.contains(tag) {
+                keep_node.tags.push(tag.clone());
+            }
+        }
+
+        // Move edges from `remove` to `keep`.
+        let edges_out: Vec<_> = self.graph.edges_directed(remove, Direction::Outgoing)
+            .map(|e| (e.target(), e.weight().clone(), e.id()))
+            .collect();
+        for (target, weight, _) in edges_out {
+            let actual_target = if target == remove { keep } else { target };
+            self.graph.add_edge(keep, actual_target, weight);
+        }
+        let edges_in: Vec<_> = self.graph.edges_directed(remove, Direction::Incoming)
+            .map(|e| (e.source(), e.weight().clone(), e.id()))
+            .collect();
+        for (source, weight, _) in edges_in {
+            let actual_source = if source == remove { keep } else { source };
+            self.graph.add_edge(actual_source, keep, weight);
+        }
+
+        self.graph.remove_node(remove);
+    }
+
+    /// Merge parallel edges (same source, target, and relation).
+    fn merge_parallel_edges(&mut self) -> usize {
+        use petgraph::graph::EdgeIndex;
+        let mut merged = 0;
+
+        // Collect all edge info first to avoid borrow conflicts.
+        let edge_info: Vec<(EdgeIndex, usize, usize, String, KnowledgeEdge)> = self.graph
+            .edge_indices()
+            .filter_map(|e| {
+                let (src, tgt) = self.graph.edge_endpoints(e)?;
+                Some((e, src.index(), tgt.index(), self.graph[e].relation.clone(), self.graph[e].clone()))
+            })
+            .collect();
+
+        let mut seen: HashMap<(usize, usize, String), (EdgeIndex, KnowledgeEdge)> = HashMap::new();
+        let mut to_remove = Vec::new();
+        let mut to_update: Vec<(EdgeIndex, KnowledgeEdge)> = Vec::new();
+
+        for (idx, src, tgt, rel, edge) in edge_info {
+            let key = (src, tgt, rel);
+            if let Some((kept_idx, kept_edge)) = seen.get_mut(&key) {
+                // Merge: combined confidence, summed counts.
+                kept_edge.confidence = (1.0 - (1.0 - kept_edge.confidence) * (1.0 - edge.confidence))
+                    .min(0.95);
+                kept_edge.tests += edge.tests;
+                kept_edge.survived += edge.survived;
+                kept_edge.references += edge.references;
+                kept_edge.importance = kept_edge.importance.max(edge.importance);
+                if edge.context.len() > kept_edge.context.len() {
+                    kept_edge.context = edge.context;
+                }
+                to_update.push((*kept_idx, kept_edge.clone()));
+                to_remove.push(idx);
+                merged += 1;
+            } else {
+                seen.insert(key, (idx, edge));
+            }
+        }
+
+        // Apply updates.
+        for (idx, edge) in to_update {
+            if self.graph.edge_weight_mut(idx).is_some() {
+                self.graph[idx] = edge;
+            }
+        }
+        for e in to_remove.into_iter().rev() {
+            self.graph.remove_edge(e);
+        }
+
+        merged
+    }
+
+    /// Collapse chain nodes: A→B→C where B has exactly 1 incoming + 1 outgoing
+    /// and is a Fact-type node with low importance.
+    fn collapse_chains(&mut self) -> usize {
+        let mut collapsed = 0;
+        let candidates: Vec<NodeIndex> = self.graph.node_indices().filter(|&n| {
+            self.graph[n].kind == NodeKind::Fact
+                && self.graph.edges_directed(n, Direction::Incoming).count() == 1
+                && self.graph.edges_directed(n, Direction::Outgoing).count() == 1
+        }).collect();
+
+        for mid in candidates {
+            if !self.graph.contains_node(mid) { continue; }
+
+            let in_edge = match self.graph.edges_directed(mid, Direction::Incoming).next() {
+                Some(e) => (e.source(), e.weight().clone(), e.id()),
+                None => continue,
+            };
+            let out_edge = match self.graph.edges_directed(mid, Direction::Outgoing).next() {
+                Some(e) => (e.target(), e.weight().clone(), e.id()),
+                None => continue,
+            };
+
+            let (src, in_w, _) = in_edge;
+            let (tgt, out_w, _) = out_edge;
+
+            // Don't collapse if either edge is high-importance.
+            if in_w.importance > 0.7 || out_w.importance > 0.7 { continue; }
+            // Don't collapse self-loops.
+            if src == tgt { continue; }
+
+            // Create combined edge.
+            let combined = KnowledgeEdge {
+                relation: format!("{} → {}", in_w.relation, out_w.relation),
+                context: format!("{} (via {})", in_w.context, self.graph[mid].label),
+                since: in_w.since.clone(),
+                confidence: in_w.confidence.min(out_w.confidence), // weakest link
+                tests: in_w.tests.min(out_w.tests),
+                survived: in_w.survived.min(out_w.survived),
+                basis: in_w.basis.clone(),
+                last_tested: in_w.last_tested.clone(),
+                importance: in_w.importance.max(out_w.importance),
+                references: in_w.references + out_w.references,
+            };
+
+            self.graph.add_edge(src, tgt, combined);
+            self.graph.remove_node(mid); // also removes its edges
+            collapsed += 1;
+        }
+
+        collapsed
+    }
+
+    /// Detect potential contradictions: same node pair with edges whose
+    /// confidence levels diverge significantly.
+    fn detect_contradictions(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        let mut pair_edges: HashMap<(usize, usize), Vec<&KnowledgeEdge>> = HashMap::new();
+
+        for edge_idx in self.graph.edge_indices() {
+            if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                // Normalize direction for undirected comparison.
+                let key = if src.index() <= tgt.index() {
+                    (src.index(), tgt.index())
+                } else {
+                    (tgt.index(), src.index())
+                };
+                pair_edges.entry(key).or_default().push(&self.graph[edge_idx]);
+            }
+        }
+
+        for ((a, b), edges) in &pair_edges {
+            if edges.len() < 2 { continue; }
+            for i in 0..edges.len() {
+                for j in (i + 1)..edges.len() {
+                    let e1 = edges[i];
+                    let e2 = edges[j];
+                    // Flag if one is high-confidence and the other is low.
+                    if (e1.confidence > 0.7 && e2.confidence < 0.3)
+                        || (e2.confidence > 0.7 && e1.confidence < 0.3)
+                    {
+                        let node_a = self.graph.node_indices()
+                            .find(|&n| n.index() == *a)
+                            .map(|n| self.graph[n].label.as_str())
+                            .unwrap_or("?");
+                        let node_b = self.graph.node_indices()
+                            .find(|&n| n.index() == *b)
+                            .map(|n| self.graph[n].label.as_str())
+                            .unwrap_or("?");
+                        warnings.push(format!(
+                            "{} ↔ {}: '{}' ({:.0}%) vs '{}' ({:.0}%) — possible contradiction",
+                            node_a, node_b,
+                            e1.relation, e1.confidence * 100.0,
+                            e2.relation, e2.confidence * 100.0,
+                        ));
+                    }
+                }
+            }
+        }
+
+        warnings
+    }
+}
+
+/// Check if two labels refer to the same entity.
+/// Case-insensitive, and one being a prefix/substring of the other.
+fn labels_match(a: &str, b: &str) -> bool {
+    let la = a.to_lowercase();
+    let lb = b.to_lowercase();
+    if la == lb { return true; }
+    // One is a substring of the other (e.g. "Anthill" matches "Anthill project").
+    if la.len() >= 3 && lb.contains(&la) { return true; }
+    if lb.len() >= 3 && la.contains(&lb) { return true; }
+    false
+}
+
 // --- Cached graph (avoids re-parsing JSON on every request) ---
 
 use std::sync::Mutex;
@@ -630,6 +898,28 @@ impl CachedGraph {
             log::info!("Archived {} low-confidence edges to {}", archived, archive_path.display());
         }
         archived
+    }
+
+    /// Run graph consolidation: dedup nodes, merge edges, collapse chains.
+    /// Returns a report of what was done.
+    pub fn consolidate(&self) -> ConsolidationReport {
+        self.maybe_reload();
+        let mut graph = match self.graph.lock() {
+            Ok(g) => g,
+            Err(_) => return ConsolidationReport::default(),
+        };
+        let report = graph.consolidate();
+        if report.nodes_merged > 0 || report.edges_merged > 0 || report.chains_collapsed > 0 {
+            graph.save();
+            log::info!(
+                "Graph consolidated: {} nodes merged, {} edges merged, {} chains collapsed, {} contradictions",
+                report.nodes_merged, report.edges_merged, report.chains_collapsed, report.contradictions.len()
+            );
+            for warning in &report.contradictions {
+                log::warn!("Contradiction: {}", warning);
+            }
+        }
+        report
     }
 
     /// Node count (for logging).
@@ -1085,5 +1375,158 @@ mod tests {
         assert_eq!(confidence_bar(1.0), "●●●●●");
         assert_eq!(confidence_bar(0.6), "●●●○○");
         assert_eq!(confidence_bar(0.0), "○○○○○");
+    }
+
+    #[test]
+    fn node_deduplication() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-dedup");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        // Two nodes with matching labels (case-insensitive).
+        kg.graph.add_node(KnowledgeNode {
+            label: "Anthill".into(), kind: NodeKind::Project, summary: "Short".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        kg.graph.add_node(KnowledgeNode {
+            label: "anthill".into(), kind: NodeKind::Project, summary: "AI colony platform, detailed".into(),
+            created: String::new(), updated: String::new(), tags: vec!["rust".into()],
+        });
+        assert_eq!(kg.node_count(), 2);
+
+        let report = kg.consolidate();
+        assert_eq!(report.nodes_merged, 1);
+        assert_eq!(kg.node_count(), 1);
+        // Should keep the longer summary.
+        let remaining = kg.graph.node_indices().next().unwrap();
+        assert!(kg.graph[remaining].summary.contains("detailed"));
+        // Tags merged.
+        assert!(kg.graph[remaining].tags.contains(&"rust".to_string()));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parallel_edge_merging() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-parallel");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        let a = kg.graph.add_node(KnowledgeNode {
+            label: "A".into(), kind: NodeKind::Person, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let b = kg.graph.add_node(KnowledgeNode {
+            label: "B".into(), kind: NodeKind::Project, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        // Two edges with same relation.
+        let mut e1 = KnowledgeEdge::new("works_on", "context 1", "", Basis::Told);
+        e1.confidence = 0.5;
+        e1.tests = 3;
+        e1.survived = 2;
+        let mut e2 = KnowledgeEdge::new("works_on", "context 2, more detailed", "", Basis::Observed);
+        e2.confidence = 0.6;
+        e2.tests = 5;
+        e2.survived = 4;
+        kg.graph.add_edge(a, b, e1);
+        kg.graph.add_edge(a, b, e2);
+
+        let report = kg.consolidate();
+        assert_eq!(report.edges_merged, 1);
+
+        // Remaining edge should have combined confidence > either individual.
+        let remaining = kg.graph.edges(a).next().unwrap();
+        let edge = remaining.weight();
+        assert!(edge.confidence > 0.6); // combined > max individual
+        assert_eq!(edge.tests, 8); // 3 + 5
+        assert_eq!(edge.survived, 6); // 2 + 4
+        assert!(edge.context.contains("detailed")); // kept longer context
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn chain_collapsing() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-chain");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        let a = kg.graph.add_node(KnowledgeNode {
+            label: "Roy".into(), kind: NodeKind::Person, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let mid = kg.graph.add_node(KnowledgeNode {
+            label: "uses Rust".into(), kind: NodeKind::Fact, summary: "intermediate".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let c = kg.graph.add_node(KnowledgeNode {
+            label: "Anthill".into(), kind: NodeKind::Project, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let mut e1 = KnowledgeEdge::new("knows", "", "", Basis::Observed);
+        e1.confidence = 0.8;
+        let mut e2 = KnowledgeEdge::new("applied_to", "", "", Basis::Inferred);
+        e2.confidence = 0.6;
+        kg.graph.add_edge(a, mid, e1);
+        kg.graph.add_edge(mid, c, e2);
+
+        assert_eq!(kg.node_count(), 3);
+        let report = kg.consolidate();
+        assert_eq!(report.chains_collapsed, 1);
+        assert_eq!(kg.node_count(), 2); // mid removed
+
+        // Combined edge: confidence = min(0.8, 0.6) = 0.6.
+        let combined = kg.graph.edges(a).next().unwrap();
+        assert!((combined.weight().confidence - 0.6).abs() < 0.01);
+        assert!(combined.weight().relation.contains("knows"));
+        assert!(combined.weight().relation.contains("applied_to"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn contradiction_detection() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-contra");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        let a = kg.graph.add_node(KnowledgeNode {
+            label: "Team".into(), kind: NodeKind::Concept, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let b = kg.graph.add_node(KnowledgeNode {
+            label: "Python".into(), kind: NodeKind::Tool, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let mut e1 = KnowledgeEdge::new("uses", "main language", "", Basis::Told);
+        e1.confidence = 0.85;
+        let mut e2 = KnowledgeEdge::new("avoids", "too slow", "", Basis::Inferred);
+        e2.confidence = 0.2;
+        kg.graph.add_edge(a, b, e1);
+        kg.graph.add_edge(a, b, e2);
+
+        let report = kg.consolidate();
+        assert!(!report.contradictions.is_empty());
+        assert!(report.contradictions[0].contains("contradiction"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn labels_match_cases() {
+        assert!(labels_match("Anthill", "anthill"));
+        assert!(labels_match("Anthill", "Anthill project"));
+        assert!(labels_match("Roy", "roy"));
+        assert!(!labels_match("Anthill", "Beehive"));
+        assert!(labels_match("AI", "ai")); // exact case-insensitive
     }
 }
