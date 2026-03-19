@@ -1111,7 +1111,7 @@ async function showFilePreview(path, contentType, resp) {
   let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <b>${fileName}</b>
     <div style="display:flex;gap:8px">
-      <a href="/api/ants/${state.activeBot}/files/${path}" download="${fileName}" style="background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;text-decoration:none">Download</a>
+      <button onclick="downloadFile('${path}','${fileName}')" style="background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px">Download</button>
       <button onclick="loadFiles('${currentFilePath.split('/').slice(0,-1).join('/')}')" style="background:var(--surface2);color:var(--text);border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px">Back</button>
     </div>
   </div>`;
@@ -1133,19 +1133,47 @@ async function showFilePreview(path, contentType, resp) {
 async function handleUpload(files) {
   if (!state.activeBot || !files.length) return;
   const dir = currentFilePath ? currentFilePath + '/' : 'files/';
+  let errors = [];
 
   for (const file of files) {
     const path = dir + file.name;
-    const data = await file.arrayBuffer();
-    await authFetch(`/api/ants/${state.activeBot}/upload/${path}`, {
-      method: 'POST',
-      body: data,
-    });
+    try {
+      const data = await file.arrayBuffer();
+      const resp = await authFetch(`/api/ants/${state.activeBot}/upload/${path}`, {
+        method: 'POST',
+        body: data,
+      });
+      if (!resp.ok) {
+        errors.push(`${file.name}: ${resp.status} ${await resp.text()}`);
+      }
+    } catch (e) {
+      errors.push(`${file.name}: ${e.message}`);
+    }
+  }
+
+  if (errors.length) {
+    alert('Upload errors:\n' + errors.join('\n'));
   }
 
   // Refresh.
   document.getElementById('file-upload').value = '';
   loadFiles(currentFilePath);
+}
+
+async function downloadFile(path, fileName) {
+  try {
+    const resp = await authFetch(`/api/ants/${state.activeBot}/files/${path}`);
+    if (!resp.ok) { alert('Download failed: ' + resp.status); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Download error: ' + e.message);
+  }
 }
 
 async function deleteFileItem(path) {
