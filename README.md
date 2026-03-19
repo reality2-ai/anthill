@@ -19,14 +19,10 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 ```bash
 git clone https://github.com/reality2-ai/anthill.git
 cd anthill
-cp anthill-example.toml anthill.toml
-# Edit anthill.toml — set mode = "claude"
-cargo run --release
-```
-
-```bash
+./install.sh                     # builds, installs binary, sets up service
 anthill --join-code              # prints a code (expires in 5 min)
-# Open http://localhost:3000 (or your Tailscale hostname) → enter the code → you're in
+# Open http://localhost:3000 (or your Tailscale hostname) → enter the code
+# Create your first ANT from the web dashboard (+  button)
 ```
 
 ## How it works
@@ -71,7 +67,7 @@ anthill --join-code              # prints a code (expires in 5 min)
 | Guide | What it covers |
 |---|---|
 | [Prerequisites](docs/prerequisites.md) | Rust, AI backend, Telegram/Slack, Tailscale |
-| [Getting Started](docs/getting-started.md) | Single ANT setup, first message |
+| [Getting Started](docs/getting-started.md) | Install, create your first ANT, send a message |
 | [Production Setup](docs/production-setup.md) | Multiple ANTS, supervisor, auto-start |
 | [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA, cross-device history |
 | [Configuration](docs/configuration.md) | Full reference for supervisor.toml and ant.toml |

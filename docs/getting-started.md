@@ -1,71 +1,42 @@
 # Getting Started
 
-Run a single ANT for testing or personal use.
-
-## 1. Clone Anthill
+## 1. Clone and install
 
 ```bash
 git clone https://github.com/reality2-ai/anthill.git
 cd anthill
+./install.sh
 ```
 
-## 2. Create your config
+This builds the binary, installs it, creates `~/.config/anthill/`, and starts the service.
+
+## 2. Generate a join code
 
 ```bash
-cp anthill-example.toml anthill.toml
+anthill --join-code
 ```
 
-Edit `anthill.toml`. The minimal config is:
+This prints a code that expires in 5 minutes. You'll need it to connect from your browser.
 
-```toml
-name = "My ANT"
-mode = "claude"
+## 3. Open the dashboard
 
-[claude]
-skip_permissions = true
+Open `http://localhost:3000` (or your Tailscale hostname) in a browser. Enter the join code and a device name. You're in.
 
-system_prompt = """\
-You are a helpful programming assistant."""
-```
+## 4. Create your first ANT
 
-That's it — no Telegram token required. The ANT will be accessible via the web dashboard only, and the working directory defaults to `~/.config/anthill/ants/standalone/working`.
+Click the **+** button in the sidebar. Enter an ID (e.g. `dev`) — everything else is optional and has sensible defaults. The ANT starts immediately.
 
-To also enable Telegram, add:
+## 5. Send a message
 
-```toml
-[telegram]
-token = "YOUR_BOT_TOKEN_HERE"    # from @BotFather
-allow = [YOUR_CHAT_ID]           # optional but recommended
-```
+Select your ANT in the sidebar and type a message. You should see:
 
-To set a specific working directory:
-
-```toml
-[claude]
-working_dir = "/home/youruser/my-ant-workspace"
-```
-
-If omitted, it defaults to `~/.config/anthill/ants/<id>/working`.
-
-## 3. Build and run
-
-```bash
-cargo run --release
-```
-
-## 4. Test it
-
-**Via web dashboard:** Open `http://localhost:3000` in your browser (single-bot mode also starts the web server).
-
-**Via Telegram** (if configured): Find your bot and send a message. You should see:
-
-1. A typing indicator ("..." bubble)
-2. A "Thinking..." message
-3. Claude's response with formatted code blocks
+1. "Thinking..." appears
+2. The Workers tab shows the task running
+3. Claude's response appears with formatted code blocks
 
 Try: "What's 2+2?" or "Write a Python hello world"
 
-## 5. Useful commands
+## 6. Useful commands
 
 | Command | What it does |
 |---|---|
@@ -74,9 +45,21 @@ Try: "What's 2+2?" or "Write a Python hello world"
 | `/cancel` | Stop the current task |
 | `/new` | Start a fresh conversation |
 
+## 7. Optional: add Telegram or Slack
+
+Click the ⚙ gear on your ANT → add a Telegram bot token or Slack tokens. Save and restart to activate.
+
+## 8. Optional: set up HTTPS
+
+```bash
+sudo tailscale serve --bg http://localhost:3000
+```
+
+Access via `https://<machine-name>.<tailnet>.ts.net` with a valid certificate.
+
 ## Next steps
 
-- [Production Setup](production-setup.md) — multiple ANTS, supervisor, auto-start
-- [Web Dashboard](web-dashboard.md) — browser-based interface, Tailscale HTTPS
+- [Production Setup](production-setup.md) — multiple ANTS, auto-start, backups
+- [Web Dashboard](web-dashboard.md) — Tailscale HTTPS, PWA, cross-device history
 - [Memory & Workspaces](memory-and-workspaces.md) — persistent memory, git backups
 - [Configuration](configuration.md) — full reference for all settings

@@ -41,7 +41,7 @@ anthill --join-code    # generate a code
 
 ## Bot tokens are secrets
 
-`ant.toml` files contain Telegram bot tokens. They live in `~/.config/anthill/ants/` which is outside the repo. The `.gitignore` excludes `anthill.toml` (single-bot mode config).
+`ant.toml` files contain Telegram/Slack tokens. They live in `~/.config/anthill/ants/` which is outside the repo.
 
 ## skip_permissions
 
@@ -63,6 +63,14 @@ Anthill runs commands with the same permissions as the user running the service.
 
 Per-user memory files accumulate context over time — project names, file paths, preferences. They're stored in the working directory, backed up to git, but not encrypted.
 
+## Git backup repositories
+
+> **Warning:** If you use GitHub for workspace backups (`backup_remote`), make sure the repository is **private**. A public backup repo exposes your ANT's memory files, conversation context, and any files Claude creates — visible to the entire internet.
+
+Memory files may contain project names, credentials mentioned in conversation, file paths, and personal preferences. Always use `gh repo create --private` when creating backup repos.
+
+*Future: encrypted backups using the colony trust key (AES-256-GCM) so even public repos would be safe. The infrastructure (`encrypt_payload`/`decrypt_payload`) is already in place.*
+
 ## Recommendations
 
 1. **Use Tailscale** for the web dashboard — don't expose port 3000 to the public internet
@@ -70,4 +78,5 @@ Per-user memory files accumulate context over time — project names, file paths
 3. **Set `allow`** in Telegram config — restrict to your chat ID
 4. **Review provisioned devices** periodically — revoke ones you don't recognise
 5. **Keep `colony.key` safe** — anyone with this file can generate join codes
-6. **Use private repos** for git backup remotes — memory may contain sensitive context
+6. **Use private repos** for git backup remotes — memory and working artifacts may contain sensitive context
+7. **Review memory files** periodically — remove any credentials or sensitive data that Claude may have stored

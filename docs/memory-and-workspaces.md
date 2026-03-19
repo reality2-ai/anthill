@@ -52,7 +52,7 @@ backup_interval_hours = 6    # commit every 6 hours (0 = disabled)
 ### Push to GitHub
 
 ```bash
-# Create a private repo
+# IMPORTANT: always use --private. A public repo exposes memory, conversations, and files.
 gh repo create your-org/anthill-my-ant --private
 
 # Set up the remote
