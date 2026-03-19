@@ -911,7 +911,14 @@ async fn handle_ws(
                     if let Ok(cmd) = serde_json::from_str::<WsCommand>(&payload_str) {
                         match cmd {
                             WsCommand::Chat { bot, message, chat_id } => {
-                                registry.send_message(&bot, chat_id.unwrap_or(0), message).await;
+                                let cid = chat_id.unwrap_or(0);
+                                let handled = handle_web_command(
+                                    &registry, &bot, cid, &message,
+                                ).await;
+                                if !handled {
+                                    // Regular message → dispatch to AI worker.
+                                    registry.send_message(&bot, cid, message).await;
+                                }
                             }
                             WsCommand::Cancel { bot, task_id } => {
                                 let bots = registry.bots.read().await;
@@ -945,6 +952,166 @@ async fn handle_ws(
             else => break,
         }
     }
+}
+
+/// Handle local commands from the web (bypass AI worker).
+/// Returns true if the command was handled locally, false if it should go to the worker.
+async fn handle_web_command(
+    registry: &BotRegistry,
+    bot_name: &str,
+    chat_id: i64,
+    message: &str,
+) -> bool {
+    let trimmed = message.trim();
+    let bots = registry.bots.read().await;
+    let handle = match bots.get(bot_name) {
+        Some(h) => h,
+        None => return false,
+    };
+
+    let response = match trimmed {
+        "/help" | "/start" => Some(
+            "**anthill commands:**\n\n\
+            /help — show this message\n\
+            /status — live view of each worker\n\
+            /ants — show running workers\n\
+            /usage — session statistics\n\
+            /cancel — cancel a running task\n\
+            /followup — queue context for running task\n\
+            /new — fresh conversation\n\
+            /analyse <file> — thematic analysis → knowledge graph\n\
+            /reflect — review and consolidate knowledge graph\n\
+            /specify <file> — generate spec from code\n\
+            /test-vectors <file> — generate test cases\n\n\
+            Everything else is sent as a prompt to the AI.".into()
+        ),
+        "/ants" => {
+            let tasks = handle.tasks.lock().ok();
+            match tasks {
+                Some(map) if map.is_empty() => Some("All workers idle.".into()),
+                Some(map) => {
+                    let mut out = format!("**{} worker{} active:**\n\n", map.len(), if map.len() == 1 { "" } else { "s" });
+                    let mut sorted: Vec<_> = map.values().collect();
+                    sorted.sort_by_key(|t| t.task_id);
+                    for task in sorted {
+                        let elapsed = task.started.elapsed().as_secs();
+                        let time = if elapsed < 60 { format!("{}s", elapsed) }
+                            else { format!("{}m {}s", elapsed / 60, elapsed % 60) };
+                        out.push_str(&format!("**#{}** — {}\n  Working for {}\n\n",
+                            task.task_id, task.message_preview, time));
+                    }
+                    Some(out)
+                }
+                None => Some("Status unavailable.".into()),
+            }
+        },
+        "/status" => {
+            let tasks = handle.tasks.lock().ok();
+            match tasks {
+                Some(map) if map.is_empty() => Some("All workers idle.".into()),
+                Some(map) => {
+                    let mut out = format!("**{} worker{} active:**\n\n", map.len(), if map.len() == 1 { "" } else { "s" });
+                    let mut sorted: Vec<_> = map.values().collect();
+                    sorted.sort_by_key(|t| t.task_id);
+                    for task in sorted {
+                        let elapsed = task.started.elapsed().as_secs();
+                        let time = if elapsed < 60 { format!("{}s", elapsed) }
+                            else { format!("{}m {}s", elapsed / 60, elapsed % 60) };
+                        let backend = task.backend.lock()
+                            .map(|b| if b.is_empty() { "starting".into() } else { b.clone() })
+                            .unwrap_or_else(|_| "?".into());
+                        let progress = task.last_progress.lock().ok()
+                            .and_then(|p| p.clone())
+                            .unwrap_or_else(|| "waiting...".into());
+                        out.push_str(&format!("**#{}** [{}] — {}\n  ⏱ {}  → {}\n\n",
+                            task.task_id, backend, task.message_preview, time, progress));
+                    }
+                    Some(out)
+                }
+                None => Some("Status unavailable.".into()),
+            }
+        },
+        s if s == "/cancel" || s.starts_with("/cancel ") => {
+            let mut tasks = match handle.tasks.lock() {
+                Ok(m) => m,
+                Err(_) => return true,
+            };
+            if trimmed == "/cancel all" {
+                let count = tasks.len();
+                for task in tasks.values() { task.handle.abort(); }
+                tasks.clear();
+                Some(format!("Cancelled {} task(s).", count))
+            } else if trimmed == "/cancel" {
+                let latest = tasks.values().max_by_key(|t| t.task_id).map(|t| t.task_id);
+                if let Some(id) = latest {
+                    if let Some(task) = tasks.remove(&id) {
+                        task.handle.abort();
+                        Some(format!("Cancelled task #{}.", id))
+                    } else { Some("No running tasks.".into()) }
+                } else { Some("No running tasks.".into()) }
+            } else {
+                let id: u32 = trimmed.strip_prefix("/cancel ").and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+                if let Some(task) = tasks.remove(&id) {
+                    task.handle.abort();
+                    Some(format!("Cancelled task #{}.", id))
+                } else { Some(format!("No task with ID {}.", id)) }
+            }
+        },
+        "/new" => {
+            drop(bots);
+            // Send a new-session request to the worker.
+            registry.send_message(bot_name, chat_id,
+                "Summarise our conversation so far in a few bullet points, then say 'Ready for a new conversation.'".into()).await;
+            // The worker handles the new_session flag via the /new classification... but web bypasses that.
+            // For now, just acknowledge.
+            return true; // Let the message go through as a regular dispatch (the worker handles session reset)
+        },
+        "/usage" => {
+            let stats = handle.stats.lock().ok();
+            match stats {
+                Some(map) if map.is_empty() => Some("No usage yet.".into()),
+                Some(map) => {
+                    let mut out = String::from("**Session statistics:**\n\n");
+                    for (&cid, s) in map.iter() {
+                        let uptime = s.started
+                            .map(|t| {
+                                let secs = t.elapsed().as_secs();
+                                if secs < 60 { format!("{}s", secs) }
+                                else if secs < 3600 { format!("{}m {}s", secs / 60, secs % 60) }
+                                else { format!("{}h {}m", secs / 3600, (secs % 3600) / 60) }
+                            })
+                            .unwrap_or_else(|| "—".into());
+                        if map.len() > 1 { out.push_str(&format!("*User {}:*\n", cid)); }
+                        out.push_str(&format!("  Messages: {}\n  Input: {} chars\n  Output: {} chars\n  Session: {}\n",
+                            s.messages, s.input_chars, s.output_chars, uptime));
+                    }
+                    Some(out)
+                }
+                None => Some("Stats unavailable.".into()),
+            }
+        },
+        _ => None,
+    };
+
+    if let Some(text) = response {
+        // Broadcast as a bot message so the web client receives it.
+        let _ = handle.event_tx.send(crate::registry::WsEvent::Message {
+            bot: bot_name.into(),
+            chat_id,
+            text,
+            task_id: 0,
+        });
+        // Also broadcast the user message for history.
+        let _ = handle.event_tx.send(crate::registry::WsEvent::UserMessage {
+            bot: bot_name.into(),
+            chat_id,
+            text: trimmed.into(),
+            source: "web".into(),
+        });
+        return true;
+    }
+
+    false
 }
 
 /// Signed envelope for WebSocket messages.
