@@ -26,14 +26,13 @@ BINARY="target/release/anthill"
 # --- Install binary ---
 if [ "$OS" = "Darwin" ]; then
     INSTALL_DIR="/usr/local/bin"
-    echo "Installing binary to $INSTALL_DIR/anthill..."
-    # macOS may not need sudo if /usr/local/bin is user-writable
-    if [ -w "$INSTALL_DIR" ]; then
-        cp "$BINARY" "$INSTALL_DIR/anthill"
-    else
-        sudo cp "$BINARY" "$INSTALL_DIR/anthill"
-        sudo chmod 755 "$INSTALL_DIR/anthill"
+    # Ensure /usr/local/bin exists (not always present on macOS).
+    if [ ! -d "$INSTALL_DIR" ]; then
+        sudo mkdir -p "$INSTALL_DIR"
     fi
+    echo "Installing binary to $INSTALL_DIR/anthill..."
+    sudo cp "$BINARY" "$INSTALL_DIR/anthill"
+    sudo chmod 755 "$INSTALL_DIR/anthill"
 else
     INSTALL_DIR="/usr/local/bin"
     # Stop the service if running (binary can't be overwritten while running).
