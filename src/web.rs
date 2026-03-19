@@ -74,6 +74,7 @@ pub async fn run_web_server(
         .route("/icon-512.svg", get(icon_512))
         .route("/icon-192.png", get(icon_192))
         .route("/icon-512.png", get(icon_512))
+        .route("/logo.svg", get(logo))
         .route("/api/auth/verify", post(auth_verify))
         .route("/api/auth/join", post(auth_join))
         .route("/api/auth/status", get(auth_status))
@@ -89,6 +90,17 @@ pub async fn run_web_server(
 /// GET / — serve the embedded web app.
 async fn index() -> Html<&'static str> {
     Html(WEB_APP_HTML)
+}
+
+/// Embedded logo SVG.
+const LOGO_SVG: &str = include_str!("../docs/logo.svg");
+
+/// GET /logo.svg
+async fn logo() -> impl IntoResponse {
+    (
+        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+        LOGO_SVG,
+    )
 }
 
 /// GET /manifest.json — PWA manifest.
