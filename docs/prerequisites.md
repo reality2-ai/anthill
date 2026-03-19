@@ -90,6 +90,10 @@ sudo tailscale up
 # Ubuntu/Debian
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up
+
+# macOS
+brew install tailscale
+# Or download from https://tailscale.com/download/mac
 ```
 
 Install [Tailscale](https://tailscale.com/download) on your phone/tablet too.
