@@ -22,43 +22,43 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "anthill", about = "Anthill — AI-powered Telegram bots")]
+#[command(name = "anthill", about = "Anthill — a colony for ANTS (Autonomous iNTelligenceS)")]
 struct Args {
-    /// Path to config file (single bot mode).
-    #[arg(long, default_value = "anthill.toml")]
+    /// Run as supervisor — manage ANTS + web dashboard.
+    #[arg(long)]
+    supervise: Option<PathBuf>,
+
+    /// Path to config file (advanced: run a single ANT directly).
+    #[arg(long, default_value = "anthill.toml", hide = true)]
     config: PathBuf,
 
     /// Mode override: raw, ai, or claude.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     mode: Option<String>,
 
     /// Shell override (raw/ai modes).
-    #[arg(long)]
+    #[arg(long, hide = true)]
     shell: Option<String>,
 
     /// Allowed Telegram chat IDs (comma-separated).
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', hide = true)]
     allow: Option<Vec<i64>>,
 
     /// Shorthand for --mode claude.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     claude: bool,
 
     /// Shorthand for --mode ai.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     ai: bool,
 
     /// Claude model override (ai mode).
-    #[arg(long)]
+    #[arg(long, hide = true)]
     ai_model: Option<String>,
 
     /// Working directory override (claude mode).
-    #[arg(long)]
+    #[arg(long, hide = true)]
     claude_dir: Option<String>,
-
-    /// Run as supervisor — manage multiple bots + web dashboard.
-    #[arg(long)]
-    supervise: Option<PathBuf>,
 
     /// Generate a join code for a new device to join the colony.
     #[arg(long, default_missing_value = "~/.config/anthill", num_args = 0..=1)]

@@ -216,3 +216,14 @@ else
     echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
     echo ""
 fi
+
+# Common commands for all platforms.
+echo "  ──────────────────────────────────"
+echo "  CLI commands:"
+echo ""
+echo "    anthill --join-code              Generate a join code"
+echo "    anthill --export-key             Show colony key (for password manager)"
+echo "    anthill --export-key --qr        Show colony key as QR code"
+echo "    anthill --import-key <key>       Restore colony key from backup"
+echo "    anthill --help                   Show all options"
+echo ""
