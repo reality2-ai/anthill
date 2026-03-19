@@ -61,7 +61,22 @@ pub struct RunningTask {
     pub message_preview: String,
     pub started: Instant,
     pub handle: tokio::task::JoinHandle<()>,
+    /// What this worker is doing right now (latest progress detail).
+    pub last_progress: Arc<Mutex<Option<String>>>,
+    /// Which AI backend is running this task.
+    pub backend: Arc<Mutex<String>>,
 }
+
+/// A queued follow-up message for a running task's session.
+#[derive(Debug)]
+pub struct FollowUp {
+    pub chat_id: i64,
+    pub message: String,
+    pub source: String,
+}
+
+/// Follow-up queue: messages queued to run after a task's current work completes.
+pub type FollowUpQueue = Arc<Mutex<HashMap<u32, Vec<FollowUp>>>>;
 
 /// All user stats, keyed by chat_id.
 pub type StatsMap = Arc<Mutex<HashMap<i64, UserStats>>>;
@@ -257,6 +272,8 @@ pub async fn ai_worker_loop(
     stats: StatsMap,
     telegram_tx: mpsc::UnboundedSender<(i64, String)>,
     tasks: TaskMap,
+    follow_ups: FollowUpQueue,
+    request_tx: mpsc::UnboundedSender<CliRequest>,
     event_tx: Option<tokio::sync::broadcast::Sender<crate::registry::WsEvent>>,
     bot_name: String,
 ) {
@@ -309,6 +326,7 @@ pub async fn ai_worker_loop(
         let ttx = telegram_tx.clone();
         let etx = event_tx.clone();
         let bname = bot_name.clone();
+        let rq_tx = request_tx.clone();
 
         // Broadcast user message (for history and cross-device sync).
         if let Some(ref tx) = etx {
@@ -344,6 +362,13 @@ pub async fn ai_worker_loop(
             });
         }
 
+        // Shared progress tracking — written by the spawned task, read by /status.
+        let live_progress: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let live_backend: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+        let task_live_progress = Arc::clone(&live_progress);
+        let task_live_backend = Arc::clone(&live_backend);
+        let follow_ups_clone = Arc::clone(&follow_ups);
+
         // Spawn the task concurrently.
         let handle = tokio::spawn(async move {
             // Send typing indicator every 4 seconds.
@@ -367,6 +392,8 @@ pub async fn ai_worker_loop(
             let mut _used_backend = String::new();
 
             for (idx, backend) in backend_list.iter().enumerate() {
+                // Track which backend is active.
+                if let Ok(mut b) = task_live_backend.lock() { *b = backend.clone(); }
                 let (cmd_name, args) = build_backend_command(
                     backend,
                     &message_for_backends,
@@ -381,6 +408,10 @@ pub async fn ai_worker_loop(
                 cmd.current_dir(&working_dir);
                 cmd.stdout(std::process::Stdio::piped());
                 cmd.stderr(std::process::Stdio::piped());
+                cmd.kill_on_drop(true);
+                // Create new process group so we can kill the entire tree on cancel.
+                #[cfg(unix)]
+                cmd.process_group(0);
 
                 let result = match cmd.spawn() {
                     Ok(mut child) => {
@@ -396,6 +427,10 @@ pub async fn ai_worker_loop(
                                     let (progress, result) = parse_backend_line(&cmd_name, &json);
 
                                     if let Some((kind, detail)) = progress {
+                                        // Update shared live progress for /status queries.
+                                        if let Ok(mut p) = task_live_progress.lock() {
+                                            *p = Some(detail.clone());
+                                        }
                                         if let Some(ref tx) = etx {
                                             let _ = tx.send(crate::registry::WsEvent::TaskProgress {
                                                 bot: bname.clone(),
@@ -506,10 +541,29 @@ pub async fn ai_worker_loop(
             };
             if let Some(ref tx) = etx {
                 let _ = tx.send(crate::registry::WsEvent::TaskCompleted {
-                    bot: bname,
+                    bot: bname.clone(),
                     task_id,
                     duration_secs,
                 });
+            }
+
+            // Process follow-up queue — dispatch queued messages with session continuity.
+            if let Ok(mut fq) = follow_ups_clone.lock() {
+                if let Some(follow_ups) = fq.remove(&task_id) {
+                    for fu in follow_ups {
+                        log::info!("[{}] Dispatching follow-up for task #{}: {}",
+                            bname, task_id,
+                            if fu.message.len() > 50 { &fu.message[..47] } else { &fu.message });
+                        // Re-queue as a new request (with session continuity via -c).
+                        let _ = rq_tx.send(CliRequest {
+                            chat_id: fu.chat_id,
+                            message: fu.message,
+                            new_session: false, // continue session
+                            task_id: 0, // will be assigned by the worker loop
+                            source: fu.source,
+                        });
+                    }
+                }
             }
         });
 
@@ -523,6 +577,8 @@ pub async fn ai_worker_loop(
                     message_preview: preview,
                     started: Instant::now(),
                     handle,
+                    last_progress: live_progress,
+                    backend: live_backend,
                 },
             );
         }

@@ -898,6 +898,20 @@ async fn handle_ws(
                                     }
                                 }
                             }
+                            WsCommand::FollowUp { bot, task_id, message } => {
+                                let bots = registry.bots.read().await;
+                                if let Some(handle) = bots.get(&bot) {
+                                    if let Ok(mut fq) = handle.follow_ups.lock() {
+                                        fq.entry(task_id).or_default().push(
+                                            crate::ai_worker::FollowUp {
+                                                chat_id: 0,
+                                                message,
+                                                source: "web".into(),
+                                            }
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -929,6 +943,13 @@ enum WsCommand {
     },
     #[serde(rename = "cancel")]
     Cancel { bot: String, task_id: u32 },
+    /// Queue a follow-up message for a running task.
+    #[serde(rename = "followup")]
+    FollowUp {
+        bot: String,
+        task_id: u32,
+        message: String,
+    },
 }
 
 pub fn now_secs() -> u64 {

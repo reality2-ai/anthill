@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
-use crate::ai_worker::{CliRequest, CliResponse, StatsMap, TaskMap};
+use crate::ai_worker::{CliRequest, CliResponse, FollowUp, FollowUpQueue, StatsMap, TaskMap};
 use crate::events::RELAY_AI_READY;
 
 /// Plugin commands from the sentant.
@@ -27,26 +27,29 @@ pub const CMD_ANTS: u8 = 0x05;      // Send task list
 pub const CMD_USAGE: u8 = 0x06;     // Send usage stats
 pub const CMD_REPLY: u8 = 0x07;     // Pop response and send to Telegram
 pub const CMD_NEW_SESSION: u8 = 0x08; // Start new session
+pub const CMD_STATUS: u8 = 0x09;    // Show live status of workers
+pub const CMD_FOLLOWUP: u8 = 0x0A;  // Queue follow-up for a running task
 
 const HELP_TEXT: &str = "\
 **anthill commands:**
 
 /help — show this message
+/status — live view of what each worker is doing right now
 /ants — show running workers and what they're working on
 /usage — show session statistics
 /cancel — cancel a running task (or /cancel <id>, /cancel all)
+/followup — queue a message for when the current task finishes
 /new — start a fresh conversation
 
-**Claude Code commands** (passed through):
+**AI commands** (passed through to the active backend):
 
 /compact — condense conversation context
 /cost — show token/cost usage for the session
 /model — show or change the AI model
-/memory — manage Claude's memory files
+/memory — manage memory files
 /clear — clear conversation history
 
-Everything else is sent to Claude Code as a prompt.
-Multiple messages can run concurrently.";
+Everything else is sent as a prompt. Multiple messages run concurrently.";
 
 const TELEGRAM_MAX: usize = 4000;
 
@@ -67,6 +70,8 @@ pub struct AiPlugin {
     tasks: TaskMap,
     /// Usage stats.
     stats: StatsMap,
+    /// Follow-up queue for running tasks.
+    follow_ups: FollowUpQueue,
     /// Next task ID counter.
     next_task_id: u32,
     /// Whether to forward user messages across channels.
@@ -81,6 +86,7 @@ impl AiPlugin {
         telegram_tx: mpsc::UnboundedSender<(i64, String)>,
         tasks: TaskMap,
         stats: StatsMap,
+        follow_ups: FollowUpQueue,
         message_queue: crate::plugins::telegram_bot::MessageQueue,
         sync_channels: bool,
     ) -> Self {
@@ -93,6 +99,7 @@ impl AiPlugin {
             message_queue,
             tasks,
             stats,
+            follow_ups,
             next_task_id: 1,
             sync_channels,
         }
@@ -307,6 +314,134 @@ impl AiPlugin {
         }
     }
 
+    fn handle_status(&self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        let map = match self.tasks.lock() {
+            Ok(m) => m,
+            Err(_) => {
+                self.send_telegram(chat_id, "Status unavailable.");
+                return;
+            }
+        };
+
+        if map.is_empty() {
+            self.send_telegram(chat_id, "All workers idle.");
+            return;
+        }
+
+        let count = map.len();
+        let mut out = format!(
+            "**{} worker{} active:**\n\n",
+            count,
+            if count == 1 { "" } else { "s" }
+        );
+
+        let mut tasks: Vec<_> = map.values().collect();
+        tasks.sort_by_key(|t| t.task_id);
+
+        for task in tasks {
+            let elapsed = task.started.elapsed().as_secs();
+            let duration = format_duration(elapsed);
+
+            let backend = task.backend.lock()
+                .map(|b| if b.is_empty() { "starting".to_string() } else { b.clone() })
+                .unwrap_or_else(|_| "?".into());
+
+            let progress = task.last_progress.lock()
+                .ok()
+                .and_then(|p| p.clone())
+                .unwrap_or_else(|| "waiting...".into());
+
+            // Check for queued follow-ups.
+            let follow_count = self.follow_ups.lock()
+                .map(|fq| fq.get(&task.task_id).map(|v| v.len()).unwrap_or(0))
+                .unwrap_or(0);
+            let follow_str = if follow_count > 0 {
+                format!("\n  📋 {} follow-up{} queued", follow_count, if follow_count == 1 { "" } else { "s" })
+            } else {
+                String::new()
+            };
+
+            out.push_str(&format!(
+                "**#{}** [{backend}] — {}\n  ⏱ {}\n  → {}{}\n\n",
+                task.task_id, task.message_preview, duration, progress, follow_str
+            ));
+        }
+        out.push_str("Use /followup <text> to queue context for the current task.\nUse /cancel <id> to stop a worker.");
+        self.send_telegram(chat_id, &out);
+    }
+
+    fn handle_followup(&mut self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        // Pop the follow-up message text from the data plane queue.
+        let (_, text, source) = match self.message_queue.lock().ok().and_then(|mut q| q.pop_front()) {
+            Some(msg) => msg,
+            None => {
+                self.send_telegram(chat_id, "Usage: /followup <message>\nQueues a message for when the current task finishes.");
+                return;
+            }
+        };
+
+        let map = match self.tasks.lock() {
+            Ok(m) => m,
+            Err(_) => {
+                self.send_telegram(chat_id, "No running tasks — sending as a new message instead.");
+                let _ = self.request_tx.send(CliRequest {
+                    chat_id,
+                    message: text,
+                    new_session: false,
+                    task_id: 0,
+                    source,
+                });
+                return;
+            }
+        };
+
+        if map.is_empty() {
+            drop(map);
+            // No tasks running — dispatch immediately.
+            self.send_telegram(chat_id, "No running tasks — sending as a new message.");
+            let task_id = self.next_task_id;
+            self.next_task_id += 1;
+            let _ = self.request_tx.send(CliRequest {
+                chat_id,
+                message: text,
+                new_session: false,
+                task_id,
+                source,
+            });
+            return;
+        }
+
+        // Find the most recent task for this chat.
+        let target_task = map
+            .values()
+            .filter(|t| t.chat_id == chat_id)
+            .max_by_key(|t| t.task_id)
+            .or_else(|| map.values().max_by_key(|t| t.task_id))
+            .map(|t| t.task_id);
+
+        drop(map);
+
+        if let Some(task_id) = target_task {
+            if let Ok(mut fq) = self.follow_ups.lock() {
+                fq.entry(task_id).or_default().push(FollowUp {
+                    chat_id,
+                    message: text,
+                    source,
+                });
+            }
+            self.send_telegram(chat_id, &format!(
+                "📋 Queued as follow-up for task #{}. It will run when the task finishes.",
+                task_id
+            ));
+        } else {
+            self.send_telegram(chat_id, "Could not find a task to follow up on.");
+        }
+    }
+
 }
 
 fn format_duration(secs: u64) -> String {
@@ -362,6 +497,8 @@ impl Plugin for AiPlugin {
             CMD_USAGE => { self.handle_usage(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_REPLY => { self.handle_reply(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_NEW_SESSION => { self.handle_new_session(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_STATUS => { self.handle_status(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_FOLLOWUP => { self.handle_followup(data); PluginResult::Ok(PluginResponse::empty()) }
             _ => PluginResult::Error(PluginError::new(0xFF, "unknown command")),
         }
     }

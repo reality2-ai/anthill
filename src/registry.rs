@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
-use crate::ai_worker::{CliRequest, StatsMap, TaskMap};
+use crate::ai_worker::{CliRequest, FollowUpQueue, StatsMap, TaskMap};
 
 /// Event broadcast to WebSocket clients.
 #[derive(Debug, Clone, Serialize)]
@@ -81,6 +81,7 @@ pub struct BotHandle {
     pub request_tx: mpsc::UnboundedSender<CliRequest>,
     pub stats: StatsMap,
     pub tasks: TaskMap,
+    pub follow_ups: FollowUpQueue,
     pub event_tx: broadcast::Sender<WsEvent>,
     pub status: Arc<RwLock<BotStatusKind>>,
 }
@@ -286,6 +287,7 @@ mod tests {
             request_tx: tx,
             stats: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tasks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            follow_ups: Arc::new(std::sync::Mutex::new(HashMap::new())),
             event_tx,
             status: Arc::new(RwLock::new(BotStatusKind::Running)),
         });

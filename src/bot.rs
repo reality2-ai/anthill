@@ -53,6 +53,7 @@ pub async fn run_bot(
     let (request_tx, request_rx) = mpsc::unbounded_channel();
     let stats: ai_worker::StatsMap = Arc::new(Mutex::new(HashMap::new()));
     let tasks: ai_worker::TaskMap = Arc::new(Mutex::new(HashMap::new()));
+    let follow_ups: ai_worker::FollowUpQueue = Arc::new(Mutex::new(HashMap::new()));
     let (event_tx, _) = broadcast::channel::<registry::WsEvent>(256);
 
     // Working directory.
@@ -82,6 +83,7 @@ pub async fn run_bot(
             request_tx: request_tx.clone(),
             stats: Arc::clone(&stats),
             tasks: Arc::clone(&tasks),
+            follow_ups: Arc::clone(&follow_ups),
             event_tx: event_tx.clone(),
             status: Arc::new(tokio::sync::RwLock::new(registry::BotStatusKind::Running)),
         };
@@ -92,10 +94,11 @@ pub async fn run_bot(
     let ai_plugin = plugins::ai_plugin::AiPlugin::new(
         1,
         Arc::clone(&response_queue),
-        request_tx,
+        request_tx.clone(),
         tg_sender.clone(),
         Arc::clone(&tasks),
         Arc::clone(&stats),
+        Arc::clone(&follow_ups),
         message_queue.clone(),
         cfg.claude.sync_channels,
     );
@@ -129,6 +132,8 @@ pub async fn run_bot(
         stats,
         tg_sender,
         tasks,
+        follow_ups,
+        request_tx,
         worker_event_tx,
         bot_name.clone(),
     ));

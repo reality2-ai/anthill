@@ -853,6 +853,21 @@ function cancelTask(taskId) {
   });
 }
 
+function sendFollowUp(taskId) {
+  if (!state.ws || !state.activeBot) return;
+  const input = document.getElementById('followup-' + taskId);
+  if (!input || !input.value.trim()) return;
+  wsSendSigned({
+    type: 'followup',
+    bot: state.activeBot,
+    task_id: taskId,
+    message: input.value.trim(),
+  });
+  input.value = '';
+  input.placeholder = 'Queued! Will run when task finishes.';
+  setTimeout(() => { input.placeholder = 'Add context for this task...'; }, 3000);
+}
+
 // --- Typing ---
 function showTyping(bot) {
   if (state.typing[bot]) clearTimeout(state.typing[bot]);
@@ -964,6 +979,10 @@ function renderWorkers() {
       </div>
       ${progress}${agentList}
       ${history ? '<div style="margin-top:6px;border-top:1px solid #333;padding-top:6px">' + history + '</div>' : ''}
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <input id="followup-${t.id}" type="text" placeholder="Add context for this task..." style="flex:1;background:var(--bg);color:var(--text);border:1px solid #444;border-radius:4px;padding:4px 8px;font-size:12px" onkeydown="if(event.key==='Enter')sendFollowUp(${t.id})">
+        <button onclick="sendFollowUp(${t.id})" style="background:none;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px">Follow-up</button>
+      </div>
     </div>`;
   }).join('');
 }

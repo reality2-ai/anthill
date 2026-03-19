@@ -104,8 +104,14 @@ impl Plugin for SlackPlugin {
 
                 let cmd_type = classify_command(&msg.text);
 
+                // For /followup, strip the command prefix.
+                let queue_text = if cmd_type == 8 {
+                    msg.text.trim().strip_prefix("/followup").unwrap_or(&msg.text).trim().to_string()
+                } else {
+                    msg.text
+                };
                 if let Ok(mut q) = self.message_queue.lock() {
-                    q.push_back((channel_hash as i64, msg.text, "slack".into()));
+                    q.push_back((channel_hash as i64, queue_text, "slack".into()));
                 }
 
                 self.poll_buf.clear();
@@ -204,11 +210,13 @@ fn classify_command(text: &str) -> u8 {
     let trimmed = text.trim();
     match trimmed {
         "/help" | "/start" => 1,
-        "/ants" | "/bots" | "/status" => 2,
+        "/ants" | "/bots" => 2,
         "/usage" => 3,
         "/new" => 6,
+        "/status" => 7,
         s if s == "/cancel all" => 5,
         s if s == "/cancel" || s.starts_with("/cancel ") => 4,
+        s if s == "/followup" || s.starts_with("/followup ") => 8,
         _ => 0,
     }
 }

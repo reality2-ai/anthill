@@ -23,13 +23,15 @@ const STATE_READY: StateId = 0;
 
 /// Command types extracted from the first bytes of user input.
 /// These are carried in the event payload, not the full text.
-const CMD_TYPE_MESSAGE: u8 = 0;     // Regular message → dispatch to Claude
+const CMD_TYPE_MESSAGE: u8 = 0;     // Regular message → dispatch to AI
 const CMD_TYPE_HELP: u8 = 1;
 const CMD_TYPE_ANTS: u8 = 2;
 const CMD_TYPE_USAGE: u8 = 3;
 const CMD_TYPE_CANCEL: u8 = 4;
 const CMD_TYPE_CANCEL_ALL: u8 = 5;
 const CMD_TYPE_NEW: u8 = 6;
+const CMD_TYPE_STATUS: u8 = 7;
+const CMD_TYPE_FOLLOWUP: u8 = 8;
 
 pub struct ConductorSentant {
     plugin_id: PluginId,
@@ -111,6 +113,18 @@ impl Sentant for ConductorSentant {
                         let payload = Self::encode_chat(chat_id);
                         actions.push(Action::plugin_call(
                             self.plugin_id, cli_plugin::CMD_NEW_SESSION, &payload,
+                        ));
+                    }
+                    CMD_TYPE_STATUS => {
+                        let payload = Self::encode_chat(chat_id);
+                        actions.push(Action::plugin_call(
+                            self.plugin_id, cli_plugin::CMD_STATUS, &payload,
+                        ));
+                    }
+                    CMD_TYPE_FOLLOWUP => {
+                        let payload = Self::encode_chat(chat_id);
+                        actions.push(Action::plugin_call(
+                            self.plugin_id, cli_plugin::CMD_FOLLOWUP, &payload,
                         ));
                     }
                     _ => {
