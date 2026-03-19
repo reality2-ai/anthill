@@ -38,7 +38,7 @@ Plugins handle everything the sentants can't: network calls, file access, proces
 
 | Plugin | Manages |
 |---|---|
-| ClaudeCliPlugin | Claude Code worker channels, task map, stats, message queue, Telegram sends |
+| AIPlugin | AI backend worker (Claude, Codex, Ollama), task map, stats, message queue |
 | AiMediationPlugin | Claude API calls, output buffering, conversation history (ai mode) |
 | ChunkerPlugin | ANSI stripping, output chunking, Telegram sends (raw mode) |
 | TelegramPlugin | Bot API polling, message classification, outgoing sender, data plane queue |

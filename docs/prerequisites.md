@@ -14,72 +14,77 @@ source ~/.cargo/env
 cargo --version
 ```
 
-## 2. AI backend
+## 2. AI backend (at least one)
 
-Anthill currently uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as its AI backend. Support for [OpenAI](https://openai.com/), [Ollama](https://ollama.com/) (local/private), and other providers is coming soon.
+Anthill supports multiple AI backends. Install whichever you want to use:
 
-### Claude Code setup
+### [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 
-Requires [Node.js](https://nodejs.org/) and an [Anthropic account](https://console.anthropic.com/) (or Claude Pro/Team subscription).
+Requires [Node.js](https://nodejs.org/) and an [Anthropic account](https://console.anthropic.com/).
 
 ```bash
 # Install Node.js
-# Arch/Manjaro
-sudo pacman -S nodejs npm
-# Ubuntu/Debian
-sudo apt install nodejs npm
-# macOS
-brew install node
-```
+# Arch/Manjaro: sudo pacman -S nodejs npm
+# Ubuntu/Debian: sudo apt install nodejs npm
+# macOS: brew install node
 
-**Install:**
-
-```bash
+# Install Claude Code
 npm install -g @anthropic-ai/claude-code
-```
 
-**Authenticate** — must be done once interactively on the machine that will run Anthill:
+# Authenticate (once, interactively)
+cd /tmp && claude
+# Follow prompts to log in, then exit with /exit
 
-```bash
-cd /tmp
-claude
-```
-
-1. Log in with your Anthropic account (or API key)
-2. Accept the workspace trust prompt
-3. Type "hello" and verify you get a response
-4. Exit with `/exit`
-
-**Verify print mode** — this is how Anthill runs Claude:
-
-```bash
+# Verify
 claude -p "Say hello"
 ```
 
-You should see plain text output. If this works, Anthill will work.
+### [OpenAI Codex](https://developers.openai.com/codex/cli)
 
-**Important:** Authenticate as the same user that will run Anthill. The service runs as your user account, so Claude Code must be authenticated under that account.
+Requires Node.js and an OpenAI account.
 
-## 4. [Telegram](https://telegram.org/) bot token (optional)
+```bash
+npm install -g @openai/codex
 
-Telegram is optional — ANTS can run with the web dashboard only. Skip this if you don't need Telegram access.
+# Authenticate
+codex
+# Follow prompts to sign in, then exit
+
+# Verify
+codex exec "Say hello"
+```
+
+### [Ollama](https://ollama.com/) (local, coming soon)
+
+```bash
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# macOS
+brew install ollama
+
+# Pull a model
+ollama pull llama3
+```
+
+**Important:** Authenticate each backend as the same user that will run Anthill.
+
+## 3. [Telegram](https://telegram.org/) bot token (optional)
 
 1. Install [Telegram](https://telegram.org/apps) on your phone or desktop
 2. Message [**@BotFather**](https://t.me/BotFather)
 3. Send `/newbot`
-4. Choose a display name (e.g. "My Dev ANT")
-5. Choose a username ending in `bot` (e.g. `my_dev_ant_bot`)
-6. BotFather replies with a **bot token** — save it
-7. Each ANT that uses Telegram needs its own token (create multiple via @BotFather)
+4. Choose a display name and username
+5. Save the bot token
+6. Each ANT that uses Telegram needs its own token
 
 **Find your chat ID** (recommended for access control):
-
 1. Message [**@userinfobot**](https://t.me/userinfobot) on Telegram
-2. It replies with your numeric chat ID (e.g. `123456789`)
+2. It replies with your numeric chat ID
 
-## 5. [Tailscale](https://tailscale.com/) (recommended)
+## 4. [Tailscale](https://tailscale.com/) (recommended)
 
-Tailscale creates a private encrypted network between your devices. Required for the web dashboard to be accessible from your phone/laptop.
+Creates a private encrypted network between your devices for the web dashboard.
 
 ```bash
 # Arch/Manjaro
@@ -98,9 +103,7 @@ brew install tailscale
 
 Install [Tailscale](https://tailscale.com/download) on your phone/tablet too.
 
-After setup, your server gets a Tailscale IP (e.g. `100.91.6.128`) and a domain name (e.g. `myserver.tail12345.ts.net`).
-
-## 6. [GitHub CLI](https://cli.github.com/) (optional)
+## 5. [GitHub CLI](https://cli.github.com/) (optional)
 
 Only needed if your ANT should clone private repos, create PRs, etc.
 

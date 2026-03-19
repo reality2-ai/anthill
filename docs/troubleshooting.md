@@ -7,16 +7,16 @@
 3. Verify the bot token in `ant.toml`
 4. Check your chat ID is in `allow` (or remove `allow` to allow everyone)
 
-## "Failed to run claude" error
+## "Failed to run claude/codex" error
 
-1. `which claude` — is it installed?
-2. `claude -p "hello"` — does it work directly?
-3. Check PATH in the service config includes `~/.local/bin` and `~/.cargo/bin`
-4. Run `claude` interactively once to authenticate
+1. Check the AI backend is installed: `which claude` or `which codex`
+2. Test it directly: `claude -p "hello"` or `codex exec "hello"`
+3. Check PATH in the service config includes `~/.local/bin`, `~/.cargo/bin`, `~/.npm-global/bin`
+4. Run the backend interactively once to authenticate
 
-## Claude asks for permission (can't execute)
+## AI asks for permission (can't execute)
 
-Set `skip_permissions = true` in `[claude]` section of `ant.toml`.
+This is handled automatically — `skip_permissions` defaults to true.
 
 ## Web dashboard not loading
 

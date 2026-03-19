@@ -90,12 +90,16 @@ To set up:
 
 Telegram and Slack can both be active on the same ANT simultaneously.
 
-### [claude]
+### [claude] — AI and workspace
 
-For `mode = "claude"` (the main mode).
+The `[claude]` section configures the AI backend and workspace (named for historical reasons — applies to all backends).
 
 ```toml
 [claude]
+# AI backends to use: "claude", "codex", "ollama" (coming soon)
+# Multiple backends can be listed — first to respond wins.
+backends = ["claude"]
+
 # Working directory — where the ANT operates
 # Auto-created if missing. Auto-initialised as a git repo.
 # Default: ~/.config/anthill/ants/<id>/working
@@ -121,28 +125,6 @@ memory_dir = "memory"
 # Cloned git repos (always "repos" within working_dir, excluded from backup)
 repos_dir = "repos"
 
-# Auto-set based on mode: true for claude/ai, false for raw
+# Always true — AI backends need command execution permission
 skip_permissions = true
-```
-
-### [raw]
-
-For `mode = "raw"` (persistent PTY).
-
-```toml
-[raw]
-shell = "/bin/bash"
-```
-
-### [ai]
-
-For `mode = "ai"` (NL → shell command → summarised output).
-
-```toml
-[ai]
-model = "claude-sonnet-4-20250514"
-
-# Anthropic API key (or set ANTHROPIC_API_KEY env var)
-# Not needed for claude mode.
-anthropic_api_key = "sk-ant-..."
 ```

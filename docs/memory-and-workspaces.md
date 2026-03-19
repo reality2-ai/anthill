@@ -34,7 +34,7 @@ If you tell the ANT "I prefer Python" today, it remembers next week.
 
 ## Conversation continuity
 
-The ANT always uses `claude -p --continue` to resume the most recent Claude Code session. Sessions survive restarts. Use `/new` to start fresh.
+Sessions survive restarts — the AI backend resumes the most recent conversation in the working directory. Use `/new` to start fresh.
 
 ## Git backups
 

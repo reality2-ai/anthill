@@ -91,6 +91,7 @@ pub fn detect_backends() -> Vec<(String, bool)> {
     let backends = vec![
         ("claude", "claude"),
         ("codex", "codex"),
+        ("gemini", "gemini"),
         ("ollama", "ollama"),
     ];
     backends

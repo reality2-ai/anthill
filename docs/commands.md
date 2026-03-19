@@ -14,9 +14,9 @@ Handled locally by the conductor — always responsive, even while workers are r
 | `/cancel all` | Cancel all running workers |
 | `/new` | Start a fresh conversation |
 
-## Claude Code commands
+## AI backend commands
 
-Passed through to Claude Code — these are Claude's own slash commands:
+These slash commands are passed through to the AI backend (when supported):
 
 | Command | Description |
 |---|---|

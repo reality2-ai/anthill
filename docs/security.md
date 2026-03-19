@@ -43,9 +43,9 @@ anthill --join-code    # generate a code
 
 `ant.toml` files contain Telegram/Slack tokens. They live in `~/.config/anthill/ants/` which is outside the repo.
 
-## skip_permissions
+## Command execution
 
-In `claude` and `ai` modes, `skip_permissions` is automatically set to `true`. This passes `--dangerously-skip-permissions` to Claude Code, giving the ANT full shell access as your user.
+The AI backend runs with full permissions (`skip_permissions = true` by default). This means the ANT can run any shell command, edit any file, and access anything your user can.
 
 **Always use the Telegram `allow` list** to restrict which chat IDs can interact. Without it, anyone who discovers your bot username can execute commands.
 
