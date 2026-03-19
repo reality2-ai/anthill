@@ -16,7 +16,7 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 
 Built on the [Reality2](https://reality2.ai) (R2) sentant engine — a software stack for wearables and IoT, now proven for AI agents.
 
-> **Note:** Anthill currently runs on **Linux only** and requires some technical setup (Rust toolchain, AI CLI tools, systemd). See [Prerequisites](docs/prerequisites.md) for what's needed. macOS and Windows support may come in future.
+> **Note:** Anthill runs on **Linux**, **macOS**, and **FreeBSD**. It requires some technical setup (Rust toolchain, AI CLI tools). The install script auto-detects your platform and sets up the appropriate service (systemd on Linux, launchd on macOS, rc.d on BSD). See [Prerequisites](docs/prerequisites.md) for what's needed.
 
 ## Quick start
 

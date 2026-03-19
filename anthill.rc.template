@@ -1,0 +1,21 @@
+#!/bin/sh
+# FreeBSD rc.d script for Anthill
+# Install to /usr/local/etc/rc.d/anthill
+
+# PROVIDE: anthill
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="anthill"
+rcvar="${name}_enable"
+command="/usr/local/bin/anthill"
+command_args="--supervise @@HOME@@/.config/anthill"
+pidfile="/var/run/${name}.pid"
+
+anthill_user="@@USER@@"
+anthill_env="RUST_LOG=info HOME=@@HOME@@ PATH=/usr/local/bin:/usr/bin:/bin:@@HOME@@/.cargo/bin:@@HOME@@/.local/bin"
+
+load_rc_config $name
+run_rc_command "$1"
