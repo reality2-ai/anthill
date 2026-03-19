@@ -19,7 +19,7 @@
         <key>RUST_LOG</key>
         <string>info</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:@@HOME@@/.cargo/bin:@@HOME@@/.local/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:@@HOME@@/.cargo/bin:@@HOME@@/.local/bin:@@HOME@@/.npm-global/bin:@@HOME@@/.nvm/versions/node/current/bin</string>
         <key>HOME</key>
         <string>@@HOME@@</string>
     </dict>

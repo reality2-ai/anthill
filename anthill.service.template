@@ -8,7 +8,7 @@ Type=simple
 User=@@USER@@
 Environment=HOME=@@HOME@@
 Environment=RUST_LOG=info
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:@@HOME@@/.cargo/bin:@@HOME@@/.local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:@@HOME@@/.cargo/bin:@@HOME@@/.local/bin:@@HOME@@/.npm-global/bin:@@HOME@@/.nvm/versions/node/current/bin
 ExecStart=/usr/local/bin/anthill --supervise @@HOME@@/.config/anthill
 Restart=always
 RestartSec=10
