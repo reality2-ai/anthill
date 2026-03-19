@@ -1167,7 +1167,14 @@ function renderWorkers() {
     </div>`;
   }).join('');
 }
-setInterval(() => { if (currentTab === 'workers') renderWorkers(); }, 1000);
+setInterval(() => {
+  if (currentTab === 'workers') {
+    // Don't re-render if the user is typing in a follow-up input.
+    const active = document.activeElement;
+    if (active && active.id && active.id.startsWith('followup-')) return;
+    renderWorkers();
+  }
+}, 1000);
 
 // --- File browser ---
 let currentFilePath = '';
