@@ -12,7 +12,7 @@ use teloxide::prelude::*;
 use teloxide::types::{ChatAction, ChatId, ParseMode};
 use tokio::sync::mpsc;
 
-use crate::events::{RELAY_COMMAND, RELAY_INPUT};
+use crate::events::RELAY_COMMAND;
 
 /// Commands accepted by TelegramPlugin.
 pub const CMD_SEND_TEXT: u8 = 0x01;
@@ -36,7 +36,6 @@ pub struct TelegramPlugin {
     /// Pre-encoded CBOR buffer for poll().
     poll_buf: Vec<u8>,
     /// When true, emit RELAY_COMMAND instead of RELAY_INPUT.
-    ai_mode: bool,
     /// Data plane: full message text stored here for the Claude plugin to consume.
     message_queue: MessageQueue,
 }
@@ -46,7 +45,7 @@ impl TelegramPlugin {
     ///
     /// `rt` is the tokio runtime handle for spawning the bot task.
     /// `allowed_chat_ids` restricts which chats can interact.
-    pub fn new(id: PluginId, rt: &tokio::runtime::Handle, token: String, allowed_chat_ids: Vec<i64>, ai_mode: bool, message_queue: MessageQueue) -> Self {
+    pub fn new(id: PluginId, rt: &tokio::runtime::Handle, token: String, allowed_chat_ids: Vec<i64>, message_queue: MessageQueue) -> Self {
         let (in_tx, in_rx) = mpsc::channel::<IncomingMessage>(64);
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(i64, String)>();
 
@@ -112,7 +111,6 @@ impl TelegramPlugin {
             incoming_rx: in_rx,
             outgoing_tx: out_tx,
             poll_buf: Vec::new(),
-            ai_mode,
             message_queue,
         }
     }
@@ -182,50 +180,25 @@ impl Plugin for TelegramPlugin {
     fn poll(&mut self) -> Option<(u32, &[u8])> {
         match self.incoming_rx.try_recv() {
             Ok(msg) => {
-                if self.ai_mode {
-                    // AI/Claude mode: store full text in data plane, emit small event.
-                    // Parse command type from the text.
-                    let cmd_type = classify_command(&msg.text);
-                    let cancel_task_id = parse_cancel_id(&msg.text);
+                let cmd_type = classify_command(&msg.text);
+                let cancel_task_id = parse_cancel_id(&msg.text);
 
-                    // Store full text in the shared message queue (data plane).
-                    if let Ok(mut q) = self.message_queue.lock() {
-                        q.push_back((msg.chat_id, msg.text, "telegram".into()));
-                    }
-
-                    // Emit small event: { 0: uint(cmd_type), 1: uint(chat_id), 2: uint(cancel_task_id) }
-                    self.poll_buf.clear();
-                    self.poll_buf.push(0xA3); // map(3)
-                    self.poll_buf.push(0x00); // key 0
-                    self.poll_buf.push(cmd_type); // cmd_type fits in single byte
-                    self.poll_buf.push(0x01); // key 1
-                    encode_uint(&mut self.poll_buf, msg.chat_id as u64);
-                    self.poll_buf.push(0x02); // key 2
-                    encode_uint(&mut self.poll_buf, cancel_task_id as u64);
-
-                    Some((RELAY_COMMAND, &self.poll_buf))
-                } else {
-                    // Raw mode: carry text in the event (for terminal sentant).
-                    self.poll_buf.clear();
-                    let text_bytes = msg.text.as_bytes();
-                    self.poll_buf.push(0xA2); // map(2)
-                    self.poll_buf.push(0x00); // key 0
-                    let len = text_bytes.len();
-                    if len <= 23 {
-                        self.poll_buf.push(0x60 | len as u8);
-                    } else if len <= 255 {
-                        self.poll_buf.push(0x78);
-                        self.poll_buf.push(len as u8);
-                    } else {
-                        self.poll_buf.push(0x79);
-                        self.poll_buf.extend_from_slice(&(len as u16).to_be_bytes());
-                    }
-                    self.poll_buf.extend_from_slice(text_bytes);
-                    self.poll_buf.push(0x01); // key 1
-                    encode_uint(&mut self.poll_buf, msg.chat_id as u64);
-
-                    Some((RELAY_INPUT, &self.poll_buf))
+                // Store full text in the shared message queue (data plane).
+                if let Ok(mut q) = self.message_queue.lock() {
+                    q.push_back((msg.chat_id, msg.text, "telegram".into()));
                 }
+
+                // Emit small event: { 0: uint(cmd_type), 1: uint(chat_id), 2: uint(cancel_task_id) }
+                self.poll_buf.clear();
+                self.poll_buf.push(0xA3); // map(3)
+                self.poll_buf.push(0x00);
+                self.poll_buf.push(cmd_type);
+                self.poll_buf.push(0x01);
+                encode_uint(&mut self.poll_buf, msg.chat_id as u64);
+                self.poll_buf.push(0x02);
+                encode_uint(&mut self.poll_buf, cancel_task_id as u64);
+
+                Some((RELAY_COMMAND, &self.poll_buf))
             }
             Err(_) => None,
         }

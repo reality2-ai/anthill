@@ -23,9 +23,6 @@ tokio = { version = "1", features = ["full"] }
 # Telegram
 teloxide = { version = "0.13", default-features = false, features = ["macros", "rustls"] }
 
-# PTY
-portable-pty = "0.8"
-
 # CLI
 clap = { version = "4", features = ["derive"] }
 

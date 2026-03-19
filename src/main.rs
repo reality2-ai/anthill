@@ -7,7 +7,6 @@
 mod backup;
 mod bot;
 mod claude_cli;
-mod claude_worker;
 mod config;
 mod events;
 mod history;
@@ -168,44 +167,13 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Supervisor mode.
-    if let Some(ref config_dir) = args.supervise {
-        log::info!("Supervisor mode — config dir: {}", config_dir.display());
-        return supervisor::run_supervisor(config_dir).await;
-    }
-
-    // Single bot mode.
-    let mut cfg = config::Config::load(&args.config)?;
-
-    // CLI overrides.
-    if let Some(m) = &args.mode {
-        cfg.mode = m.clone();
-    }
-    if args.claude {
-        cfg.mode = "claude".into();
-    }
-    if args.ai {
-        cfg.mode = "ai".into();
-    }
-    if cfg.mode.is_empty() {
-        cfg.mode = "raw".into();
-    }
-    if let Some(s) = &args.shell {
-        cfg.raw.shell = s.clone();
-    }
-    if let Some(a) = &args.allow {
-        cfg.telegram.allow = a.clone();
-    }
-    if let Some(m) = &args.ai_model {
-        cfg.ai.model = m.clone();
-    }
-    if let Some(d) = &args.claude_dir {
-        cfg.claude.working_dir = Some(d.clone());
-    }
-
-    log::info!("anthill starting — mode={}", cfg.mode);
-
-    bot::run_bot(cfg, "standalone".into(), None, None).await
+    // Supervisor mode (default if no utility command).
+    let config_dir = args.supervise.unwrap_or_else(|| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        PathBuf::from(format!("{}/.config/anthill", home))
+    });
+    log::info!("Starting — config dir: {}", config_dir.display());
+    supervisor::run_supervisor(&config_dir).await
 }
 
 /// Print a QR code to the terminal using Unicode block characters.

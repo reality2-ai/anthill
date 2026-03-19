@@ -506,15 +506,6 @@
       <span class="field-label">Display Name</span>
       <input id="c-name" class="field-input">
     </div>
-    <div class="field">
-      <span class="field-label">Mode</span>
-      <select id="c-mode" class="field-input">
-        <option value="claude">claude — Claude Code per message</option>
-        <option value="ai">ai — NL → shell → summary</option>
-        <option value="raw">raw — persistent PTY</option>
-      </select>
-    </div>
-
     <h3 class="section-title">Telegram (optional)</h3>
     <div class="field">
       <span class="field-label">Bot Token <span style="color:var(--text-dim)">(from @BotFather, leave empty to disable)</span></span>
@@ -1184,7 +1175,6 @@ async function showConfigModal(antId) {
     if (resp.ok) {
       const cfg = await resp.json();
       document.getElementById('c-name').value = cfg.name || '';
-      document.getElementById('c-mode').value = cfg.mode || 'claude';
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
@@ -1215,16 +1205,14 @@ async function saveConfig() {
   const allowStr = document.getElementById('c-allow').value.trim();
   const allow = allowStr ? allowStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
 
-  const mode = document.getElementById('c-mode').value;
   const body = {
     name: document.getElementById('c-name').value.trim(),
-    mode,
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),
     slack_bot_token: document.getElementById('c-slack-bot').value.trim(),
     slack_app_token: document.getElementById('c-slack-app').value.trim(),
-    skip_permissions: mode === 'claude' || mode === 'ai',
+    skip_permissions: true,
     sync_channels: document.getElementById('c-sync-channels').checked,
     backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
     backup_remote: document.getElementById('c-backup-remote').value.trim(),

@@ -234,21 +234,15 @@ async fn get_config(
             match toml::from_str::<crate::config::Config>(&content) {
                 Ok(cfg) => Json(serde_json::json!({
                     "name": cfg.name.unwrap_or_default(),
-                    "mode": cfg.mode,
                     "telegram_token": cfg.telegram.token.unwrap_or_default(),
                     "telegram_allow": cfg.telegram.allow,
                     "slack_bot_token": cfg.slack.bot_token.unwrap_or_default(),
                     "slack_app_token": cfg.slack.app_token.unwrap_or_default(),
                     "working_dir": cfg.claude.working_dir.unwrap_or_default(),
-                    "memory_dir": cfg.claude.memory_dir,
-                    "repos_dir": cfg.claude.repos_dir,
-                    "skip_permissions": cfg.claude.skip_permissions,
                     "sync_channels": cfg.claude.sync_channels,
                     "backup_interval_hours": cfg.claude.backup_interval_hours,
                     "backup_remote": cfg.claude.backup_remote,
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
-                    "shell": cfg.raw.shell,
-                    "ai_model": cfg.ai.model,
                 })).into_response(),
                 Err(_) => {
                     (StatusCode::OK, content).into_response()
@@ -264,7 +258,6 @@ async fn get_config(
 #[allow(dead_code)]
 struct ConfigUpdate {
     name: Option<String>,
-    mode: Option<String>,
     telegram_token: Option<String>,
     telegram_allow: Option<Vec<i64>>,
     slack_bot_token: Option<String>,
@@ -277,8 +270,6 @@ struct ConfigUpdate {
     backup_interval_hours: Option<u32>,
     backup_remote: Option<String>,
     system_prompt: Option<String>,
-    shell: Option<String>,
-    ai_model: Option<String>,
 }
 
 async fn put_config(
@@ -294,7 +285,7 @@ async fn put_config(
             toml.push_str(&format!("name = \"{}\"\n", name));
         }
     }
-    toml.push_str(&format!("mode = \"{}\"\n\n", req.mode.as_deref().unwrap_or("claude")));
+    toml.push_str("mode = \"claude\"\n\n");
 
     toml.push_str("[telegram]\n");
     if let Some(ref token) = req.telegram_token {
@@ -307,8 +298,7 @@ async fn put_config(
         }
     }
 
-    let mode_str = req.mode.as_deref().unwrap_or("claude");
-    let skip_perms = mode_str == "claude" || mode_str == "ai";
+    let skip_perms = true;
 
     // Slack section (optional).
     let slack_bot = req.slack_bot_token.as_deref().unwrap_or("");
@@ -345,11 +335,6 @@ async fn put_config(
         }
     }
 
-    toml.push_str("\n\n[raw]\n");
-    toml.push_str(&format!("shell = \"{}\"\n", req.shell.as_deref().unwrap_or("/bin/bash")));
-
-    toml.push_str("\n[ai]\n");
-    toml.push_str(&format!("model = \"{}\"\n", req.ai_model.as_deref().unwrap_or("claude-sonnet-4-20250514")));
 
     // Validate the generated TOML.
     if toml::from_str::<crate::config::Config>(&toml).is_err() {
@@ -393,7 +378,6 @@ async fn create_ant(
 
     let name = req.name.filter(|s| !s.is_empty()).unwrap_or_else(|| req.id.clone());
     config.push_str(&format!("name = \"{}\"\n", name));
-    config.push_str("mode = \"claude\"\n");
 
     if let Some(ref token) = req.token {
         if !token.is_empty() {

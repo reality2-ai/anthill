@@ -1,21 +1,22 @@
-//! Configuration — loads from TOML file, with CLI and env var overrides.
+//! Configuration — loads from TOML file.
 
 use serde::Deserialize;
 use std::path::Path;
 
-/// Top-level config.
+/// Top-level ANT config.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
-    /// Display name for this ant (shown in web UI). Defaults to directory name.
+    /// Display name (shown in web UI). Defaults to directory name.
     pub name: Option<String>,
-    /// Mode: "raw", "ai", or "claude".
+
+    /// Mode field kept for backward compatibility (ignored).
+    #[serde(default)]
+    #[allow(dead_code)]
     pub mode: String,
 
     pub telegram: TelegramConfig,
     pub slack: SlackConfig,
-    pub raw: RawConfig,
-    pub ai: AiConfig,
     pub claude: ClaudeConfig,
 }
 
@@ -37,66 +38,27 @@ pub struct SlackConfig {
     pub app_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct RawConfig {
-    /// Shell to spawn.
-    pub shell: String,
-}
-
-impl Default for RawConfig {
-    fn default() -> Self {
-        Self {
-            shell: "/bin/bash".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct AiConfig {
-    /// Claude model for AI mediation.
-    pub model: String,
-    /// Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
-    pub anthropic_api_key: Option<String>,
-}
-
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self {
-            model: "claude-sonnet-4-20250514".into(),
-            anthropic_api_key: None,
-        }
-    }
-}
-
+/// AI and workspace configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ClaudeConfig {
-    /// Working directory for `claude -p`. Defaults to current directory.
+    /// Working directory. Defaults to ~/.config/anthill/ants/<id>/working.
     pub working_dir: Option<String>,
-    /// Directory for per-user memory files ({chat_id}.md).
-    /// Relative to working_dir. Default: "memory"
+    /// Per-user memory directory (relative to working_dir).
     pub memory_dir: String,
-    /// Directory for cloned git repositories.
-    /// Relative to working_dir. Default: "repos"
+    /// Cloned repos directory (relative to working_dir, excluded from backup).
     pub repos_dir: String,
-    /// System prompt prepended to every invocation.
+    /// System prompt — defines the ANT's personality.
     pub system_prompt: Option<String>,
-    /// Skip permission prompts (allows Claude to run commands without approval).
-    /// Only enable if access is restricted via telegram.allow.
+    /// Allow AI to run commands without permission prompts. Auto-set to true.
     pub skip_permissions: bool,
-    /// Sync user messages across channels (telegram, slack, web).
-    /// When true, a message sent via Telegram also appears in Slack and the web dashboard.
-    /// Default: false (security — don't leak messages across channels).
+    /// Sync user messages across channels (web, Telegram, Slack). Default: false.
     pub sync_channels: bool,
-    /// Encrypt memory/ and files/ in git backups using the colony trust key.
-    /// Safe for public repos. Default: false.
+    /// Encrypt memory/ and files/ in git backups. Default: false.
     pub encrypt_backups: bool,
-    /// Auto-backup: commit working dir changes to git periodically.
-    /// Set to 0 to disable. Default: 0 (disabled).
+    /// Auto-backup interval in hours (0 = disabled).
     pub backup_interval_hours: u32,
-    /// Git remote to push backups to (e.g. "origin"). Empty = local only.
+    /// Git remote for backup pushes (empty = local only).
     pub backup_remote: String,
 }
 
@@ -107,7 +69,7 @@ impl Default for ClaudeConfig {
             memory_dir: "memory".into(),
             repos_dir: "repos".into(),
             system_prompt: None,
-            skip_permissions: false,
+            skip_permissions: true,
             sync_channels: false,
             encrypt_backups: false,
             backup_interval_hours: 0,
@@ -117,23 +79,14 @@ impl Default for ClaudeConfig {
 }
 
 impl Config {
-    /// Load config from a TOML file. Returns default config if file doesn't exist.
+    /// Load config from a TOML file.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         if !path.exists() {
             log::info!("No config file at {}, using defaults", path.display());
             return Ok(Self::default());
         }
-
         let contents = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&contents)?;
         Ok(config)
-    }
-
-    /// Resolve the Anthropic API key (config file → env var).
-    pub fn anthropic_api_key(&self) -> Option<String> {
-        self.ai
-            .anthropic_api_key
-            .clone()
-            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
     }
 }

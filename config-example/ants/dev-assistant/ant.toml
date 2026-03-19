@@ -1,28 +1,19 @@
 # ANT: dev-assistant
-# A Claude-powered development assistant.
 
-# Display name shown in the web UI (defaults to directory name).
 name = "Dev Assistant"
 
-mode = "claude"
-
 [telegram]
-token = "YOUR_BOT_TOKEN_HERE"
-# allow = [123456789]  # restrict to specific chat IDs
+# token = "YOUR_BOT_TOKEN_HERE"
+# allow = [123456789]
+
+[slack]
+# bot_token = "xoxb-..."
+# app_token = "xapp-..."
 
 [claude]
-working_dir = "/home/user/projects"
-memory_dir = "memory"
-repos_dir = "repos"
-skip_permissions = true
-backup_interval_hours = 6
-system_prompt = """\
-You are a helpful programming assistant. Always carefully consider what is \
-being instructed and push back when appropriate. Be a devil's advocate — \
-everything is a conjecture and should be subject to refutation."""
-
-[raw]
-shell = "/bin/bash"
-
-[ai]
-model = "claude-sonnet-4-20250514"
+# working_dir = "/home/user/projects"
+# backup_interval_hours = 6
+# encrypt_backups = false
+# sync_channels = false
+# system_prompt = """\
+# You are a helpful programming assistant."""

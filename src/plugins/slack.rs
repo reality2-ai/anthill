@@ -8,7 +8,7 @@
 use r2_engine::plugin::*;
 use tokio::sync::mpsc;
 
-use crate::events::{RELAY_COMMAND, RELAY_INPUT};
+use crate::events::RELAY_COMMAND;
 use crate::plugins::telegram_bot::MessageQueue;
 
 /// An incoming message from Slack.
@@ -25,7 +25,6 @@ pub struct SlackPlugin {
     #[allow(dead_code)]
     outgoing_tx: mpsc::UnboundedSender<(String, String)>, // (channel, text)
     poll_buf: Vec<u8>,
-    ai_mode: bool,
     message_queue: MessageQueue,
 }
 
@@ -36,8 +35,7 @@ impl SlackPlugin {
         rt: &tokio::runtime::Handle,
         bot_token: String,
         app_token: String,
-        ai_mode: bool,
-        message_queue: MessageQueue,
+            message_queue: MessageQueue,
     ) -> Self {
         let (in_tx, in_rx) = mpsc::channel::<IncomingMessage>(64);
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(String, String)>();
@@ -77,7 +75,6 @@ impl SlackPlugin {
             incoming_rx: in_rx,
             outgoing_tx: out_tx,
             poll_buf: Vec::new(),
-            ai_mode,
             message_queue,
         }
     }
@@ -105,47 +102,22 @@ impl Plugin for SlackPlugin {
                 // Hash the channel ID to a u64 for use as chat_id.
                 let channel_hash = hash_channel(&msg.channel);
 
-                if self.ai_mode {
-                    // Store full text in data plane.
-                    let cmd_type = classify_command(&msg.text);
+                let cmd_type = classify_command(&msg.text);
 
-                    if let Ok(mut q) = self.message_queue.lock() {
-                        q.push_back((channel_hash as i64, msg.text, "slack".into()));
-                    }
-
-                    // Emit small event: { 0: uint(cmd_type), 1: uint(channel_hash) }
-                    self.poll_buf.clear();
-                    self.poll_buf.push(0xA3); // map(3)
-                    self.poll_buf.push(0x00); // key 0
-                    self.poll_buf.push(cmd_type);
-                    self.poll_buf.push(0x01); // key 1
-                    encode_uint(&mut self.poll_buf, channel_hash);
-                    self.poll_buf.push(0x02); // key 2
-                    self.poll_buf.push(0x00); // cancel_task_id = 0
-
-                    Some((RELAY_COMMAND, &self.poll_buf))
-                } else {
-                    // Raw mode — carry text in event.
-                    self.poll_buf.clear();
-                    let text_bytes = msg.text.as_bytes();
-                    self.poll_buf.push(0xA2);
-                    self.poll_buf.push(0x00);
-                    let len = text_bytes.len();
-                    if len <= 23 {
-                        self.poll_buf.push(0x60 | len as u8);
-                    } else if len <= 255 {
-                        self.poll_buf.push(0x78);
-                        self.poll_buf.push(len as u8);
-                    } else {
-                        self.poll_buf.push(0x79);
-                        self.poll_buf.extend_from_slice(&(len as u16).to_be_bytes());
-                    }
-                    self.poll_buf.extend_from_slice(text_bytes);
-                    self.poll_buf.push(0x01);
-                    encode_uint(&mut self.poll_buf, channel_hash);
-
-                    Some((RELAY_INPUT, &self.poll_buf))
+                if let Ok(mut q) = self.message_queue.lock() {
+                    q.push_back((channel_hash as i64, msg.text, "slack".into()));
                 }
+
+                self.poll_buf.clear();
+                self.poll_buf.push(0xA3);
+                self.poll_buf.push(0x00);
+                self.poll_buf.push(cmd_type);
+                self.poll_buf.push(0x01);
+                encode_uint(&mut self.poll_buf, channel_hash);
+                self.poll_buf.push(0x02);
+                self.poll_buf.push(0x00);
+
+                Some((RELAY_COMMAND, &self.poll_buf))
             }
             Err(_) => None,
         }
