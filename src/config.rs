@@ -1,10 +1,10 @@
 //! Configuration — loads from TOML file.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Top-level ANT config.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     /// Display name (shown in web UI). Defaults to directory name.
@@ -20,7 +20,7 @@ pub struct Config {
     pub claude: ClaudeConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct TelegramConfig {
     /// Bot token. Falls back to TELOXIDE_TOKEN env var.
@@ -29,7 +29,7 @@ pub struct TelegramConfig {
     pub allow: Vec<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SlackConfig {
     /// Slack bot token (xoxb-...).
@@ -39,7 +39,7 @@ pub struct SlackConfig {
 }
 
 /// AI and workspace configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClaudeConfig {
     /// AI backends: ["claude"], ["codex"], ["claude", "codex"], etc.

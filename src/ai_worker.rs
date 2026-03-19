@@ -260,8 +260,9 @@ pub async fn ai_worker_loop(
     event_tx: Option<tokio::sync::broadcast::Sender<crate::registry::WsEvent>>,
     bot_name: String,
 ) {
-    // Track the last known Telegram chat ID for cross-channel forwarding.
-    let mut last_telegram_chat_id: i64 = 0;
+    // Per-source chat ID mapping for cross-channel forwarding.
+    // Maps source ("telegram", "slack") → last known chat_id from that source.
+    let mut source_chat_ids: HashMap<String, i64> = HashMap::new();
 
     // Ensure memory directory exists.
     if let Err(e) = std::fs::create_dir_all(&config.memory_dir) {
@@ -269,9 +270,9 @@ pub async fn ai_worker_loop(
     }
 
     while let Some(req) = rx.recv().await {
-        // Remember Telegram chat IDs for cross-channel forwarding.
-        if req.source == "telegram" && req.chat_id != 0 {
-            last_telegram_chat_id = req.chat_id;
+        // Remember chat IDs per source for cross-channel forwarding.
+        if req.chat_id != 0 && req.source != "web" {
+            source_chat_ids.insert(req.source.clone(), req.chat_id);
         }
         let memory_file = config.memory_dir.join(format!("{}.md", req.chat_id));
 
@@ -301,7 +302,7 @@ pub async fn ai_worker_loop(
         let task_id = req.task_id;
         let req_source = req.source.clone();
         let sync = config.sync_channels;
-        let tg_chat = last_telegram_chat_id;
+        let tg_chat = source_chat_ids.get("telegram").copied().unwrap_or(0);
         let rq = Arc::clone(&response_queue);
         let st = Arc::clone(&stats);
         let tm = Arc::clone(&tasks);
@@ -320,13 +321,13 @@ pub async fn ai_worker_loop(
         }
 
         // Forward user message to Telegram if from another channel and sync is enabled.
-        if config.sync_channels && req.source != "telegram" && last_telegram_chat_id != 0 {
+        if config.sync_channels && req.source != "telegram" && tg_chat != 0 {
             let label = match req.source.as_str() {
                 "web" => "🌐 web",
                 "slack" => "💬 slack",
                 _ => &req.source,
             };
-            let _ = ttx.send((last_telegram_chat_id, format!("[{}] {}", label, req.message)));
+            let _ = ttx.send((tg_chat, format!("[{}] {}", label, req.message)));
         }
 
         // Broadcast task started event.

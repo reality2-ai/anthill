@@ -280,71 +280,33 @@ async fn put_config(
     Path(id): Path<String>,
     Json(req): Json<ConfigUpdate>,
 ) -> impl IntoResponse {
-    // Generate TOML from the fields.
-    let mut toml = String::new();
+    // Build a typed config and serialize to TOML.
+    let cfg = crate::config::Config {
+        name: req.name.clone().filter(|s| !s.is_empty()),
+        mode: String::new(),
+        telegram: crate::config::TelegramConfig {
+            token: req.telegram_token.clone().filter(|s| !s.is_empty()),
+            allow: req.telegram_allow.clone().unwrap_or_default(),
+        },
+        slack: crate::config::SlackConfig {
+            bot_token: req.slack_bot_token.clone().filter(|s| !s.is_empty()),
+            app_token: req.slack_app_token.clone().filter(|s| !s.is_empty()),
+        },
+        claude: crate::config::ClaudeConfig {
+            backends: req.backends.clone().unwrap_or_else(|| vec!["claude".into()]),
+            working_dir: req.working_dir.clone().filter(|s| !s.is_empty()),
+            system_prompt: req.system_prompt.clone().filter(|s| !s.is_empty()),
+            sync_channels: req.sync_channels.unwrap_or(false),
+            backup_interval_hours: req.backup_interval_hours.unwrap_or(0),
+            backup_remote: req.backup_remote.clone().unwrap_or_default(),
+            ..Default::default()
+        },
+    };
 
-    if let Some(ref name) = req.name {
-        if !name.is_empty() {
-            toml.push_str(&format!("name = \"{}\"\n", name));
-        }
-    }
-    toml.push_str("\n[telegram]\n");
-    if let Some(ref token) = req.telegram_token {
-        toml.push_str(&format!("token = \"{}\"\n", token));
-    }
-    if let Some(ref allow) = req.telegram_allow {
-        if !allow.is_empty() {
-            let ids: Vec<String> = allow.iter().map(|id| id.to_string()).collect();
-            toml.push_str(&format!("allow = [{}]\n", ids.join(", ")));
-        }
-    }
-
-    let skip_perms = true;
-
-    // Slack section (optional).
-    let slack_bot = req.slack_bot_token.as_deref().unwrap_or("");
-    let slack_app = req.slack_app_token.as_deref().unwrap_or("");
-    if !slack_bot.is_empty() || !slack_app.is_empty() {
-        toml.push_str("\n[slack]\n");
-        if !slack_bot.is_empty() {
-            toml.push_str(&format!("bot_token = \"{}\"\n", slack_bot));
-        }
-        if !slack_app.is_empty() {
-            toml.push_str(&format!("app_token = \"{}\"\n", slack_app));
-        }
-    }
-
-    toml.push_str("\n[claude]\n");
-    let default_backends = vec!["claude".to_string()];
-    let backends = req.backends.as_ref().unwrap_or(&default_backends);
-    let backend_strs: Vec<String> = backends.iter().map(|b| format!("\"{}\"", b)).collect();
-    toml.push_str(&format!("backends = [{}]\n", backend_strs.join(", ")));
-    if let Some(ref wd) = req.working_dir {
-        if !wd.is_empty() {
-            toml.push_str(&format!("working_dir = \"{}\"\n", wd));
-        }
-    }
-    toml.push_str("memory_dir = \"memory\"\n");
-    toml.push_str("repos_dir = \"repos\"\n");
-    toml.push_str(&format!("skip_permissions = {}\n", skip_perms));
-    toml.push_str(&format!("sync_channels = {}\n", req.sync_channels.unwrap_or(false)));
-    toml.push_str(&format!("backup_interval_hours = {}\n", req.backup_interval_hours.unwrap_or(0)));
-    let remote = req.backup_remote.as_deref().unwrap_or("");
-    if !remote.is_empty() {
-        toml.push_str(&format!("backup_remote = \"{}\"\n", remote));
-    }
-    if let Some(ref prompt) = req.system_prompt {
-        if !prompt.is_empty() {
-            // Escape for TOML multi-line string.
-            toml.push_str(&format!("system_prompt = \"\"\"\\\n{}\"\"\"", prompt));
-        }
-    }
-
-
-    // Validate the generated TOML.
-    if toml::from_str::<crate::config::Config>(&toml).is_err() {
-        return (StatusCode::BAD_REQUEST, "Generated invalid config").into_response();
-    }
+    let toml = match toml::to_string_pretty(&cfg) {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("Config error: {}", e)).into_response(),
+    };
 
     match state.registry.write_config(&id, &toml) {
         Ok(()) => (StatusCode::OK, "Config saved. Restart Anthill to apply.").into_response(),
@@ -378,33 +340,26 @@ async fn create_ant(
         return (StatusCode::CONFLICT, "ANT already exists").into_response();
     }
 
-    // Generate ant.toml — only include fields that have values.
-    let mut config = String::new();
+    // Build typed config and serialize.
+    let cfg = crate::config::Config {
+        name: req.name.filter(|s| !s.is_empty()).or_else(|| Some(req.id.clone())),
+        mode: String::new(),
+        telegram: crate::config::TelegramConfig {
+            token: req.token.filter(|s| !s.is_empty()),
+            allow: Vec::new(),
+        },
+        slack: crate::config::SlackConfig::default(),
+        claude: crate::config::ClaudeConfig {
+            working_dir: req.working_dir.filter(|s| !s.is_empty()),
+            system_prompt: req.system_prompt.filter(|s| !s.is_empty()),
+            ..Default::default()
+        },
+    };
 
-    let name = req.name.filter(|s| !s.is_empty()).unwrap_or_else(|| req.id.clone());
-    config.push_str(&format!("name = \"{}\"\n", name));
-
-    if let Some(ref token) = req.token {
-        if !token.is_empty() {
-            config.push_str("\n[telegram]\n");
-            config.push_str(&format!("token = \"{}\"\n", token));
-        }
-    }
-
-    config.push_str("\n[claude]\n");
-    if let Some(ref wd) = req.working_dir {
-        if !wd.is_empty() {
-            config.push_str(&format!("working_dir = \"{}\"\n", wd));
-        }
-    }
-    config.push_str("skip_permissions = true\n");
-
-    if let Some(ref prompt) = req.system_prompt {
-        if !prompt.is_empty() {
-            config.push_str(&format!("system_prompt = \"\"\"\\\n{}\"\"\"", prompt));
-        }
-    }
-    config.push('\n');
+    let config = match toml::to_string_pretty(&cfg) {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("Config error: {}", e)).into_response(),
+    };
 
     match state.registry.write_config(&req.id, &config) {
         Ok(()) => (StatusCode::CREATED, "ANT created. Restart Anthill to start it.").into_response(),
@@ -464,28 +419,13 @@ async fn auth_middleware(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
 ) -> impl IntoResponse {
-    // Check X-Credential header first, then ?credential query param.
+    // Credential must be in X-Credential header. No query param fallback.
     let credential = req
         .headers()
         .get("x-credential")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            req.uri().query().and_then(|q| {
-                q.split('&')
-                    .find_map(|pair| {
-                        let mut parts = pair.splitn(2, '=');
-                        let key = parts.next()?;
-                        let val = parts.next()?;
-                        if key == "credential" {
-                            Some(urlencoding::decode(val).ok()?.to_string())
-                        } else {
-                            None
-                        }
-                    })
-            })
-        })
-        .unwrap_or_default();
+        .unwrap_or("")
+        .to_string();
 
     if check_auth(&state, &credential).is_err() {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -494,26 +434,11 @@ async fn auth_middleware(
     next.run(req).await.into_response()
 }
 
-/// Simple URL decoding (just for the credential parameter).
+// urlencoding module removed — credential no longer accepted via query params.
+#[allow(dead_code)]
 mod urlencoding {
     pub fn decode(s: &str) -> Result<String, ()> {
-        let mut result = String::with_capacity(s.len());
-        let mut chars = s.bytes();
-        while let Some(b) = chars.next() {
-            if b == b'%' {
-                let h1 = chars.next().ok_or(())?;
-                let h2 = chars.next().ok_or(())?;
-                let hex = [h1, h2];
-                let s = std::str::from_utf8(&hex).map_err(|_| ())?;
-                let byte = u8::from_str_radix(s, 16).map_err(|_| ())?;
-                result.push(byte as char);
-            } else if b == b'+' {
-                result.push(' ');
-            } else {
-                result.push(b as char);
-            }
-        }
-        Ok(result)
+        Ok(s.to_string())
     }
 }
 
@@ -663,6 +588,8 @@ struct FileEntry {
 }
 
 /// Resolve a safe path within an ANT's working directory. Prevents traversal.
+/// Resolve a safe path within an ANT's working directory.
+/// Uses canonicalization to prevent symlink escapes and .. traversal.
 async fn resolve_ant_path(
     registry: &crate::registry::BotRegistry,
     ant_id: &str,
@@ -673,15 +600,44 @@ async fn resolve_ant_path(
     let base = handle.working_dir.clone();
     drop(bots);
 
-    // Sanitise: no .. traversal.
-    let clean = subpath.replace("..", "").trim_start_matches('/').to_string();
-    let full = base.join(&clean);
+    // Canonicalize the base to resolve any symlinks in the working dir itself.
+    let canonical_base = std::fs::canonicalize(&base).ok()?;
 
-    // Ensure it's still within the working dir.
-    if !full.starts_with(&base) {
+    // Strip leading slashes, reject paths with null bytes.
+    let clean = subpath.trim_start_matches('/');
+    if clean.contains('\0') {
         return None;
     }
-    Some((base, full))
+
+    let full = base.join(clean);
+
+    // For existing paths: canonicalize and verify prefix.
+    // For new paths (uploads): canonicalize the parent and verify prefix.
+    if full.exists() {
+        let canonical = std::fs::canonicalize(&full).ok()?;
+        if !canonical.starts_with(&canonical_base) {
+            log::warn!("Path traversal blocked: {} escapes {}", canonical.display(), canonical_base.display());
+            return None;
+        }
+        Some((canonical_base, canonical))
+    } else {
+        // Path doesn't exist yet (upload). Check the parent.
+        let parent = full.parent()?;
+        if parent.exists() {
+            let canonical_parent = std::fs::canonicalize(parent).ok()?;
+            if !canonical_parent.starts_with(&canonical_base) {
+                log::warn!("Path traversal blocked: {} escapes {}", canonical_parent.display(), canonical_base.display());
+                return None;
+            }
+        }
+        // Also verify the joined path lexically doesn't escape
+        // (handles cases where parent doesn't exist yet).
+        let normalized = canonical_base.join(clean);
+        if !normalized.starts_with(&canonical_base) {
+            return None;
+        }
+        Some((canonical_base, full))
+    }
 }
 
 /// GET /api/ants/:id/files — list root workspace directories.
@@ -914,7 +870,8 @@ async fn handle_ws(
                         }
                         env.payload
                     } else {
-                        // Fall back to unsigned (for backward compatibility during transition).
+                        // Unsigned message — accepted over HTTP where crypto.subtle is unavailable.
+                        log::debug!("WebSocket: unsigned message received (HTTP mode)");
                         text.to_string()
                     };
 
