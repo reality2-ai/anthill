@@ -54,6 +54,9 @@ sha2 = "0.10"
 hmac = "0.12"
 aes-gcm = "0.10"
 
+# QR code generation (for key export)
+qrcode = "0.14"
+
 # Error handling
 anyhow = "1"
 

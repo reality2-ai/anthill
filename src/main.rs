@@ -65,8 +65,13 @@ struct Args {
     join_code: Option<PathBuf>,
 
     /// Export the colony key (for backup to 1Password, etc).
+    /// Use --export-key --qr to display as a QR code.
     #[arg(long)]
     export_key: bool,
+
+    /// Show export as QR code (scan into password manager).
+    #[arg(long)]
+    qr: bool,
 
     /// Import a colony key (restore from backup).
     #[arg(long)]
@@ -84,10 +89,23 @@ async fn main() -> anyhow::Result<()> {
         let key_path = format!("{}/.config/anthill/colony.key", home);
         match std::fs::read_to_string(&key_path) {
             Ok(key) => {
+                let key = key.trim();
+                if args.qr {
+                    println!();
+                    println!("  Scan this QR code with your password manager:");
+                    println!();
+                    print_qr(key);
+                    println!();
+                    println!("  The key will not be shown as text.");
+                    println!("  If you need the raw key, use --export-key without --qr.");
+                } else {
+                    println!();
+                    println!("  Colony key: {}", key);
+                    println!();
+                    println!("  Store this in a password manager (1Password, Bitwarden, etc).");
+                    println!("  Or use --export-key --qr to scan as a QR code.");
+                }
                 println!();
-                println!("  Colony key: {}", key.trim());
-                println!();
-                println!("  Store this in a password manager (1Password, Bitwarden, etc).");
                 println!("  This key encrypts backups and derives all device credentials.");
                 println!("  If lost, you cannot decrypt backups or regenerate credentials.");
                 println!();
@@ -188,4 +206,50 @@ async fn main() -> anyhow::Result<()> {
     log::info!("anthill starting — mode={}", cfg.mode);
 
     bot::run_bot(cfg, "standalone".into(), None, None).await
+}
+
+/// Print a QR code to the terminal using Unicode block characters.
+fn print_qr(data: &str) {
+    use qrcode::QrCode;
+
+    let code = match QrCode::new(data.as_bytes()) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("  Failed to generate QR code: {}", e);
+            return;
+        }
+    };
+
+    let width = code.width();
+    let modules = code.to_colors();
+
+    // Use Unicode half-blocks: each character represents two vertical pixels.
+    // ██ = both black, ▀▀ = top black, ▄▄ = bottom black, "  " = both white.
+    // Add quiet zone (2 modules border).
+    let qz = 2;
+    let total_w = width + qz * 2;
+    let total_h = width + qz * 2;
+
+    for y in (0..total_h).step_by(2) {
+        print!("  "); // indent
+        for x in 0..total_w {
+            let top = if y >= qz && y < qz + width && x >= qz && x < qz + width {
+                modules[(y - qz) * width + (x - qz)] == qrcode::Color::Dark
+            } else {
+                false
+            };
+            let bot = if y + 1 >= qz && y + 1 < qz + width && x >= qz && x < qz + width {
+                modules[(y + 1 - qz) * width + (x - qz)] == qrcode::Color::Dark
+            } else {
+                false
+            };
+            match (top, bot) {
+                (true, true) => print!("█"),
+                (true, false) => print!("▀"),
+                (false, true) => print!("▄"),
+                (false, false) => print!(" "),
+            }
+        }
+        println!();
+    }
 }
