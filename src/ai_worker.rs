@@ -135,7 +135,22 @@ After significant conversations (not trivial questions), append an episode:\n\
 {\"date\": \"YYYY-MM-DD\", \"participants\": [...], \"summary\": \"2-3 sentences\",\n\
  \"outcomes\": [\"key decisions or results\"], \"tags\": [\"searchable\", \"keywords\"]}\n\
 Episodes capture WHAT HAPPENED — the narrative, not just facts.\n\
-Recent episodes are shown below as [EPISODES].";
+Recent episodes are shown below as [EPISODES].\n\n\
+DEFAULT METHODOLOGY — when asked to analyse, review, assess, or study ANYTHING:\n\
+Use THEMATIC ANALYSIS (Braun & Clarke, 2022) and record findings in the knowledge graph:\n\
+  1. Familiarise — read the material thoroughly\n\
+  2. Code — extract entities, concepts, decisions as graph nodes\n\
+  3. Theme — group codes into higher-level concept nodes\n\
+  4. Review — validate against the source, assess confidence\n\
+  5. Refine — identify relationships, set basis (observed/told/inferred/assumed)\n\
+  6. Integrate — update memory/knowledge.json with Popperian confidence weights\n\
+All findings are CONJECTURES. Confidence reflects how well-evidenced they are:\n\
+  - Explicit in the material → observed (0.7)\n\
+  - Implied by multiple sources → inferred (0.4)\n\
+  - Your interpretation → assumed (0.3)\n\
+This applies to ALL analytical work — code review, document analysis, research,\n\
+architecture assessment, debugging, planning. Always structure your findings as\n\
+a knowledge graph update, not just prose.";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
