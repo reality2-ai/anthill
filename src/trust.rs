@@ -4,7 +4,7 @@
 //! X25519 join encryption) with filesystem persistence and human-readable
 //! join codes.  Replaces the earlier HMAC-based implementation.
 
-use ed25519_dalek::{Signer, SigningKey, Verifier};
+use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -398,26 +398,30 @@ impl ColonyTrust {
     }
 }
 
-/// Sign a message with Ed25519: sign(signing_key, device_id + ":" + timestamp + ":" + payload).
+/// Sign a WebSocket message with HMAC-SHA256.
+///
+/// Uses HMAC (not Ed25519) because browsers can compute HMAC natively
+/// via crypto.subtle. Device identity uses Ed25519; transport signing uses HMAC.
+/// Format: HMAC-SHA256(credential_bytes, device_id + ":" + timestamp + ":" + payload).
 /// Returns (signature_hex, timestamp).
 pub fn sign_message(credential: &str, device_id: &str, payload: &str) -> (String, u64) {
+    use sha2::Sha256;
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+
     let timestamp = now_secs();
     let data = format!("{}:{}:{}", device_id, timestamp, payload);
 
-    if let Ok(bytes) = hex_decode(credential) {
-        if bytes.len() == 32 {
-            let mut seed = [0u8; 32];
-            seed.copy_from_slice(&bytes);
-            let key = SigningKey::from_bytes(&seed);
-            let sig = key.sign(data.as_bytes());
-            return (hex_encode(&sig.to_bytes()), timestamp);
-        }
-    }
+    let key_bytes = hex_decode(credential).unwrap_or_default();
+    let mut mac = HmacSha256::new_from_slice(&key_bytes)
+        .expect("HMAC key length should be valid");
+    mac.update(data.as_bytes());
+    let sig = mac.finalize().into_bytes();
 
-    (String::new(), timestamp)
+    (hex_encode(&sig), timestamp)
 }
 
-/// Verify a signed message. Returns true if valid and fresh.
+/// Verify an HMAC-SHA256 signed WebSocket message. Returns true if valid and fresh.
 pub fn verify_signature(
     credential: &str,
     device_id: &str,
@@ -425,31 +429,31 @@ pub fn verify_signature(
     payload: &str,
     signature: &str,
 ) -> bool {
+    use sha2::Sha256;
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+
     let now = now_secs();
     if now.abs_diff(timestamp) > MAX_MESSAGE_AGE_SECS {
         return false;
     }
 
     let data = format!("{}:{}:{}", device_id, timestamp, payload);
+    let key_bytes = hex_decode(credential).unwrap_or_default();
+    let mut mac = HmacSha256::new_from_slice(&key_bytes)
+        .expect("HMAC key length should be valid");
+    mac.update(data.as_bytes());
+    let expected = hex_encode(&mac.finalize().into_bytes());
 
-    let bytes = match hex_decode(credential) {
-        Ok(b) if b.len() == 32 => b,
-        _ => return false,
-    };
-    let mut seed = [0u8; 32];
-    seed.copy_from_slice(&bytes);
-    let key = SigningKey::from_bytes(&seed);
-    let pub_key = key.verifying_key();
-
-    let sig_bytes = match hex_decode(signature) {
-        Ok(b) if b.len() == 64 => b,
-        _ => return false,
-    };
-    let mut sig_arr = [0u8; 64];
-    sig_arr.copy_from_slice(&sig_bytes);
-    let sig = ed25519_dalek::Signature::from_bytes(&sig_arr);
-
-    pub_key.verify(data.as_bytes(), &sig).is_ok()
+    // Constant-time comparison.
+    if signature.len() != expected.len() {
+        return false;
+    }
+    signature
+        .bytes()
+        .zip(expected.bytes())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 /// Encrypt a payload using XChaCha20-Poly1305 with a key derived from the credential.
