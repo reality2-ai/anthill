@@ -53,6 +53,13 @@ pub enum WsEvent {
         /// Where the message came from: "telegram", "slack", "web"
         source: String,
     },
+    /// A task failed or timed out.
+    #[serde(rename = "task_error")]
+    TaskError {
+        bot: String,
+        task_id: u32,
+        error: String,
+    },
     /// Typing indicator.
     #[serde(rename = "typing")]
     Typing { bot: String },

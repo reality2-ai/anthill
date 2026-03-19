@@ -120,6 +120,7 @@ pub async fn run_bot(
         skip_permissions: cfg.claude.skip_permissions,
         sync_channels: cfg.claude.sync_channels,
         backends: cfg.claude.backends.clone(),
+        worker_timeout_secs: cfg.claude.worker_timeout_secs,
     };
 
     // Forward events to the global broadcast if in supervisor mode.

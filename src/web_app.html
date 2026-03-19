@@ -723,6 +723,17 @@ function handleEvent(msg) {
       renderBotList();
       break;
 
+    case 'task_error':
+      if (state.tasks[msg.bot]) {
+        const errTask = state.tasks[msg.bot].find(t => t.id === msg.task_id);
+        if (errTask) {
+          errTask.lastProgress = '⚠️ ' + msg.error;
+          errTask.error = true;
+          renderTasks();
+        }
+      }
+      break;
+
     case 'typing':
       showTyping(msg.bot);
       break;
@@ -825,7 +836,8 @@ function renderTasks() {
   panel.innerHTML = tasks.map(t => {
     const secs = Math.floor((Date.now() - t.startTime) / 1000);
     const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    const progress = t.lastProgress ? `<div style="font-size:12px;color:var(--green);margin-top:2px">${escapeHtml(t.lastProgress)}</div>` : '';
+    const progressColor = t.error ? 'var(--red)' : (t.lastProgress && t.lastProgress.startsWith('No output') ? 'var(--yellow)' : 'var(--green)');
+    const progress = t.lastProgress ? `<div style="font-size:12px;color:${progressColor};margin-top:2px">${escapeHtml(t.lastProgress)}</div>` : '';
     const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
     const agentList = agents.length ? agents.map(a =>
       `<div style="font-size:11px;color:var(--yellow);margin-top:1px;padding-left:12px">↳ ${escapeHtml(a.detail)}</div>`
@@ -961,7 +973,8 @@ function renderWorkers() {
   list.innerHTML = tasks.map(t => {
     const secs = Math.floor((Date.now() - t.startTime) / 1000);
     const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
-    const progress = t.lastProgress ? `<div style="color:var(--green);font-size:13px;margin-top:4px">${escapeHtml(t.lastProgress)}</div>` : '';
+    const progressColor2 = t.error ? 'var(--red)' : (t.lastProgress && t.lastProgress.startsWith('No output') ? 'var(--yellow)' : 'var(--green)');
+    const progress = t.lastProgress ? `<div style="color:${progressColor2};font-size:13px;margin-top:4px">${escapeHtml(t.lastProgress)}</div>` : '';
     const agents = (t.progress || []).filter(p => p.kind === 'agent_spawn');
     const agentList = agents.length ? agents.map(a =>
       `<div style="font-size:12px;color:var(--yellow);margin-top:2px;padding-left:12px">↳ ${escapeHtml(a.detail)}</div>`

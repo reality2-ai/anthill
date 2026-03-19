@@ -56,6 +56,10 @@ sha2 = "0.10"
 # QR code generation (for key export)
 qrcode = "0.14"
 
+# Process management (Unix process group signals)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Error handling
 anyhow = "1"
 

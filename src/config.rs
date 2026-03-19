@@ -64,6 +64,8 @@ pub struct ClaudeConfig {
     pub backup_interval_hours: u32,
     /// Git remote for backup pushes (empty = local only).
     pub backup_remote: String,
+    /// Worker timeout in seconds — kill if no output for this long. Default: 600 (10 min).
+    pub worker_timeout_secs: u64,
 }
 
 impl Default for ClaudeConfig {
@@ -79,6 +81,7 @@ impl Default for ClaudeConfig {
             encrypt_backups: false,
             backup_interval_hours: 0,
             backup_remote: String::new(),
+            worker_timeout_secs: 600,
         }
     }
 }

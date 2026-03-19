@@ -42,6 +42,8 @@ pub struct CliWorkerConfig {
     pub skip_permissions: bool,
     pub sync_channels: bool,
     pub backends: Vec<String>,
+    /// Worker timeout in seconds (0 = no timeout). Default: 600 (10 minutes).
+    pub worker_timeout_secs: u64,
 }
 
 /// Per-user usage statistics (shared with sentant for /usage command).
@@ -327,6 +329,7 @@ pub async fn ai_worker_loop(
         let etx = event_tx.clone();
         let bname = bot_name.clone();
         let rq_tx = request_tx.clone();
+        let timeout_secs = if config.worker_timeout_secs > 0 { config.worker_timeout_secs } else { 600 };
 
         // Broadcast user message (for history and cross-device sync).
         if let Some(ref tx) = etx {
@@ -403,9 +406,11 @@ pub async fn ai_worker_loop(
                     continue_session,
                 );
 
+                let cmd_name_clone = cmd_name.clone();
                 let mut cmd = tokio::process::Command::new(&cmd_name);
                 cmd.args(&args);
                 cmd.current_dir(&working_dir);
+                cmd.stdin(std::process::Stdio::null());  // Never wait for input.
                 cmd.stdout(std::process::Stdio::piped());
                 cmd.stderr(std::process::Stdio::piped());
                 cmd.kill_on_drop(true);
@@ -416,49 +421,149 @@ pub async fn ai_worker_loop(
                 let result = match cmd.spawn() {
                     Ok(mut child) => {
                         let stdout = child.stdout.take();
-                        let mut result_text = String::new();
+                        let stderr = child.stderr.take();
 
-                        if let Some(stdout) = stdout {
-                            use tokio::io::{AsyncBufReadExt, BufReader};
-                            let mut reader = BufReader::new(stdout).lines();
+                        // Track last activity for stall detection.
+                        let last_activity = Arc::new(Mutex::new(Instant::now()));
+                        let activity_for_reader = Arc::clone(&last_activity);
 
-                            while let Ok(Some(line)) = reader.next_line().await {
-                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                    let (progress, result) = parse_backend_line(&cmd_name, &json);
+                        // Read stdout (stream-json progress + results).
+                        let stdout_handle = {
+                            let bname = bname.clone();
+                            let etx = etx.clone();
+                            let progress = Arc::clone(&task_live_progress);
+                            tokio::spawn(async move {
+                                let mut lines_result = String::new();
+                                if let Some(stdout) = stdout {
+                                    use tokio::io::{AsyncBufReadExt, BufReader};
+                                    let mut reader = BufReader::new(stdout).lines();
 
-                                    if let Some((kind, detail)) = progress {
-                                        // Update shared live progress for /status queries.
-                                        if let Ok(mut p) = task_live_progress.lock() {
-                                            *p = Some(detail.clone());
-                                        }
-                                        if let Some(ref tx) = etx {
-                                            let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                                bot: bname.clone(),
-                                                task_id,
-                                                kind,
-                                                detail,
-                                            });
-                                        }
-                                    }
+                                    while let Ok(Some(line)) = reader.next_line().await {
+                                        // Update activity timestamp.
+                                        if let Ok(mut t) = activity_for_reader.lock() { *t = Instant::now(); }
 
-                                    if let Some(text) = result {
-                                        if !text.is_empty() {
-                                            result_text = text;
+                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                            let (prog, result) = parse_backend_line(&cmd_name_clone, &json);
+
+                                            if let Some((kind, detail)) = prog {
+                                                if let Ok(mut p) = progress.lock() {
+                                                    *p = Some(detail.clone());
+                                                }
+                                                if let Some(ref tx) = etx {
+                                                    let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                                        bot: bname.clone(),
+                                                        task_id,
+                                                        kind,
+                                                        detail,
+                                                    });
+                                                }
+                                            }
+
+                                            if let Some(text) = result {
+                                                if !text.is_empty() {
+                                                    lines_result = text;
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        }
+                                lines_result
+                            })
+                        };
 
-                        let status = child.wait().await;
+                        // Read stderr (capture error output to prevent pipe deadlock).
+                        let stderr_handle = tokio::spawn(async move {
+                            let mut stderr_text = String::new();
+                            if let Some(stderr) = stderr {
+                                use tokio::io::{AsyncBufReadExt, BufReader};
+                                let mut reader = BufReader::new(stderr).lines();
+                                while let Ok(Some(line)) = reader.next_line().await {
+                                    if stderr_text.len() < 4096 {
+                                        if !stderr_text.is_empty() { stderr_text.push('\n'); }
+                                        stderr_text.push_str(&line);
+                                    }
+                                }
+                            }
+                            stderr_text
+                        });
+
+                        // Stall watchdog — warns if no activity for 2 minutes,
+                        // kills after the configured timeout.
+                        let child_id = child.id();
+                        let watchdog_activity = Arc::clone(&last_activity);
+                        let watchdog_etx = etx.clone();
+                        let watchdog_bname = bname.clone();
+                        let watchdog_handle = tokio::spawn(async move {
+                            let stall_warn_secs = 120u64;
+                            let mut warned = false;
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                                let idle_secs = watchdog_activity.lock()
+                                    .map(|t| t.elapsed().as_secs())
+                                    .unwrap_or(0);
+
+                                // Stall warning at 2 minutes of no output.
+                                if !warned && idle_secs > stall_warn_secs {
+                                    warned = true;
+                                    if let Some(ref tx) = watchdog_etx {
+                                        let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                            bot: watchdog_bname.clone(),
+                                            task_id,
+                                            kind: "warning".into(),
+                                            detail: format!("No output for {}s — worker may be stalled", idle_secs),
+                                        });
+                                    }
+                                }
+
+                                // Reset warning if activity resumes.
+                                if warned && idle_secs < stall_warn_secs {
+                                    warned = false;
+                                }
+
+                                // Hard timeout — kill the process group.
+                                if idle_secs > timeout_secs {
+                                    log::warn!("[{}] Task #{} timed out ({}s idle) — killing",
+                                        watchdog_bname, task_id, idle_secs);
+                                    #[cfg(unix)]
+                                    if let Some(pid) = child_id {
+                                        unsafe { libc::killpg(pid as i32, libc::SIGKILL); }
+                                    }
+                                    return true; // timed out
+                                }
+                            }
+                        });
+
+                        // Wait for stdout reader, stderr reader, and child exit.
+                        let (stdout_result, stderr_result, status) = tokio::join!(
+                            stdout_handle,
+                            stderr_handle,
+                            child.wait()
+                        );
+                        watchdog_handle.abort();
+
+                        let result_text = stdout_result.unwrap_or_default();
+                        let stderr_text = stderr_result.unwrap_or_default();
                         let success = status.as_ref().map(|s| s.success()).unwrap_or(false);
 
                         if !result_text.is_empty() && success {
                             Ok(result_text)
-                        } else if is_retriable_error(&result_text) || !success {
-                            Err(format!("{} failed: {}", backend, result_text))
+                        } else if is_retriable_error(&result_text) || is_retriable_error(&stderr_text) || !success {
+                            let detail = if !result_text.is_empty() {
+                                result_text
+                            } else if !stderr_text.is_empty() {
+                                stderr_text
+                            } else {
+                                let code = status.as_ref().map(|s| format!("exit {}", s)).unwrap_or_else(|e| format!("{}", e));
+                                format!("process {}", code)
+                            };
+                            Err(format!("{} failed: {}", backend, detail))
                         } else if result_text.is_empty() {
-                            Err(format!("{}: no output", backend))
+                            let hint = if !stderr_text.is_empty() {
+                                format!(": {}", stderr_text.lines().next().unwrap_or(""))
+                            } else {
+                                String::new()
+                            };
+                            Err(format!("{}: no output{}", backend, hint))
                         } else {
                             Ok(result_text)
                         }
@@ -485,8 +590,16 @@ pub async fn ai_worker_loop(
                                 });
                             }
                         } else {
-                            response_text = format!("All backends failed. Last error: {}", err);
+                            response_text = format!("⚠️ All backends failed. Last error: {}", err);
                             _used_backend = backend.clone();
+                            // Broadcast error event.
+                            if let Some(ref tx) = etx {
+                                let _ = tx.send(crate::registry::WsEvent::TaskError {
+                                    bot: bname.clone(),
+                                    task_id,
+                                    error: err.clone(),
+                                });
+                            }
                         }
                     }
                 }
