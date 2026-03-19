@@ -87,15 +87,21 @@ pub type StatsMap = Arc<Mutex<HashMap<i64, UserStats>>>;
 pub type TaskMap = Arc<Mutex<HashMap<u32, RunningTask>>>;
 
 const MEMORY_PREAMBLE: &str = "\
-You have two persistent memory files:\n\
-- ANT memory (shared across all users): shown below as [ANT MEMORY]\n\
-- User memory (per-user): shown below as [USER MEMORY]\n\n\
-IMPORTANT — after EVERY response, silently check:\n\
-  1. Did I learn anything new about this project, environment, tools, or architecture? → append to ANT memory\n\
-  2. Did I learn anything about this user (name, role, preferences, what they're working on)? → append to user memory\n\
-  3. Is anything in my memory files now outdated? → remove it\n\
-Do this WITHOUT telling the user — just quietly use the Edit or Write tool on the memory file.\n\
-Keep entries concise — one line per fact. Date important entries (e.g. '2026-03-20: deployed v2').";
+You have a knowledge graph and a per-user memory file:\n\
+- Knowledge graph (shared, structured): memory/knowledge.json — shown below as [KNOWLEDGE GRAPH]\n\
+- User memory (per-user, freeform): shown below as [USER MEMORY]\n\n\
+IMPORTANT — after EVERY response, silently update your memory:\n\
+  1. New entity (person, project, server, tool, concept)? → add a node to knowledge.json\n\
+  2. New relationship between entities? → add an edge to knowledge.json\n\
+  3. Decision made or event occurred? → add a decision/event node with edges\n\
+  4. User-specific fact (name, role, preferences)? → append to user memory file\n\
+  5. Anything outdated? → update or remove it\n\
+Do this WITHOUT telling the user — just quietly read, modify, and write the files.\n\n\
+Knowledge graph JSON format:\n\
+  nodes: [{\"label\": \"...\", \"kind\": \"person|project|server|tool|concept|decision|event|fact\",\n\
+           \"summary\": \"one line\", \"created\": \"YYYY-MM-DD\", \"updated\": \"YYYY-MM-DD\", \"tags\": [...]}]\n\
+  edges: [[from_index, to_index, {\"relation\": \"...\", \"context\": \"...\", \"since\": \"YYYY-MM-DD\"}]]\n\
+Keep nodes concise. Use tags for searchability. Date everything.";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
@@ -311,15 +317,11 @@ pub async fn ai_worker_loop(
         log::warn!("Could not create memory dir {:?}: {}", config.memory_dir, e);
     }
 
-    // ANT-level memory file — shared across all users of this ANT.
-    let ant_memory_file = config.memory_dir.join("ant.md");
-    if !ant_memory_file.exists() {
-        let header = format!("# {} — ANT Memory\n\n\
-            This file stores what this ANT has learned across all conversations.\n\
-            Add project context, architecture decisions, environment details, tools, and ongoing work.\n\n",
-            bot_name);
-        let _ = std::fs::write(&ant_memory_file, header);
-    }
+    // Knowledge graph file — structured shared memory.
+    let knowledge_file = config.memory_dir.join("knowledge.json");
+
+    // Legacy ant.md — kept for backwards compat but graph is primary.
+    let _ant_memory_file = config.memory_dir.join("ant.md");
 
     while let Some(req) = rx.recv().await {
         // Remember chat IDs per source for cross-channel forwarding.
@@ -335,11 +337,12 @@ pub async fn ai_worker_loop(
         }
 
         // Build the command for the selected backend.
-        // Both ANT and user memory are pre-loaded into the prompt.
+        // Knowledge graph + user memory pre-loaded into the prompt.
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
-            &ant_memory_file,
+            &knowledge_file,
             &user_memory_file,
+            &req.message,
             &config.working_dir,
             &config.repos_dir,
         );
@@ -742,8 +745,9 @@ pub async fn ai_worker_loop(
 
 fn build_system_prompt(
     custom: Option<&str>,
-    ant_memory_file: &Path,
+    knowledge_file: &Path,
     user_memory_file: &Path,
+    user_message: &str,
     working_dir: &str,
     repos_dir: &Path,
 ) -> String {
@@ -763,26 +767,30 @@ fn build_system_prompt(
 
     prompt.push_str(MEMORY_PREAMBLE);
     prompt.push_str(&format!(
-        "\nANT memory file: {}\nUser memory file: {}\n",
-        ant_memory_file.display(),
+        "\nKnowledge graph: {}\nUser memory file: {}\n",
+        knowledge_file.display(),
         user_memory_file.display()
     ));
 
-    // Pre-load ANT memory so the AI has it immediately (doesn't need to read the file).
-    let ant_memory = std::fs::read_to_string(ant_memory_file).unwrap_or_default();
-    if !ant_memory.trim().is_empty() {
-        prompt.push_str("\n[ANT MEMORY]\n");
-        // Cap at 4K to avoid bloating the prompt.
-        if ant_memory.len() > 4096 {
-            prompt.push_str(&ant_memory[..4096]);
-            prompt.push_str("\n... (truncated — read the full file for more)\n");
+    // Load knowledge graph and render relevant context.
+    let kg = crate::knowledge::KnowledgeGraph::load(knowledge_file);
+    if kg.node_count() > 0 {
+        let rendered = if kg.node_count() <= 30 {
+            // Small graph — show everything.
+            kg.render_full(4096)
         } else {
-            prompt.push_str(&ant_memory);
-        }
-        prompt.push_str("\n[/ANT MEMORY]\n");
+            // Large graph — extract relevant subgraph based on the user's message.
+            let relevant = kg.relevant_subgraph(user_message, 50);
+            let mut r = kg.render_subgraph(&relevant, 4096);
+            r.push_str("\n(Showing relevant context. Read knowledge.json for the full graph.)\n");
+            r
+        };
+        prompt.push_str("\n[KNOWLEDGE GRAPH]\n");
+        prompt.push_str(&rendered);
+        prompt.push_str("[/KNOWLEDGE GRAPH]\n");
     }
 
-    // Pre-load user memory too.
+    // Pre-load user memory.
     let user_memory = std::fs::read_to_string(user_memory_file).unwrap_or_default();
     if !user_memory.trim().is_empty() {
         prompt.push_str("\n[USER MEMORY]\n");

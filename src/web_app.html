@@ -249,10 +249,16 @@
     background: var(--surface);
     border-top: 1px solid #333;
     display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  #input-row {
+    display: flex;
     gap: 10px;
   }
 
-  #input-area textarea {
+  #input-row textarea {
     flex: 1;
     background: var(--bg);
     color: var(--text);
@@ -653,7 +659,7 @@
       <span id="quote-text"></span>
       <button onclick="clearQuote()" style="position:absolute;top:4px;right:6px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;line-height:1" title="Remove quote">&times;</button>
     </div>
-    <div style="display:flex;gap:10px">
+    <div id="input-row">
       <textarea id="input" placeholder="Send a message..." rows="1"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
       <button id="send-btn" onclick="sendMessage()">Send</button>
@@ -929,6 +935,10 @@ function renderTasks() {
       ${progress}${agentList}
     </div>`;
   }).join('');
+
+  // Tasks panel changed size — re-scroll chat to keep latest message visible.
+  const chat = document.getElementById('chat');
+  if (chat) requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
 }
 
 // Update task timers every second

@@ -10,6 +10,7 @@ mod ai_worker;
 mod config;
 mod events;
 mod history;
+mod knowledge;
 mod plugins;
 mod registry;
 mod sentants;

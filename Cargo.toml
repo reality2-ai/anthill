@@ -56,6 +56,9 @@ hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
 
+# Knowledge graph
+petgraph = { version = "0.6", features = ["serde-1"] }
+
 # QR code generation (for key export)
 qrcode = "0.14"
 
