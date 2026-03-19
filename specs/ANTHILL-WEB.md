@@ -112,7 +112,7 @@ On connection, the server sends a `snapshot` message containing:
 - All ANT listings (running + configured)
 - Chat history for each ANT
 
-Subsequently, the server broadcasts events as they occur (see ANTHILL-WORKER §7.2).
+Subsequently, the server broadcasts events as they occur (see ANTHILL-WORKER §7.2). The supervisor also broadcasts ANT crash and restart status events, so the web UI can reflect real-time ANT health.
 
 ### 4.4 Client → Server Commands
 
@@ -188,12 +188,17 @@ File paths are validated against the working directory via `canonicalize()` to p
 - Reply-to-message: hover → ↩ button → quote bar above input
 - Auto-scroll on new messages
 - Typing indicator
+- **Slash command autocomplete**: typing `/` in the input opens a menu listing all available commands with descriptions. Arrow keys navigate, Tab or Enter selects. The menu filters as the user types.
+- **Web command routing**: `/help`, `/status`, `/usage`, `/ants`, and `/cancel` are handled locally and return responses as system messages — no AI backend needed.
+- **Auto-followup**: when one task is running, new messages auto-queue as follow-ups instead of starting concurrent tasks.
+- **Interrupt (`!`)**: prefixing a message with `!` cancels the running task and restarts with combined context.
+- **ANT not-running feedback**: sending a message to a stopped or unconfigured ANT displays an error message instead of silently dropping the message.
 
 ### 6.3 Workers Tab
 
 - Per-worker cards: task ID, preview, elapsed time, progress, backend
 - Confidence-coloured progress: green (normal), yellow (stall warning), purple (question), red (error)
-- Follow-up input per worker card
+- Follow-up input per worker card (focus is preserved during timer re-renders)
 - Cancel button per worker
 
 ### 6.4 Files Tab

@@ -57,3 +57,15 @@ Common issues:
 ## Long responses get cut off
 
 Telegram has a 4096-character limit. Anthill splits long messages automatically. If content is still missing, check logs for errors.
+
+## Crash on messages with macrons or special characters (UTF-8)
+
+**Fixed.** Earlier versions could panic when slicing strings at byte offsets that landed inside multi-byte UTF-8 characters (e.g. Māori macrons like ā, ē, ī, ō, ū, or emoji). All string slicing now uses character or word boundaries. If you see a panic mentioning "byte index is not a char boundary", update to the latest build.
+
+## ANT doesn't respond (web UI) — no error, no spinner
+
+1. Check the ANT status indicator in the sidebar: green = running, red = stopped, grey = configured but not started.
+2. If the ANT is stopped or grey, start it from the ANT settings or restart Anthill.
+3. If you send a message to a stopped ANT, the web UI now shows an error message ("ANT is not running"). If you don't see this message, update to the latest build.
+4. Check the Workers tab for stall warnings (yellow) — the task may be running but slow.
+5. Check logs: `journalctl -u anthill -f` for backend errors.

@@ -184,7 +184,37 @@ AI output is parsed tolerantly:
 
 ---
 
-## 7. Security Considerations
+## 7. Spec Generation Pipeline
+
+### 7.1 `/specify <file>` — Formal Specification
+
+Generates an RFC 2119-style specification from source code. The pipeline follows the same six-phase thematic analysis pattern:
+
+1. **Familiarise** — read and chunk the source file
+2. **Code** — extract behaviours, invariants, data structures, and interfaces
+3. **Theme** — group codes into specification sections (lifecycle, protocol, error handling, etc.)
+4. **Review** — validate extracted behaviours against the source
+5. **Refine** — produce formal MUST/SHOULD/MAY statements with rationale
+6. **Integrate** — write the spec file to `specs/` and update the knowledge graph
+
+Output is a Markdown specification with normative language (RFC 2119 keywords).
+
+### 7.2 `/test-vectors <file>` — Test Case Generation
+
+Generates test cases from source code or an existing specification. Uses the same six-phase pipeline:
+
+1. **Familiarise** — read and chunk the input file
+2. **Code** — extract testable behaviours, edge cases, invariants
+3. **Theme** — group into test categories (happy path, error handling, boundary conditions, etc.)
+4. **Review** — validate coverage against the source
+5. **Refine** — produce concrete test vectors with inputs, expected outputs, and rationale
+6. **Integrate** — output test cases and Rust `#[test]` stubs
+
+Both commands update the knowledge graph with extracted entities and relationships, providing the same Popperian confidence metadata as `/analyse`.
+
+---
+
+## 8. Security Considerations
 
 1. **Document content is sent to external AI backends.** Users SHOULD be aware that analysed documents are processed by Claude Code, Codex, etc.
 2. **Extracted knowledge persists** in the knowledge graph and is included in future prompts. Sensitive content in documents will appear in the graph.

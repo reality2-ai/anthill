@@ -67,4 +67,16 @@ Run from the server terminal:
 | `anthill --export-key --qr` | Show colony key as QR code |
 | `anthill --import-key <key>` | Restore colony key from backup |
 
+## Special prefixes
+
+| Prefix | Description |
+|---|---|
+| `!` | **Interrupt**: cancel the running task and restart with both the original prompt and the new message combined. Example: `! actually use the v2 API instead` |
+
+## Auto-followup
+
+When exactly one task is running, any new message you send is automatically queued as a follow-up — no need to type `/followup`. The queued message runs with session continuity when the current task completes.
+
+If multiple tasks are running, messages start new concurrent tasks as before.
+
 Everything else sent to an ANT is dispatched as a prompt to the AI backend. Multiple messages run concurrently.

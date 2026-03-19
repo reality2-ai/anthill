@@ -52,7 +52,13 @@ HTTPS is recommended because:
 - **Cross-device sync** — messages from Telegram appear in the web UI and vice versa
 - **Auto-reconnecting WebSocket** — reconnects with exponential backoff
 - **Responsive** — scales fonts for mobile/tablet/desktop
-- **Slash command autocomplete** — type `/` to see all commands with descriptions, arrow keys to navigate, Tab/Enter to select
+- **Slash command autocomplete** — type `/` to see all commands with descriptions, arrow keys to navigate, Tab/Enter to select. Includes `/help`, `/status`, `/usage`, `/ants`, `/cancel`, `/analyse`, `/reflect`, `/specify`, `/test-vectors`, and more
+- **Web command routing** — `/help`, `/status`, `/usage`, `/ants`, `/cancel` work directly from the web (previously only Telegram/Slack)
+- **Auto-followup** — when one task is running, new messages auto-queue as follow-ups instead of spawning concurrent tasks
+- **Interrupt (`!`)** — prefix a message with `!` to cancel the running task and restart with combined context
+- **ANT not-running feedback** — sending to a stopped or unconfigured ANT shows an error instead of silently dropping the message
+- **Supervisor status events** — ANT crash and restart events are broadcast to the web UI in real time
+- **Workers tab focus fix** — follow-up input no longer loses focus when the elapsed timer re-renders
 - **Keyboard shortcuts** — Escape closes modals, Enter submits join/create dialogs
 
 ## Install as a PWA

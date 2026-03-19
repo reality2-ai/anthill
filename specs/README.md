@@ -41,16 +41,23 @@ How well-tested and stable is each area? Confidence grows through implementation
 | ANTHILL-MEMORY | Keyword extraction (i18n) | ●●●○○ | English, French, German tested | No CJK support |
 | ANTHILL-WORKER | Multi-backend fallback | ●●●○○ | Claude + Codex tested | Gemini/Ollama detection only |
 | ANTHILL-WORKER | Worker supervision | ●●●○○ | Timeout, stderr capture, stall detect | Running in production |
-| ANTHILL-WORKER | Follow-up queue | ●●○○○ | Implemented | Needs more real-world testing |
+| ANTHILL-WORKER | Follow-up queue | ●●●○○ | Auto-followup, ! interrupt | Auto-queue on message-while-running |
+| ANTHILL-WORKER | Web command routing | ●●●○○ | /help /status /usage /ants /cancel via web | Previously Telegram/Slack only |
 | ANTHILL-WORKER | Question relay | ●○○○○ | Implemented | Depends on AskUserQuestion usage |
 | ANTHILL-WORKER | Stream-json parsing | ●●●●○ | Claude + Codex formats | Text block fallback added |
 | ANTHILL-THEMATIC | Document chunking | ●●●○○ | Short/long docs, paragraph breaks | Overlap + progress guarantee |
 | ANTHILL-THEMATIC | Phase prompts + parsing | ●●○○○ | JSON parse, fence stripping | Needs real document testing |
 | ANTHILL-THEMATIC | Graph integration | ●○○○○ | Prompt template only | AI does the integration |
+| ANTHILL-THEMATIC | Spec generation (/specify) | ●●○○○ | Implemented | Generates RFC 2119 specs from code |
+| ANTHILL-THEMATIC | Test vectors (/test-vectors) | ●●○○○ | Implemented | Generates test cases from code or specs |
 | ANTHILL-WEB | Dashboard SPA | ●●●●○ | Running in production | Responsive, PWA |
 | ANTHILL-WEB | WebSocket protocol | ●●●○○ | HMAC signing, snapshot, events | Unsigned fallback for HTTP |
 | ANTHILL-WEB | File management | ●●○○○ | Upload, download, delete | Auth-aware download fixed |
 | ANTHILL-WEB | Device QR provisioning | ●●●○○ | CLI + web QR, countdown timer | Tested on mobile |
+| ANTHILL-WEB | Slash command autocomplete | ●●●○○ | Menu renders, Tab/Enter selects | Web UI only |
+| ANTHILL-WEB | ANT not-running feedback | ●●●○○ | Error on send to stopped ANT | Prevents silent message loss |
+| ANTHILL-WORKER | UTF-8 safety | ●●●●○ | Char/word-boundary slicing | Māori macrons, emoji safe |
+| ANTHILL-COLONY | Supervisor crash broadcasts | ●●●○○ | Crash/restart events to web UI | Real-time status updates |
 
 **Legend:** ●○○○○ = implemented but untested in production, ●●●●● = battle-tested and stable.
 

@@ -140,7 +140,24 @@ When a user sends a message while a task is running, they may want it to apply a
 3. When the task completes, queued follow-ups are dispatched as new requests with `new_session: false` (session continuity via `-c` flag).
 4. The AI sees the follow-up as a continuation of the same conversation.
 
-### 5.3 Question Relay
+### 5.3 Auto-Followup
+
+When exactly one task is running for an ANT, any new message sent to that ANT is automatically queued as a follow-up rather than starting a concurrent task. This applies to all interfaces (web, Telegram, Slack).
+
+- The user does not need to use `/followup` explicitly.
+- If multiple tasks are running, the message starts a new concurrent task (existing behaviour).
+- Auto-followup preserves session continuity: the queued message runs with `-c` when the current task completes.
+
+### 5.4 Interrupt with `!`
+
+A message prefixed with `!` cancels the running task and restarts with the combined context of the original prompt and the new message.
+
+1. The user sends `! <new instruction>`.
+2. The running task is cancelled (SIGKILL to the process group).
+3. A new task is dispatched with both the original prompt and the interrupt message, preserving session continuity.
+4. This is equivalent to cancel + re-send with additional context, but as a single atomic action.
+
+### 5.5 Question Relay
 
 When a worker's AI backend uses the `AskUserQuestion` tool:
 
@@ -170,7 +187,15 @@ When a worker's AI backend uses the `AskUserQuestion` tool:
 
 ### 6.2 Command Classification
 
-Commands are classified by the input plugin (Telegram, Slack) at receive time. The command type (0-8) is encoded in the event payload's first byte. The conductor sentant routes each type to the appropriate plugin command.
+Commands are classified by the input plugin (Telegram, Slack, Web) at receive time. The command type (0-8) is encoded in the event payload's first byte. The conductor sentant routes each type to the appropriate plugin command.
+
+### 6.3 Web Command Routing
+
+Slash commands (`/help`, `/status`, `/usage`, `/ants`, `/cancel`) now work from the web UI, not just Telegram and Slack. The web frontend detects slash-prefixed messages and routes them through the same command classification pipeline. Responses are delivered as system messages in the chat view.
+
+### 6.4 UTF-8 Safety
+
+All string slicing (message truncation, preview extraction, chunk boundaries) MUST use character or word boundaries, never byte offsets. This prevents panics on multi-byte characters such as Māori macrons (e.g. ā, ē, ī, ō, ū), emoji, or CJK characters.
 
 ---
 
