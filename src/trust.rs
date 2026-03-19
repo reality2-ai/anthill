@@ -220,7 +220,7 @@ impl ColonyTrust {
     /// Provision a new device directly (no join code required).
     /// Used internally for bootstrap / programmatic provisioning.
     #[allow(dead_code)]
-    pub fn provision_device(&mut self, name: &str) -> Device {
+    pub fn provision_device(&mut self, name: &str) -> Option<Device> {
         let mut rng = OsRng;
         let device_key = SigningKey::generate(&mut rng);
         let device_pub = device_key.verifying_key();
@@ -232,25 +232,28 @@ impl ColonyTrust {
         let code = self.group.generate_join_code(&mut rng, now, 60);
         let code_value = *code.value();
 
-        let _ = self.group.process_join_request(
+        if let Err(e) = self.group.process_join_request(
             &mut rng,
             now,
             &code_value,
             &device_pub,
             String::from(name),
             DEFAULT_CERT_TTL_SECS,
-        );
+        ) {
+            log::error!("provision_device failed: {:?}", e);
+            return None;
+        }
 
         self.last_seen.insert(id.clone(), now);
         self.save_devices();
 
-        Device {
+        Some(Device {
             id,
             name: name.to_string(),
             credential,
             joined_at: now,
             last_seen: now,
-        }
+        })
     }
 
     /// Authenticate a device by its credential (hex-encoded Ed25519 seed).
@@ -305,13 +308,14 @@ impl ColonyTrust {
     }
 
     /// List all provisioned devices.
+    /// Note: credential is empty — public keys are not credentials.
     pub fn list_devices(&self) -> Vec<Device> {
         let mut devices: Vec<Device> = self.group.members().iter().map(|m| {
             let id = hex_encode(&m.certificate.device_public_key);
             Device {
                 id: id.clone(),
                 name: m.name.clone(),
-                credential: id.clone(),
+                credential: String::new(), // Don't leak — pub key is not a credential.
                 joined_at: m.certificate.issued_at,
                 last_seen: self.last_seen.get(&id).copied().unwrap_or(m.certificate.issued_at),
             }
@@ -440,20 +444,15 @@ pub fn verify_signature(
 
     let data = format!("{}:{}:{}", device_id, timestamp, payload);
     let key_bytes = hex_decode(credential).unwrap_or_default();
+    let sig_bytes = match hex_decode(signature) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
     let mut mac = HmacSha256::new_from_slice(&key_bytes)
         .expect("HMAC key length should be valid");
     mac.update(data.as_bytes());
-    let expected = hex_encode(&mac.finalize().into_bytes());
-
-    // Constant-time comparison.
-    if signature.len() != expected.len() {
-        return false;
-    }
-    signature
-        .bytes()
-        .zip(expected.bytes())
-        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
+    // Constant-time comparison on raw bytes (not hex strings).
+    mac.verify_slice(&sig_bytes).is_ok()
 }
 
 /// Encrypt a payload using XChaCha20-Poly1305 with a key derived from the credential.
@@ -462,7 +461,8 @@ pub fn encrypt_payload(credential: &str, plaintext: &[u8]) -> Result<String, Str
     use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
     use sha2::{Sha256, Digest};
 
-    let key_bytes = Sha256::digest(credential.as_bytes());
+    let raw = hex_decode(credential).unwrap_or_else(|_| credential.as_bytes().to_vec());
+    let key_bytes = Sha256::digest(&raw);
     let cipher = XChaCha20Poly1305::new_from_slice(&key_bytes)
         .map_err(|e| format!("key error: {}", e))?;
 
@@ -486,7 +486,8 @@ pub fn decrypt_payload(credential: &str, encrypted: &str) -> Result<Vec<u8>, Str
     use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
     use sha2::{Sha256, Digest};
 
-    let key_bytes = Sha256::digest(credential.as_bytes());
+    let raw = hex_decode(credential).unwrap_or_else(|_| credential.as_bytes().to_vec());
+    let key_bytes = Sha256::digest(&raw);
     let cipher = XChaCha20Poly1305::new_from_slice(&key_bytes)
         .map_err(|e| format!("key error: {}", e))?;
 
@@ -512,7 +513,7 @@ pub fn load_colony_trust(config_dir: &Path) -> anyhow::Result<SharedTrust> {
 
 // --- Utilities ---
 
-fn now_secs() -> u64 {
+pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -569,68 +570,24 @@ fn load_members(path: &Path) -> (Vec<MemberInfo>, RevocationSet, HashMap<String,
 }
 
 fn hex_encode(data: &[u8]) -> String {
-    data.iter().map(|b| format!("{:02x}", b)).collect()
+    hex::encode(data)
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, anyhow::Error> {
-    let s = s.trim();
-    if s.len() % 2 != 0 {
-        anyhow::bail!("odd hex length");
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&s[i..i + 2], 16)
-                .map_err(|e| anyhow::anyhow!("bad hex: {}", e))
-        })
-        .collect()
+    Ok(hex::decode(s.trim())?)
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let n = (b0 << 16) | (b1 << 8) | b2;
-        result.push(CHARS[((n >> 18) & 63) as usize] as char);
-        result.push(CHARS[((n >> 12) & 63) as usize] as char);
-        if chunk.len() > 1 { result.push(CHARS[((n >> 6) & 63) as usize] as char); }
-        else { result.push('='); }
-        if chunk.len() > 2 { result.push(CHARS[(n & 63) as usize] as char); }
-        else { result.push('='); }
-    }
-    result
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 #[allow(dead_code)]
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    let s = s.trim_end_matches('=');
-    let mut result = Vec::new();
-    let chars: Vec<u8> = s.bytes().map(|b| match b {
-        b'A'..=b'Z' => b - b'A',
-        b'a'..=b'z' => b - b'a' + 26,
-        b'0'..=b'9' => b - b'0' + 52,
-        b'+' => 62,
-        b'/' => 63,
-        _ => 255,
-    }).collect();
-
-    for chunk in chars.chunks(4) {
-        let len = chunk.len();
-        if chunk.iter().any(|&b| b == 255) {
-            return Err("invalid base64".into());
-        }
-        let n = (chunk[0] as u32) << 18
-            | (if len > 1 { chunk[1] as u32 } else { 0 }) << 12
-            | (if len > 2 { chunk[2] as u32 } else { 0 }) << 6
-            | (if len > 3 { chunk[3] as u32 } else { 0 });
-        result.push((n >> 16) as u8);
-        if len > 2 { result.push((n >> 8) as u8); }
-        if len > 3 { result.push(n as u8); }
-    }
-    Ok(result)
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|e| format!("invalid base64: {}", e))
 }
 
 #[cfg(test)]
@@ -694,7 +651,7 @@ mod tests {
         let mut trust = ColonyTrust::load(&dir).unwrap();
         assert!(trust.is_empty_colony());
 
-        let device = trust.provision_device("My Laptop");
+        let device = trust.provision_device("My Laptop").expect("provision");
         assert!(!trust.is_empty_colony());
         assert_eq!(device.name, "My Laptop");
 
@@ -722,7 +679,7 @@ mod tests {
         let device_cred;
         {
             let mut trust = ColonyTrust::load(&dir).unwrap();
-            let device = trust.provision_device("Persistent Device");
+            let device = trust.provision_device("Persistent Device").expect("provision");
             device_cred = device.credential.clone();
         }
 
