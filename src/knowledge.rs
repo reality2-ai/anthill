@@ -198,6 +198,13 @@ impl KnowledgeEdge {
 /// Minimum confidence for an edge to appear in the prompt.
 pub const MIN_PROMPT_CONFIDENCE: f64 = 0.15;
 
+/// Confidence below which edges are archived (moved to separate file).
+pub const ARCHIVE_CONFIDENCE: f64 = 0.10;
+
+/// Maximum active nodes before auto-archiving triggers.
+#[allow(dead_code)]
+pub const MAX_ACTIVE_NODES: usize = 500;
+
 /// Serializable graph format (petgraph's serde format).
 #[derive(Serialize, Deserialize)]
 struct GraphData {
@@ -450,6 +457,152 @@ impl KnowledgeGraph {
         }
 
         output
+    }
+}
+
+// --- Cached graph (avoids re-parsing JSON on every request) ---
+
+use std::sync::Mutex;
+use std::time::SystemTime;
+
+/// A cached knowledge graph that reloads from disk only when the file changes.
+pub struct CachedGraph {
+    graph: Mutex<KnowledgeGraph>,
+    file_path: PathBuf,
+    last_mtime: Mutex<Option<SystemTime>>,
+}
+
+impl CachedGraph {
+    /// Create a new cached graph from a file path.
+    pub fn new(path: &Path) -> Self {
+        let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+        let graph = KnowledgeGraph::load(path);
+        Self {
+            graph: Mutex::new(graph),
+            file_path: path.to_path_buf(),
+            last_mtime: Mutex::new(mtime),
+        }
+    }
+
+    /// Get the graph, reloading if the file changed on disk.
+    /// Returns a result string (rendered context) for the given message.
+    pub fn render_for_prompt(&self, message: &str, max_chars: usize) -> String {
+        self.maybe_reload();
+        let graph = match self.graph.lock() {
+            Ok(g) => g,
+            Err(_) => return String::new(),
+        };
+        if graph.node_count() == 0 {
+            return String::new();
+        }
+        if graph.node_count() <= 30 {
+            graph.render_full(max_chars)
+        } else {
+            let relevant = graph.relevant_subgraph(message, 50);
+            let mut r = graph.render_subgraph(&relevant, max_chars);
+            r.push_str("\n(Showing relevant context. Read knowledge.json for full graph.)\n");
+            r
+        }
+    }
+
+    /// Reload from disk if the file's mtime has changed.
+    fn maybe_reload(&self) {
+        let current_mtime = std::fs::metadata(&self.file_path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        let needs_reload = {
+            let last = self.last_mtime.lock().ok();
+            match (last.as_deref(), &current_mtime) {
+                (Some(Some(prev)), Some(curr)) => curr != prev,
+                (Some(None), Some(_)) => true, // file appeared
+                _ => false,
+            }
+        };
+
+        if needs_reload {
+            let new_graph = KnowledgeGraph::load(&self.file_path);
+            log::debug!("Knowledge graph reloaded: {} nodes", new_graph.node_count());
+            if let Ok(mut g) = self.graph.lock() {
+                *g = new_graph;
+            }
+            if let Ok(mut m) = self.last_mtime.lock() {
+                *m = current_mtime;
+            }
+        }
+    }
+
+    /// Archive low-confidence edges to a separate file.
+    /// Returns the number of edges archived.
+    pub fn archive_stale(&self) -> usize {
+        self.maybe_reload();
+        let mut graph = match self.graph.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+
+        let archive_path = self.file_path.with_file_name("knowledge-archive.json");
+        let mut archive = KnowledgeGraph::load(&archive_path);
+
+        // Find edges to archive.
+        let stale_edges: Vec<_> = graph.graph.edge_indices().filter(|&e| {
+            graph.graph[e].confidence < ARCHIVE_CONFIDENCE
+        }).collect();
+
+        if stale_edges.is_empty() { return 0; }
+
+        let mut archived = 0;
+        for edge_idx in stale_edges {
+            if let Some((from, to)) = graph.graph.edge_endpoints(edge_idx) {
+                let edge = graph.graph[edge_idx].clone();
+                let from_node = graph.graph[from].clone();
+                let to_node = graph.graph[to].clone();
+
+                // Ensure nodes exist in archive.
+                let a_from = archive.find_by_label(&from_node.label)
+                    .unwrap_or_else(|| archive.graph.add_node(from_node));
+                let a_to = archive.find_by_label(&to_node.label)
+                    .unwrap_or_else(|| archive.graph.add_node(to_node));
+                archive.graph.add_edge(a_from, a_to, edge);
+                archived += 1;
+            }
+        }
+
+        // Remove archived edges from active graph.
+        // (Collect indices first, remove in reverse to avoid invalidation.)
+        let to_remove: Vec<_> = graph.graph.edge_indices().filter(|&e| {
+            graph.graph[e].confidence < ARCHIVE_CONFIDENCE
+        }).collect();
+        for e in to_remove.into_iter().rev() {
+            graph.graph.remove_edge(e);
+        }
+
+        // Remove orphan nodes (no edges).
+        let orphans: Vec<_> = graph.graph.node_indices().filter(|&n| {
+            graph.graph.edges(n).next().is_none()
+                && graph.graph.neighbors_undirected(n).next().is_none()
+        }).collect();
+        for n in orphans.into_iter().rev() {
+            graph.graph.remove_node(n);
+        }
+
+        // Save archive FIRST — if power dies here, duplicates are safe.
+        // Then save the trimmed active graph.
+        archive.rebuild_index();
+        archive.save();
+        graph.rebuild_index();
+        graph.save();
+
+        if archived > 0 {
+            log::info!("Archived {} low-confidence edges to {}", archived, archive_path.display());
+        }
+        archived
+    }
+
+    /// Node count (for logging).
+    #[allow(dead_code)]
+    pub fn node_count(&self) -> usize {
+        self.graph.lock().map(|g| g.node_count()).unwrap_or(0)
     }
 }
 

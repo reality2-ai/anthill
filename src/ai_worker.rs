@@ -327,11 +327,12 @@ pub async fn ai_worker_loop(
         log::warn!("Could not create memory dir {:?}: {}", config.memory_dir, e);
     }
 
-    // Knowledge graph file — structured shared memory.
+    // Knowledge graph — cached in memory, reloads when file changes on disk.
     let knowledge_file = config.memory_dir.join("knowledge.json");
+    let knowledge_cache = crate::knowledge::CachedGraph::new(&knowledge_file);
 
-    // Legacy ant.md — kept for backwards compat but graph is primary.
-    let _ant_memory_file = config.memory_dir.join("ant.md");
+    // Periodic archiving of low-confidence edges (every 100 requests).
+    let mut request_count: u32 = 0;
 
     while let Some(req) = rx.recv().await {
         // Remember chat IDs per source for cross-channel forwarding.
@@ -346,13 +347,20 @@ pub async fn ai_worker_loop(
             let _ = std::fs::write(&user_memory_file, header);
         }
 
+        // Periodic archive of low-confidence edges.
+        request_count += 1;
+        if request_count % 100 == 0 {
+            knowledge_cache.archive_stale();
+        }
+
         // Build the command for the selected backend.
         // Knowledge graph + user memory pre-loaded into the prompt.
+        let kg_rendered = knowledge_cache.render_for_prompt(&req.message, 4096);
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
             &knowledge_file,
+            &kg_rendered,
             &user_memory_file,
-            &req.message,
             &config.working_dir,
             &config.repos_dir,
         );
@@ -756,8 +764,8 @@ pub async fn ai_worker_loop(
 fn build_system_prompt(
     custom: Option<&str>,
     knowledge_file: &Path,
+    kg_rendered: &str,
     user_memory_file: &Path,
-    user_message: &str,
     working_dir: &str,
     repos_dir: &Path,
 ) -> String {
@@ -782,21 +790,10 @@ fn build_system_prompt(
         user_memory_file.display()
     ));
 
-    // Load knowledge graph and render relevant context.
-    let kg = crate::knowledge::KnowledgeGraph::load(knowledge_file);
-    if kg.node_count() > 0 {
-        let rendered = if kg.node_count() <= 30 {
-            // Small graph — show everything.
-            kg.render_full(4096)
-        } else {
-            // Large graph — extract relevant subgraph based on the user's message.
-            let relevant = kg.relevant_subgraph(user_message, 50);
-            let mut r = kg.render_subgraph(&relevant, 4096);
-            r.push_str("\n(Showing relevant context. Read knowledge.json for the full graph.)\n");
-            r
-        };
+    // Include pre-rendered knowledge graph context.
+    if !kg_rendered.is_empty() {
         prompt.push_str("\n[KNOWLEDGE GRAPH]\n");
-        prompt.push_str(&rendered);
+        prompt.push_str(kg_rendered);
         prompt.push_str("[/KNOWLEDGE GRAPH]\n");
     }
 
