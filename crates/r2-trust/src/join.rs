@@ -36,6 +36,15 @@ impl JoinCode {
         }
     }
 
+    /// Restore a join code from persisted state.
+    pub fn from_raw(value: [u8; JOIN_CODE_LEN], expires_at: u64) -> Self {
+        JoinCode {
+            value,
+            expires_at,
+            used: false,
+        }
+    }
+
     /// Validate a candidate join code.
     pub fn validate(&self, candidate: &[u8; JOIN_CODE_LEN], now: u64) -> Result<()> {
         if now >= self.expires_at {

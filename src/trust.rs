@@ -61,6 +61,8 @@ pub struct ColonyTrust {
     group: TrustGroup,
     /// Path to devices file.
     devices_path: PathBuf,
+    /// Path to join codes file (shared between CLI and server).
+    join_codes_path: PathBuf,
     /// Last-seen timestamps (not tracked by r2-trust).
     last_seen: HashMap<String, u64>,
 }
@@ -73,6 +75,7 @@ impl ColonyTrust {
     pub fn load(config_dir: &Path) -> anyhow::Result<Self> {
         let key_path = config_dir.join("colony.key");
         let devices_path = config_dir.join("devices.toml");
+        let join_codes_path = config_dir.join("join-codes.toml");
         let now = now_secs();
 
         let (group, last_seen) = if key_path.exists() {
@@ -124,11 +127,15 @@ impl ColonyTrust {
             (group, HashMap::new())
         };
 
-        Ok(Self {
+        let mut trust = Self {
             group,
             devices_path,
+            join_codes_path,
             last_seen,
-        })
+        };
+        // Load any pending join codes from disk (CLI may have written them).
+        trust.load_join_codes();
+        Ok(trust)
     }
 
     /// Returns true if no devices have been provisioned yet.
@@ -139,15 +146,20 @@ impl ColonyTrust {
     /// Generate a join code (valid for 5 minutes).
     ///
     /// Returns a human-readable hex string (e.g. "a1b2c3d4-e5f6a7b8-...").
+    /// Persists to disk so the running server can see CLI-generated codes.
     pub fn generate_join_code(&mut self) -> String {
         let mut rng = OsRng;
         let now = now_secs();
         let code = self.group.generate_join_code(&mut rng, now, DEFAULT_JOIN_CODE_TTL_SECS);
-        format_join_code(code.value())
+        let formatted = format_join_code(code.value());
+        self.save_join_codes();
+        formatted
     }
 
     /// Verify a join code is valid (without consuming it).
     pub fn verify_join_code(&mut self, code: &str) -> bool {
+        // Reload from disk in case CLI wrote new codes.
+        self.load_join_codes();
         let raw = match parse_join_code(code) {
             Some(r) => r,
             None => return false,
@@ -156,10 +168,49 @@ impl ColonyTrust {
         self.group.validate_join_code(&raw, now)
     }
 
-    /// Provision a new device (server generates keypair on behalf).
-    ///
-    /// Preserves the current Anthill UX: server returns a credential
-    /// (hex-encoded Ed25519 private key seed).
+    /// Join the colony using a user-provided join code.
+    /// Validates and consumes the code, provisions a device, returns credentials.
+    pub fn join_with_code(&mut self, code: &str, name: &str) -> Option<Device> {
+        // Reload from disk in case CLI wrote the code.
+        self.load_join_codes();
+        let raw = parse_join_code(code)?;
+        let mut rng = OsRng;
+        let device_key = SigningKey::generate(&mut rng);
+        let device_pub = device_key.verifying_key();
+        let id = hex_encode(device_pub.as_bytes());
+        let credential = hex_encode(device_key.to_bytes().as_ref());
+        let now = now_secs();
+
+        // Validate and consume the join code via process_join_request.
+        match self.group.process_join_request(
+            &mut rng,
+            now,
+            &raw,
+            &device_pub,
+            String::from(name),
+            DEFAULT_CERT_TTL_SECS,
+        ) {
+            Ok(_) => {
+                self.last_seen.insert(id.clone(), now);
+                self.save_devices();
+                self.save_join_codes(); // Remove consumed code from disk.
+                Some(Device {
+                    id,
+                    name: name.to_string(),
+                    credential,
+                    joined_at: now,
+                    last_seen: now,
+                })
+            }
+            Err(e) => {
+                log::warn!("Join failed: {:?}", e);
+                None
+            }
+        }
+    }
+
+    /// Provision a new device directly (no join code required).
+    /// Used internally for bootstrap / programmatic provisioning.
     pub fn provision_device(&mut self, name: &str) -> Device {
         let mut rng = OsRng;
         let device_key = SigningKey::generate(&mut rng);
@@ -278,6 +329,43 @@ impl ColonyTrust {
             }
             Err(_) => false,
         }
+    }
+
+    /// Load join codes from disk (CLI may have written them).
+    fn load_join_codes(&mut self) {
+        let now = now_secs();
+        if let Ok(contents) = std::fs::read_to_string(&self.join_codes_path) {
+            for line in contents.lines() {
+                let mut parts = line.split_whitespace();
+                let hex_code = match parts.next() {
+                    Some(h) => h,
+                    None => continue,
+                };
+                let expiry: u64 = match parts.next().and_then(|s| s.parse().ok()) {
+                    Some(e) => e,
+                    None => continue,
+                };
+                if expiry <= now { continue; }
+                if let Some(raw) = parse_join_code(hex_code) {
+                    // Only inject if not already known.
+                    if !self.group.validate_join_code(&raw, now) {
+                        self.group.inject_join_code(
+                            r2_trust::join::JoinCode::from_raw(raw, expiry)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Save active join codes to disk (for CLI↔server handoff).
+    fn save_join_codes(&self) {
+        let now = now_secs();
+        let lines: Vec<String> = self.group.join_codes().iter()
+            .filter(|c| c.expires_at() > now)
+            .map(|c| format!("{} {}", format_join_code(c.value()), c.expires_at()))
+            .collect();
+        let _ = std::fs::write(&self.join_codes_path, lines.join("\n"));
     }
 
     /// Persist devices to disk.

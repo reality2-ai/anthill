@@ -228,6 +228,16 @@ impl TrustGroup {
         self.join_codes.len()
     }
 
+    /// Inject a join code from persisted state (e.g. CLI-generated codes loaded from disk).
+    pub fn inject_join_code(&mut self, code: JoinCode) {
+        self.join_codes.push(code);
+    }
+
+    /// Iterate active join codes (for persistence).
+    pub fn join_codes(&self) -> &[JoinCode] {
+        &self.join_codes
+    }
+
     /// Check if a join code is valid (without consuming it).
     pub fn validate_join_code(&self, candidate: &[u8; 16], now: u64) -> bool {
         self.join_codes.iter().any(|c| c.validate(candidate, now).is_ok())

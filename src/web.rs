@@ -501,19 +501,22 @@ async fn auth_join(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    if !trust.verify_join_code(&req.code) {
-        return (StatusCode::FORBIDDEN, "Invalid or expired join code").into_response();
-    }
-
     let name = if req.device_name.is_empty() { "unnamed device" } else { &req.device_name };
-    let device = trust.provision_device(name);
-    log::info!("Device joined colony: '{}' ({})", device.name, &device.id[..8]);
 
-    Json(serde_json::json!({
-        "device_id": device.id,
-        "credential": device.credential,
-        "name": device.name,
-    })).into_response()
+    // Validate, consume, and provision in one step.
+    match trust.join_with_code(&req.code, name) {
+        Some(device) => {
+            log::info!("Device joined colony: '{}' ({})", device.name, &device.id[..8]);
+            Json(serde_json::json!({
+                "device_id": device.id,
+                "credential": device.credential,
+                "name": device.name,
+            })).into_response()
+        }
+        None => {
+            (StatusCode::FORBIDDEN, "Invalid or expired join code").into_response()
+        }
+    }
 }
 
 /// GET /api/auth/devices — list all provisioned devices (auth via middleware).
