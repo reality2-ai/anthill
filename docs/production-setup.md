@@ -25,7 +25,7 @@ cd anthill
 ./install.sh
 ```
 
-This builds a release binary, copies it to `/usr/local/bin/anthill`, creates `~/.config/anthill/ants/`, generates a systemd service, and installs it.
+This builds a release binary, copies it to `/usr/local/bin/anthill`, creates `~/.config/anthill/ants/`, and sets up the appropriate auto-start service for your platform (systemd on Linux, launchd on macOS, rc.d on BSD).
 
 ### 2. Create your first ANT
 
@@ -101,7 +101,7 @@ See [Web Dashboard](web-dashboard.md) for Tailscale HTTPS setup.
 Both Anthill and the HTTPS proxy survive reboots:
 
 ```bash
-# Anthill — enabled via systemd (done in step 5)
+# Anthill — enabled via install.sh (done in step 5)
 sudo systemctl enable anthill
 
 # HTTPS proxy — persists with --bg flag

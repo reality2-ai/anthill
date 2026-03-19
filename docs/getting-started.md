@@ -76,7 +76,7 @@ Try: "What's 2+2?" or "Write a Python hello world"
 
 ## Next steps
 
-- [Production Setup](production-setup.md) — multiple ANTS, auto-start, systemd
+- [Production Setup](production-setup.md) — multiple ANTS, supervisor, auto-start
 - [Web Dashboard](web-dashboard.md) — browser-based interface, Tailscale HTTPS
 - [Memory & Workspaces](memory-and-workspaces.md) — persistent memory, git backups
 - [Configuration](configuration.md) — full reference for all settings

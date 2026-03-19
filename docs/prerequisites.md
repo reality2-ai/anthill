@@ -58,7 +58,7 @@ claude -p "Say hello"
 
 You should see plain text output. If this works, Anthill will work.
 
-**Important:** Authenticate as the same user that will run Anthill. If your systemd service runs as `youruser`, Claude Code must be authenticated under that account.
+**Important:** Authenticate as the same user that will run Anthill. The service runs as your user account, so Claude Code must be authenticated under that account.
 
 ## 4. [Telegram](https://telegram.org/) bot token (optional)
 

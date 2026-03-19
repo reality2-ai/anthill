@@ -11,7 +11,7 @@
 
 1. `which claude` — is it installed?
 2. `claude -p "hello"` — does it work directly?
-3. Check PATH in the systemd service includes `~/.local/bin` and `~/.cargo/bin`
+3. Check PATH in the service config includes `~/.local/bin` and `~/.cargo/bin`
 4. Run `claude` interactively once to authenticate
 
 ## Claude asks for permission (can't execute)
