@@ -67,6 +67,8 @@ pub enum WsEvent {
 pub enum BotStatusKind {
     Running,
     Stopped,
+    /// Configured on disk but not yet started.
+    Configured,
     Error(String),
 }
 
@@ -127,7 +129,6 @@ impl BotRegistry {
     }
 
     /// List ANT directory names on disk (may include ones not running).
-    #[allow(dead_code)]
     pub fn list_config_dirs(&self) -> Vec<String> {
         let mut dirs = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&self.ants_dir) {
@@ -144,10 +145,14 @@ impl BotRegistry {
         dirs
     }
 
-    /// List bot names and their status.
+    /// List all ants — merges configured-on-disk with running-in-memory.
+    /// Ants that exist on disk but aren't running show as `Configured`.
     pub async fn list_bots(&self) -> Vec<BotInfo> {
         let bots = self.bots.read().await;
         let mut list = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // Running ants (from memory).
         for (name, handle) in bots.iter() {
             let status = handle.status.read().await.clone();
             let task_count = handle.tasks.lock().map(|m| m.len()).unwrap_or(0);
@@ -161,7 +166,27 @@ impl BotRegistry {
                 running_tasks: task_count,
                 total_messages: message_count,
             });
+            seen.insert(name.clone());
         }
+
+        // Configured-on-disk but not running.
+        for dir_name in self.list_config_dirs() {
+            if !seen.contains(&dir_name) {
+                // Try to read the display name from config.
+                let display_name = self.read_config(&dir_name)
+                    .and_then(|toml_str| toml::from_str::<crate::config::Config>(&toml_str).ok())
+                    .and_then(|cfg| cfg.name)
+                    .unwrap_or_else(|| dir_name.clone());
+                list.push(BotInfo {
+                    id: dir_name,
+                    name: display_name,
+                    status: BotStatusKind::Configured,
+                    running_tasks: 0,
+                    total_messages: 0,
+                });
+            }
+        }
+
         list.sort_by(|a, b| a.name.cmp(&b.name));
         list
     }
@@ -197,4 +222,111 @@ pub struct BotInfo {
     pub status: BotStatusKind,
     pub running_tasks: usize,
     pub total_messages: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn list_bots_shows_configured_not_running() {
+        let dir = std::env::temp_dir().join("anthill-test-registry");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Create two ant configs on disk.
+        let ant1_dir = dir.join("ant-alpha");
+        std::fs::create_dir_all(&ant1_dir).unwrap();
+        std::fs::write(
+            ant1_dir.join("ant.toml"),
+            "name = \"Alpha\"\n",
+        ).unwrap();
+
+        let ant2_dir = dir.join("ant-beta");
+        std::fs::create_dir_all(&ant2_dir).unwrap();
+        std::fs::write(
+            ant2_dir.join("ant.toml"),
+            "name = \"Beta\"\n",
+        ).unwrap();
+
+        let registry = BotRegistry::new(dir.clone());
+
+        // No bots running — both should show as Configured.
+        let bots = registry.list_bots().await;
+        assert_eq!(bots.len(), 2);
+        assert!(bots.iter().all(|b| matches!(b.status, BotStatusKind::Configured)));
+        assert!(bots.iter().any(|b| b.id == "ant-alpha" && b.name == "Alpha"));
+        assert!(bots.iter().any(|b| b.id == "ant-beta" && b.name == "Beta"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn list_bots_merges_running_and_configured() {
+        let dir = std::env::temp_dir().join("anthill-test-registry-merge");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two on disk.
+        for name in &["running-ant", "stopped-ant"] {
+            let d = dir.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("ant.toml"), format!("name = \"{}\"\n", name)).unwrap();
+        }
+
+        let registry = BotRegistry::new(dir.clone());
+
+        // Register one as running.
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let (event_tx, _) = broadcast::channel(16);
+        registry.bots.write().await.insert("running-ant".into(), BotHandle {
+            name: "running-ant".into(),
+            display_name: "Running Ant".into(),
+            working_dir: dir.join("running-ant"),
+            request_tx: tx,
+            stats: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            tasks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            event_tx,
+            status: Arc::new(RwLock::new(BotStatusKind::Running)),
+        });
+
+        let bots = registry.list_bots().await;
+        assert_eq!(bots.len(), 2);
+
+        let running = bots.iter().find(|b| b.id == "running-ant").unwrap();
+        assert!(matches!(running.status, BotStatusKind::Running));
+
+        let configured = bots.iter().find(|b| b.id == "stopped-ant").unwrap();
+        assert!(matches!(configured.status, BotStatusKind::Configured));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn send_message_to_nonexistent_bot_returns_false() {
+        let dir = std::env::temp_dir().join("anthill-test-registry-send");
+        let registry = BotRegistry::new(dir);
+        assert!(!registry.send_message("no-such-bot", 0, "hello".into()).await);
+    }
+
+    #[test]
+    fn config_dir_operations() {
+        let dir = std::env::temp_dir().join("anthill-test-registry-ops");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let registry = BotRegistry::new(dir.clone());
+
+        // Write config.
+        registry.write_config("test-ant", "name = \"Test\"\n").unwrap();
+        assert!(registry.read_config("test-ant").is_some());
+        assert_eq!(registry.list_config_dirs(), vec!["test-ant".to_string()]);
+
+        // Delete config.
+        registry.delete_config("test-ant").unwrap();
+        assert!(registry.read_config("test-ant").is_none());
+        assert!(registry.list_config_dirs().is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -89,8 +89,16 @@ pub async fn run_web_server(
 
     log::info!("Web server listening on {}", bind);
 
-    let listener = tokio::net::TcpListener::bind(bind).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(bind).await {
+        Ok(l) => l,
+        Err(e) => {
+            log::error!("Failed to bind web server to {}: {}", bind, e);
+            return;
+        }
+    };
+    if let Err(e) = axum::serve(listener, app).await {
+        log::error!("Web server error: {}", e);
+    }
 }
 
 /// GET / — serve the embedded web app.

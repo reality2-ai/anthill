@@ -422,6 +422,147 @@ fn generate_random_bytes(n: usize) -> Vec<u8> {
     bytes
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sign_and_verify_roundtrip() {
+        let credential = hex::encode(&generate_random_bytes(32));
+        let device_id = "test-device-001";
+        let payload = "hello world";
+
+        let (signature, timestamp) = sign_message(&credential, device_id, payload);
+
+        assert!(verify_signature(&credential, device_id, timestamp, payload, &signature));
+    }
+
+    #[test]
+    fn verify_rejects_wrong_credential() {
+        let cred1 = hex::encode(&generate_random_bytes(32));
+        let cred2 = hex::encode(&generate_random_bytes(32));
+        let (signature, timestamp) = sign_message(&cred1, "dev1", "msg");
+
+        assert!(!verify_signature(&cred2, "dev1", timestamp, "msg", &signature));
+    }
+
+    #[test]
+    fn verify_rejects_wrong_payload() {
+        let cred = hex::encode(&generate_random_bytes(32));
+        let (signature, timestamp) = sign_message(&cred, "dev1", "original");
+
+        assert!(!verify_signature(&cred, "dev1", timestamp, "tampered", &signature));
+    }
+
+    #[test]
+    fn verify_rejects_stale_timestamp() {
+        let cred = hex::encode(&generate_random_bytes(32));
+        let device_id = "dev1";
+        let payload = "test";
+        let old_timestamp = now_secs() - MAX_MESSAGE_AGE_SECS - 10;
+
+        let data = format!("{}:{}:{}", device_id, old_timestamp, payload);
+        let key = hex::decode(&cred).unwrap();
+        let sig = hex::encode(&hmac_sha256(&key, data.as_bytes()));
+
+        assert!(!verify_signature(&cred, device_id, old_timestamp, payload, &sig));
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let cred = hex::encode(&generate_random_bytes(32));
+        let plaintext = b"secret data for testing";
+
+        let encrypted = encrypt_payload(&cred, plaintext).unwrap();
+        let decrypted = decrypt_payload(&cred, &encrypted).unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn decrypt_with_wrong_key_fails() {
+        let cred1 = hex::encode(&generate_random_bytes(32));
+        let cred2 = hex::encode(&generate_random_bytes(32));
+
+        let encrypted = encrypt_payload(&cred1, b"secret").unwrap();
+        assert!(decrypt_payload(&cred2, &encrypted).is_err());
+    }
+
+    #[test]
+    fn colony_trust_lifecycle() {
+        let dir = std::env::temp_dir().join("anthill-test-trust");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Load creates colony key.
+        let mut trust = ColonyTrust::load(&dir).unwrap();
+        assert!(trust.is_empty_colony());
+
+        // Provision a device.
+        let device = trust.provision_device("My Laptop");
+        assert!(!trust.is_empty_colony());
+        assert_eq!(device.name, "My Laptop");
+
+        // Authenticate with valid credential.
+        let authed = trust.authenticate(&device.credential);
+        assert!(authed.is_some());
+        assert_eq!(authed.unwrap().id, device.id);
+
+        // Authenticate with wrong credential.
+        assert!(trust.authenticate("deadbeef").is_none());
+
+        // Join codes.
+        let code = trust.generate_join_code();
+        assert!(trust.verify_join_code(&code)); // consumed
+        assert!(!trust.verify_join_code(&code)); // already used
+
+        // Revoke device.
+        assert!(trust.revoke_device(&device.id));
+        assert!(trust.authenticate(&device.credential).is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn colony_trust_persists_across_loads() {
+        let dir = std::env::temp_dir().join("anthill-test-trust-persist");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let device_cred;
+        {
+            let mut trust = ColonyTrust::load(&dir).unwrap();
+            let device = trust.provision_device("Persistent Device");
+            device_cred = device.credential.clone();
+        }
+
+        // Reload from disk.
+        let mut trust2 = ColonyTrust::load(&dir).unwrap();
+        assert!(!trust2.is_empty_colony());
+        let authed = trust2.authenticate(&device_cred);
+        assert!(authed.is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn base64_roundtrip() {
+        let data = b"hello world, this is a test of base64 encoding!";
+        let encoded = base64_encode(data);
+        let decoded = base64_decode(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn hex_roundtrip() {
+        let data = vec![0u8, 127, 255, 1, 42];
+        let encoded = hex::encode(&data);
+        assert_eq!(encoded, "007fff012a");
+        let decoded = hex::decode(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+}
+
 /// Hex encoding/decoding.
 mod hex {
     pub fn encode(data: &[u8]) -> String {

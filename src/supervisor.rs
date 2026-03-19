@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::registry::BotRegistry;
+use crate::registry::{BotRegistry, BotStatusKind};
 
 /// Supervisor configuration (supervisor.toml).
 #[derive(Debug, Deserialize)]
@@ -93,10 +93,15 @@ fn spawn_bot_task(
 ) -> JoinHandle<()> {
     let bot_name = name.clone();
     tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
-            .build()
-            .unwrap();
+            .build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    log::error!("[{}] failed to create runtime: {}", bot_name, e);
+                    return;
+                }
+            };
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async move {
             if let Err(e) = crate::bot::run_bot(
@@ -123,8 +128,8 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
 
     let ant_configs = discover_ants(&ants_dir);
     if ant_configs.is_empty() {
-        anyhow::bail!(
-            "No ants found in {}. Create subdirectories with ant.toml files.",
+        log::warn!(
+            "No ants found in {}. Use the web dashboard to create one.",
             ants_dir.display()
         );
     }
@@ -205,7 +210,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     // Start the web server.
     let bind: SocketAddr = format!("{}:{}", sup_cfg.http_bind, sup_cfg.http_port)
         .parse()
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("Invalid bind address '{}:{}': {}", sup_cfg.http_bind, sup_cfg.http_port, e))?;
     let web_registry = Arc::clone(&registry);
     tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, bind));
 
@@ -241,6 +246,14 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
         for (name, handle, cfg) in &mut ant_tasks {
             if handle.is_finished() {
                 log::warn!("Ant '{}' has stopped", name);
+
+                // Update registry status.
+                {
+                    let bots = registry.bots.read().await;
+                    if let Some(bot_handle) = bots.get(name) {
+                        *bot_handle.status.write().await = BotStatusKind::Stopped;
+                    }
+                }
 
                 if !sup_cfg.restart_on_crash {
                     continue;

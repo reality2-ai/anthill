@@ -95,3 +95,97 @@ impl Config {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_roundtrips_through_toml() {
+        let cfg = Config::default();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.claude.backends, vec!["claude".to_string()]);
+        assert_eq!(parsed.claude.memory_dir, "memory");
+        assert!(parsed.claude.skip_permissions);
+        assert!(!parsed.claude.sync_channels);
+        assert!(!parsed.claude.encrypt_backups);
+    }
+
+    #[test]
+    fn config_with_all_fields_roundtrips() {
+        let cfg = Config {
+            name: Some("Test Ant".into()),
+            mode: String::new(),
+            telegram: TelegramConfig {
+                token: Some("123:ABC".into()),
+                allow: vec![100, 200],
+            },
+            slack: SlackConfig {
+                bot_token: Some("xoxb-test".into()),
+                app_token: Some("xapp-test".into()),
+            },
+            claude: ClaudeConfig {
+                backends: vec!["claude".into(), "codex".into()],
+                working_dir: Some("/tmp/test".into()),
+                system_prompt: Some("You are helpful.".into()),
+                sync_channels: true,
+                encrypt_backups: true,
+                backup_interval_hours: 6,
+                backup_remote: "origin".into(),
+                ..Default::default()
+            },
+        };
+
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.name, Some("Test Ant".into()));
+        assert_eq!(parsed.telegram.token, Some("123:ABC".into()));
+        assert_eq!(parsed.telegram.allow, vec![100, 200]);
+        assert_eq!(parsed.slack.bot_token, Some("xoxb-test".into()));
+        assert_eq!(parsed.claude.backends, vec!["claude", "codex"]);
+        assert_eq!(parsed.claude.working_dir, Some("/tmp/test".into()));
+        assert!(parsed.claude.sync_channels);
+        assert!(parsed.claude.encrypt_backups);
+        assert_eq!(parsed.claude.backup_interval_hours, 6);
+    }
+
+    #[test]
+    fn partial_toml_fills_defaults() {
+        let toml_str = r#"
+name = "Minimal"
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.name, Some("Minimal".into()));
+        assert_eq!(cfg.claude.backends, vec!["claude".to_string()]);
+        assert!(cfg.claude.skip_permissions);
+        assert!(cfg.telegram.token.is_none());
+    }
+
+    #[test]
+    fn load_missing_file_returns_defaults() {
+        let path = std::path::PathBuf::from("/tmp/anthill-test-nonexistent/ant.toml");
+        let cfg = Config::load(&path).unwrap();
+        assert!(cfg.name.is_none());
+        assert_eq!(cfg.claude.backends, vec!["claude".to_string()]);
+    }
+
+    #[test]
+    fn load_real_file_roundtrips() {
+        let dir = std::env::temp_dir().join("anthill-test-config-rt");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ant.toml");
+
+        let cfg = Config {
+            name: Some("RoundTrip".into()),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        std::fs::write(&path, &toml_str).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.name, Some("RoundTrip".into()));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
