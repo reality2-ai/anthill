@@ -1257,14 +1257,21 @@ function bytesToHex(bytes) {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Send a signed WebSocket message.
+// Send a signed WebSocket message (falls back to unsigned over HTTP).
 async function wsSendSigned(payload) {
   if (!state.ws) return;
-  const credential = getCredential();
-  const deviceId = localStorage.getItem('anthill_device_id') || '';
   const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  const envelope = await hmacSign(credential, deviceId, payloadStr);
-  state.ws.send(JSON.stringify(envelope));
+
+  if (window.crypto && window.crypto.subtle) {
+    // HTTPS — sign the message.
+    const credential = getCredential();
+    const deviceId = localStorage.getItem('anthill_device_id') || '';
+    const envelope = await hmacSign(credential, deviceId, payloadStr);
+    state.ws.send(JSON.stringify(envelope));
+  } else {
+    // HTTP — send unsigned (server accepts both).
+    state.ws.send(payloadStr);
+  }
 }
 
 // --- Authenticated fetch ---
