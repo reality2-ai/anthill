@@ -726,7 +726,24 @@ function handleEvent(msg) {
           state.messages[bot] = msgs;
         }
       }
+      // Restore running tasks from server snapshot (survives reconnect/refresh).
+      // Clear all tasks first — server is authoritative. Bots with no running
+      // tasks won't appear in msg.tasks, so stale entries must be wiped.
+      for (const botId of Object.keys(state.tasks)) {
+        state.tasks[botId] = [];
+      }
+      if (msg.tasks) {
+        for (const [bot, tasks] of Object.entries(msg.tasks)) {
+          state.tasks[bot] = tasks.map(t => ({
+            id: t.task_id,
+            preview: t.preview,
+            startTime: Date.now() - (t.elapsed_secs * 1000),
+            progress: [],
+          }));
+        }
+      }
       renderBotList();
+      renderTasks();
       if (state.activeBot) renderChat();
       break;
 
@@ -762,6 +779,7 @@ function handleEvent(msg) {
           // Keep last 20 progress entries.
           if (task.progress.length > 20) task.progress = task.progress.slice(-20);
           renderTasks();
+          if (currentTab === 'workers') renderWorkers();
           // Auto-switch to Workers tab if a question comes in.
           if (msg.kind === 'question' && msg.bot === state.activeBot) switchTab('workers');
         }
@@ -774,6 +792,7 @@ function handleEvent(msg) {
       }
       renderTasks();
       renderBotList();
+      if (currentTab === 'workers') renderWorkers();
       break;
 
     case 'task_error':
@@ -783,6 +802,7 @@ function handleEvent(msg) {
           errTask.lastProgress = '⚠️ ' + msg.error;
           errTask.error = true;
           renderTasks();
+          if (currentTab === 'workers') renderWorkers();
         }
       }
       break;
