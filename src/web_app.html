@@ -439,6 +439,19 @@
     <button onclick="showDevicesModal()" style="width:100%;background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px;cursor:pointer;font-size:13px">Manage Devices</button>
   </div>
   <div style="padding:8px 12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">
+    <details style="cursor:pointer">
+      <summary style="margin-bottom:4px">Colony Key</summary>
+      <div style="margin-top:6px;padding:6px;background:var(--bg);border-radius:4px;font-family:var(--mono)">
+        <div>Export:</div>
+        <div style="color:var(--green)">anthill --export-key</div>
+        <div style="color:var(--green)">anthill --export-key --qr</div>
+        <div style="margin-top:4px">Import:</div>
+        <div style="color:var(--green)">anthill --import-key &lt;key&gt;</div>
+        <div style="margin-top:4px;color:var(--yellow)">Back up your colony key! If lost, encrypted backups and device credentials cannot be recovered.</div>
+      </div>
+    </details>
+  </div>
+  <div style="padding:8px 12px;font-size:11px;color:var(--text-dim);border-top:1px solid #333">
     <div id="device-name-display" style="margin-bottom:4px"></div>
     ANTS: Autonomous iNTelligenceS
   </div>
