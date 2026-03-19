@@ -63,7 +63,6 @@ pub async fn run_web_server(
         .route("/api/backends", get(list_backends))
         .route("/api/auth/devices", get(auth_list_devices))
         .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
-        .route("/api/auth/join-code", post(auth_generate_join_code))
         .route("/api/auth/qr-join", get(auth_qr_join))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -557,24 +556,6 @@ async fn auth_revoke_device(
     } else {
         StatusCode::NOT_FOUND
     }
-}
-
-/// POST /api/auth/join-code — generate a join code (auth via middleware).
-async fn auth_generate_join_code(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    let mut trust = match state.trust.lock() {
-        Ok(t) => t,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    let code = trust.generate_join_code();
-    log::info!("Join code generated: {}", code);
-
-    Json(serde_json::json!({
-        "code": code,
-        "expires_in_seconds": 300,
-    })).into_response()
 }
 
 /// GET /api/auth/qr-join — generate join code + QR SVG (auth via middleware).
