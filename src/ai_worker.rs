@@ -380,13 +380,23 @@ pub async fn ai_worker_loop(
             knowledge_cache.archive_stale();
         }
 
+        // --- Special commands: /analyse and /reflect ---
+        let actual_message = if req.message.starts_with("/analyse ") {
+            let file_path = req.message.strip_prefix("/analyse ").unwrap().trim();
+            build_analyse_message(file_path, &config.working_dir, &knowledge_file)
+        } else if req.message == "/reflect" {
+            build_reflect_message(&knowledge_file)
+        } else {
+            req.message.clone()
+        };
+
         // Build the command for the selected backend.
         // Knowledge graph + episodes + user memory pre-loaded into the prompt.
-        let kg_rendered = knowledge_cache.render_for_prompt(&req.message, 4096);
+        let kg_rendered = knowledge_cache.render_for_prompt(&actual_message, 4096);
 
         // Load relevant episodes.
         let episodes_mem = crate::knowledge::EpisodicMemory::load(&episodes_file);
-        let relevant_episodes = episodes_mem.search(&req.message, 5);
+        let relevant_episodes = episodes_mem.search(&actual_message, 5);
         let episodes_rendered = episodes_mem.render(&relevant_episodes, 2048);
 
         let system_prompt = build_system_prompt(
@@ -399,7 +409,7 @@ pub async fn ai_worker_loop(
             &config.repos_dir,
         );
         let backends = config.backends.clone();
-        let message_for_backends = req.message.clone();
+        let message_for_backends = actual_message.clone();
         let system_prompt_for_backends = system_prompt.clone();
         let working_dir_for_backends = config.working_dir.clone();
         let skip_perms = config.skip_permissions;
@@ -853,4 +863,119 @@ fn build_system_prompt(
     }
 
     prompt
+}
+
+/// Build the message for /analyse <file> — thematic analysis of a document.
+fn build_analyse_message(file_path: &str, working_dir: &str, _knowledge_file: &Path) -> String {
+    use crate::thematic;
+
+    // Resolve the file path relative to working directory.
+    let full_path = if file_path.starts_with('/') {
+        std::path::PathBuf::from(file_path)
+    } else {
+        std::path::PathBuf::from(working_dir).join(file_path)
+    };
+
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Could not read '{}': {}", file_path, e),
+    };
+
+    let source_name = full_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+
+    let chunks = thematic::chunk_document(&content);
+
+    if chunks.len() <= 2 {
+        // Short document — single combined analysis prompt.
+        format!(
+            r#"Perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on this document: "{source_name}"
+
+Follow these phases:
+
+PHASE 2 — CODING: Extract all significant entities, concepts, decisions, tools, and facts.
+PHASE 3 — THEMES: Group codes into broader themes with support levels.
+PHASE 5 — RELATIONSHIPS: Identify relationships between entities with basis (observed/inferred/assumed).
+PHASE 6 — INTEGRATION: Read memory/knowledge.json and integrate the results:
+  - Add/update nodes for each code
+  - Add concept nodes for each theme, linked to member codes
+  - Add edges for each relationship (observed→0.7, inferred→0.4, assumed→0.3 confidence)
+  - Add "{source_name}" as an event node with today's date
+  - Don't duplicate existing nodes — update if better info available
+
+Write the updated knowledge.json. Then give a brief summary of what you found.
+
+DOCUMENT:
+{content}"#,
+            source_name = source_name,
+            content = content
+        )
+    } else {
+        // Long document — provide the first chunk with instructions for iterative analysis.
+        let first_chunk = &chunks[0];
+        format!(
+            r#"Perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on a large document: "{source_name}"
+The document has {n} chunks. This is chunk 1.
+
+PHASE 2 — CODING: Extract entities, concepts, decisions from this chunk.
+After coding this chunk, read the next chunk from the file and continue coding.
+When all chunks are coded, proceed to:
+PHASE 3 — THEMES: Group codes into themes.
+PHASE 5 — RELATIONSHIPS: Identify relationships with basis.
+PHASE 6 — INTEGRATION: Update memory/knowledge.json with results.
+
+The full document is at: {path}
+
+START WITH CHUNK 1:
+{chunk}"#,
+            source_name = source_name,
+            n = chunks.len(),
+            path = full_path.display(),
+            chunk = first_chunk
+        )
+    }
+}
+
+/// Build the message for /reflect — meta-analysis of the knowledge graph.
+fn build_reflect_message(knowledge_file: &Path) -> String {
+    let kg_content = std::fs::read_to_string(knowledge_file).unwrap_or_default();
+    let node_count = kg_content.matches("\"label\"").count();
+
+    format!(
+        r#"REFLECT on your knowledge graph (memory/knowledge.json).
+
+The graph currently has approximately {node_count} nodes. Perform meta-analysis:
+
+1. REVIEW ALL NODES AND EDGES — read memory/knowledge.json completely.
+
+2. IDENTIFY PATTERNS:
+   - Are there clusters of related nodes that should be linked by a theme/concept node?
+   - Are there implicit relationships that should be made explicit?
+   - Are there nodes that seem to be about the same thing but named differently? (merge them)
+
+3. TEST CONJECTURES:
+   - For each edge, does the current conversation history support or contradict it?
+   - Strengthen edges that are well-supported (increment 'survived' and 'tests')
+   - Weaken or mark edges that seem outdated (increment 'tests' only)
+
+4. DETECT CONTRADICTIONS:
+   - Are there edges between the same nodes that conflict?
+   - Flag these by adding a "contradiction" event node linked to both
+
+5. ASSESS IMPORTANCE:
+   - Which relationships are central to the project? (increase importance)
+   - Which are peripheral? (decrease importance)
+
+6. CONSOLIDATE:
+   - Merge duplicate nodes (keep the better summary, union tags)
+   - Collapse trivial chains (A→B→C where B adds nothing)
+   - Remove orphan nodes with no edges
+
+7. Write the updated knowledge.json and briefly summarise what changed.
+
+Current graph location: {path}"#,
+        node_count = node_count,
+        path = knowledge_file.display()
+    )
 }

@@ -32,6 +32,8 @@ const CMD_TYPE_CANCEL_ALL: u8 = 5;
 const CMD_TYPE_NEW: u8 = 6;
 const CMD_TYPE_STATUS: u8 = 7;
 const CMD_TYPE_FOLLOWUP: u8 = 8;
+const CMD_TYPE_ANALYSE: u8 = 9;
+const CMD_TYPE_REFLECT: u8 = 10;
 
 pub struct ConductorSentant {
     plugin_id: PluginId,
@@ -125,6 +127,18 @@ impl Sentant for ConductorSentant {
                         let payload = Self::encode_chat(chat_id);
                         actions.push(Action::plugin_call(
                             self.plugin_id, cli_plugin::CMD_FOLLOWUP, &payload,
+                        ));
+                    }
+                    CMD_TYPE_ANALYSE => {
+                        let payload = Self::encode_chat(chat_id);
+                        actions.push(Action::plugin_call(
+                            self.plugin_id, cli_plugin::CMD_ANALYSE, &payload,
+                        ));
+                    }
+                    CMD_TYPE_REFLECT => {
+                        let payload = Self::encode_chat(chat_id);
+                        actions.push(Action::plugin_call(
+                            self.plugin_id, cli_plugin::CMD_REFLECT, &payload,
                         ));
                     }
                     _ => {

@@ -29,6 +29,8 @@ pub const CMD_REPLY: u8 = 0x07;     // Pop response and send to Telegram
 pub const CMD_NEW_SESSION: u8 = 0x08; // Start new session
 pub const CMD_STATUS: u8 = 0x09;    // Show live status of workers
 pub const CMD_FOLLOWUP: u8 = 0x0A;  // Queue follow-up for a running task
+pub const CMD_ANALYSE: u8 = 0x0B;   // Thematic analysis of a file
+pub const CMD_REFLECT: u8 = 0x0C;   // Meta-analysis / reflect on knowledge graph
 
 const HELP_TEXT: &str = "\
 **anthill commands:**
@@ -40,6 +42,8 @@ const HELP_TEXT: &str = "\
 /cancel — cancel a running task (or /cancel <id>, /cancel all)
 /followup — queue a message for when the current task finishes
 /new — start a fresh conversation
+/analyse <file> — run thematic analysis on a file → knowledge graph
+/reflect — review and consolidate the knowledge graph
 
 **AI commands** (passed through to the active backend):
 
@@ -442,6 +446,58 @@ impl AiPlugin {
         }
     }
 
+    fn handle_analyse(&mut self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        // Pop the file path from the message queue.
+        let (_, text, source) = match self.message_queue.lock().ok().and_then(|mut q| q.pop_front()) {
+            Some(msg) => msg,
+            None => {
+                self.send_telegram(chat_id, "Usage: /analyse <file path>\nRuns thematic analysis on a file and integrates results into the knowledge graph.");
+                return;
+            }
+        };
+
+        let file_path = text.trim().to_string();
+        if file_path.is_empty() {
+            self.send_telegram(chat_id, "Usage: /analyse <file path>");
+            return;
+        }
+
+        self.send_telegram(chat_id, &format!("📊 Starting thematic analysis of '{}'...", file_path));
+
+        // Read the file content and build the analysis prompt.
+        // The AI will do the actual analysis — we build a combined prompt for short files
+        // or chunk for long ones.
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+
+        let _ = self.request_tx.send(CliRequest {
+            chat_id,
+            message: format!("/analyse {}", file_path),
+            new_session: false,
+            task_id,
+            source,
+        });
+    }
+
+    fn handle_reflect(&mut self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        self.send_telegram(chat_id, "🔍 Reflecting on knowledge graph...");
+
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+
+        let _ = self.request_tx.send(CliRequest {
+            chat_id,
+            message: "/reflect".into(),
+            new_session: false,
+            task_id,
+            source: "system".into(),
+        });
+    }
+
 }
 
 fn format_duration(secs: u64) -> String {
@@ -499,6 +555,8 @@ impl Plugin for AiPlugin {
             CMD_NEW_SESSION => { self.handle_new_session(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_STATUS => { self.handle_status(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_FOLLOWUP => { self.handle_followup(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_ANALYSE => { self.handle_analyse(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_REFLECT => { self.handle_reflect(data); PluginResult::Ok(PluginResponse::empty()) }
             _ => PluginResult::Error(PluginError::new(0xFF, "unknown command")),
         }
     }

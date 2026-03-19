@@ -184,11 +184,11 @@ impl Plugin for TelegramPlugin {
                 let cancel_task_id = parse_cancel_id(&msg.text);
 
                 // Store message text in the shared message queue (data plane).
-                // For /followup, strip the command prefix so the plugin gets just the content.
-                let queue_text = if cmd_type == 8 {
-                    msg.text.trim().strip_prefix("/followup").unwrap_or(&msg.text).trim().to_string()
-                } else {
-                    msg.text
+                // Strip command prefixes so the plugin gets just the content.
+                let queue_text = match cmd_type {
+                    8 => msg.text.trim().strip_prefix("/followup").unwrap_or(&msg.text).trim().to_string(),
+                    9 => msg.text.trim().strip_prefix("/analyse").or_else(|| msg.text.trim().strip_prefix("/analyze")).unwrap_or(&msg.text).trim().to_string(),
+                    _ => msg.text,
                 };
                 if let Ok(mut q) = self.message_queue.lock() {
                     q.push_back((msg.chat_id, queue_text, "telegram".into()));
@@ -231,6 +231,8 @@ fn classify_command(text: &str) -> u8 {
         s if s == "/cancel all" => 5,
         s if s == "/cancel" || s.starts_with("/cancel ") => 4,
         s if s == "/followup" || s.starts_with("/followup ") => 8,
+        s if s.starts_with("/analyse ") || s.starts_with("/analyze ") => 9,
+        "/reflect" => 10,
         _ => 0, // regular message
     }
 }
