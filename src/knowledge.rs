@@ -1612,60 +1612,81 @@ impl CachedGraph {
             r
         };
 
-        // Also scan topic graphs in memory/graphs/ for relevant context.
-        // Uses a cache to avoid re-parsing unchanged JSON files on every request.
+        // Use the META-GRAPH to find which topic graphs are relevant — don't scan all files.
+        // The meta-graph has nodes tagged "topic" that represent each graph file.
+        // Query the meta-graph for topics matching the message, then load only those.
         let graphs_dir = self.file_path.parent()
             .map(|p| p.join("graphs"));
         if let Some(dir) = graphs_dir {
             if dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    let remaining = max_chars.saturating_sub(meta_result.len());
-                    if remaining > 200 {
-                        let mut topic_context = String::new();
-                        let mut cache = self.topic_cache.lock().unwrap_or_else(|e| e.into_inner());
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.extension().map(|e| e == "json").unwrap_or(false) {
-                                let current_mtime = std::fs::metadata(&path)
-                                    .ok().and_then(|m| m.modified().ok());
+                let remaining = max_chars.saturating_sub(meta_result.len());
+                if remaining > 200 {
+                    // Find relevant topic names from the meta-graph.
+                    let relevant_topics: Vec<String> = {
+                        let graph = match self.graph.lock() {
+                            Ok(g) => g,
+                            Err(_) => return meta_result,
+                        };
+                        // Find topic nodes that match the message keywords.
+                        let keywords = extract_keywords(message);
+                        graph.graph.node_indices()
+                            .filter(|&idx| {
+                                let n = &graph.graph[idx];
+                                n.tags.iter().any(|t| t == "topic" || t == "graph")
+                            })
+                            .filter(|&idx| {
+                                let n = &graph.graph[idx];
+                                let label_lower = n.label.to_lowercase();
+                                // Match if any keyword appears in the topic label or summary.
+                                keywords.iter().any(|kw| label_lower.contains(kw)
+                                    || n.summary.to_lowercase().contains(kw))
+                                // Also always include "conversation" graph.
+                                || n.label == "conversation"
+                            })
+                            .map(|idx| graph.graph[idx].label.clone())
+                            .collect()
+                    };
 
-                                // Load from cache or disk (reload if mtime changed).
-                                let needs_load = match cache.get(&path) {
-                                    Some(cached) => cached.mtime != current_mtime,
-                                    None => true,
-                                };
-                                if needs_load {
-                                    let tg = KnowledgeGraph::load(&path);
-                                    cache.insert(path.clone(), CachedTopicGraph {
-                                        graph: tg,
-                                        mtime: current_mtime,
-                                    });
-                                }
+                    // Load only the relevant topic graphs (cached).
+                    let mut topic_context = String::new();
+                    let mut cache = self.topic_cache.lock().unwrap_or_else(|e| e.into_inner());
+                    for topic_name in &relevant_topics {
+                        let path = dir.join(format!("{}.json", topic_name));
+                        if !path.exists() { continue; }
 
-                                let topic = match cache.get(&path) {
-                                    Some(c) => &c.graph,
-                                    None => continue,
-                                };
-                                if topic.node_count() == 0 { continue; }
-                                let topic_name = path.file_stem()
-                                    .map(|s| s.to_string_lossy().to_string())
-                                    .unwrap_or_default();
-                                // Check if this topic is relevant to the message.
-                                let relevant = topic.relevant_subgraph(message, 10);
-                                if !relevant.is_empty() {
-                                    topic_context.push_str(&format!("\n### {} ({})\n",
-                                        topic_name, path.display()));
-                                    topic_context.push_str(&topic.render_subgraph(
-                                        &relevant,
-                                        remaining.saturating_sub(topic_context.len()) / 2,
-                                    ));
-                                }
-                                if topic_context.len() > remaining { break; }
-                            }
+                        let current_mtime = std::fs::metadata(&path)
+                            .ok().and_then(|m| m.modified().ok());
+
+                        let needs_load = match cache.get(&path) {
+                            Some(cached) => cached.mtime != current_mtime,
+                            None => true,
+                        };
+                        if needs_load {
+                            let tg = KnowledgeGraph::load(&path);
+                            cache.insert(path.clone(), CachedTopicGraph {
+                                graph: tg,
+                                mtime: current_mtime,
+                            });
                         }
-                        if !topic_context.is_empty() {
-                            meta_result.push_str(&topic_context);
+
+                        let topic = match cache.get(&path) {
+                            Some(c) => &c.graph,
+                            None => continue,
+                        };
+                        if topic.node_count() == 0 { continue; }
+
+                        let relevant = topic.relevant_subgraph(message, 10);
+                        if !relevant.is_empty() {
+                            topic_context.push_str(&format!("\n### {}\n", topic_name));
+                            topic_context.push_str(&topic.render_subgraph(
+                                &relevant,
+                                remaining.saturating_sub(topic_context.len()) / 2,
+                            ));
                         }
+                        if topic_context.len() > remaining { break; }
+                    }
+                    if !topic_context.is_empty() {
+                        meta_result.push_str(&topic_context);
                     }
                 }
             }
