@@ -750,7 +750,12 @@ function handleEvent(msg) {
 
     case 'user_message':
       if (!state.messages[msg.bot]) state.messages[msg.bot] = [];
-      state.messages[msg.bot].push({ role: 'user', text: msg.text });
+      // Skip if we already added this message locally (immediate echo).
+      const msgs = state.messages[msg.bot];
+      const last = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+      if (!(last && last.role === 'user' && last.text === msg.text)) {
+        msgs.push({ role: 'user', text: msg.text });
+      }
       if (msg.bot === state.activeBot) renderChat();
       break;
 
@@ -948,7 +953,11 @@ function sendMessage() {
     clearQuote();
   }
 
-  // Message will appear via the user_message broadcast event.
+  // Show the message immediately (don't wait for server broadcast).
+  if (!state.messages[state.activeBot]) state.messages[state.activeBot] = [];
+  state.messages[state.activeBot].push({ role: 'user', text: fullMessage });
+  showTyping(state.activeBot);
+
   wsSendSigned({
     type: 'chat',
     bot: state.activeBot,
