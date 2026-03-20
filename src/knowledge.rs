@@ -1711,6 +1711,9 @@ impl CachedGraph {
     ) -> String {
         // Phase 1: Semantic search (async, no graph lock held).
         let similar = self.semantic_search(ollama, message, 10).await;
+        if similar.is_empty() {
+            log::debug!("Semantic search returned no results — falling back to keyword only");
+        }
 
         self.maybe_reload();
         let graph = match self.graph.lock() {

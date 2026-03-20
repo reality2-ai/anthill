@@ -293,7 +293,7 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                     let item_type = json.pointer("/item/type").and_then(|t| t.as_str()).unwrap_or("");
                     if item_type == "command_execution" {
                         let cmd = json.pointer("/item/command").and_then(|c| c.as_str()).unwrap_or("");
-                        let short = if cmd.len() > 60 { &cmd[..57] } else { cmd };
+                        let short = if cmd.len() > 60 { slice_safe(cmd, 57) } else { cmd };
                         (Some(("tool_use".into(), format!("Running: {}", short))), None)
                     } else {
                         (None, None)
@@ -1062,11 +1062,11 @@ fn build_system_prompt(
     ));
 
     // Dynamic sections — fit within remaining budget.
+    // Knowledge graph gets the lion's share since it drives reasoning quality.
     let remaining = MAX_SYSTEM_PROMPT.saturating_sub(prompt.len());
-    // Split budget: 50% knowledge graph, 25% episodes, 25% user memory.
-    let kg_budget = remaining / 2;
-    let ep_budget = remaining / 4;
-    let um_budget = remaining / 4;
+    let kg_budget = remaining * 70 / 100;   // 70% — knowledge graph (primary context)
+    let um_budget = remaining * 15 / 100;   // 15% — user memory (preferences)
+    let ep_budget = remaining * 15 / 100;   // 15% — episodes (narrative color)
 
     // Knowledge graph context (highest priority).
     if !kg_rendered.is_empty() {

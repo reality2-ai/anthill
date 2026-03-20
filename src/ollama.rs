@@ -68,14 +68,21 @@ impl OllamaClient {
         if let Some(ref path) = self.cache_file {
             let cache = self.embed_cache.clone();
             let path = path.clone();
-            // Spawn blocking to avoid holding the async lock.
             tokio::spawn(async move {
                 let data = cache.lock().await;
-                if let Ok(json) = serde_json::to_string(&*data) {
-                    let tmp = path.with_extension("json.tmp");
-                    if std::fs::write(&tmp, &json).is_ok() {
-                        let _ = std::fs::rename(&tmp, &path);
+                match serde_json::to_string(&*data) {
+                    Ok(json) => {
+                        let tmp = path.with_extension("json.tmp");
+                        if let Err(e) = std::fs::write(&tmp, &json) {
+                            log::warn!("Embedding cache write failed: {}", e);
+                            return;
+                        }
+                        if let Err(e) = std::fs::rename(&tmp, &path) {
+                            log::warn!("Embedding cache rename failed: {}", e);
+                            let _ = std::fs::remove_file(&tmp);
+                        }
                     }
+                    Err(e) => log::warn!("Embedding cache serialization failed: {}", e),
                 }
             });
         }

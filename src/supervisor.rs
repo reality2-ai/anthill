@@ -274,7 +274,10 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                     continue;
                 }
 
-                let delay = sup_cfg.restart_delay_secs * (*count as u64);
+                // Exponential backoff: base × 2^(attempt-1), capped at 5 minutes.
+                let delay = (sup_cfg.restart_delay_secs as f64
+                    * 2_f64.powi((*count as i32 - 1).min(6)))
+                    .min(300.0) as u64;
                 log::info!(
                     "Restarting ant '{}' in {}s (attempt {})",
                     name, delay, count
