@@ -989,6 +989,23 @@ async function loadGraph(graphName) {
         );
       });
 
+    // Subtle spin on connected nodes — barely perceptible, like satellites.
+    const connectedNodes = new Set();
+    data.links.forEach(l => {
+      connectedNodes.add(l.source.id !== undefined ? l.source.id : l.source);
+      connectedNodes.add(l.target.id !== undefined ? l.target.id : l.target);
+    });
+    graphInstance.onEngineTick(() => {
+      const t = Date.now() * 0.0003; // very slow
+      data.nodes.forEach(n => {
+        if (connectedNodes.has(n.id) && n.__threeObj) {
+          // Each node spins at a slightly different rate based on its id.
+          const rate = 0.002 + (n.id % 7) * 0.0003;
+          n.__threeObj.rotation.y += rate;
+        }
+      });
+    });
+
     // Resize handling.
     const ro = new ResizeObserver(() => {
       if (graphInstance) {
