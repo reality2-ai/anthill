@@ -806,19 +806,23 @@ impl KnowledgeGraph {
             return all;
         }
 
-        // Score each node by keyword hits.
-        let mut scores: HashMap<NodeIndex, u32> = HashMap::new();
+        let total_nodes = self.graph.node_count().max(1) as f64;
+
+        // Score each node by TF-IDF weighted keyword hits.
+        let mut scores: HashMap<NodeIndex, f64> = HashMap::new();
         for kw in &keywords {
             if let Some(nodes) = self.keyword_index.get(kw) {
+                // IDF: log(total_nodes / docs_containing_term)
+                let idf = (total_nodes / nodes.len().max(1) as f64).ln().max(0.1);
                 for &idx in nodes {
-                    *scores.entry(idx).or_default() += 1;
+                    *scores.entry(idx).or_default() += idf;
                 }
             }
         }
 
-        // Sort by score descending, take top N/2.
-        let mut scored: Vec<(NodeIndex, u32)> = scores.into_iter().collect();
-        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        // Sort by TF-IDF score descending, take top N/2.
+        let mut scored: Vec<(NodeIndex, f64)> = scores.into_iter().collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let direct_limit = max_nodes / 2;
         let direct: Vec<NodeIndex> = scored.iter().take(direct_limit).map(|(idx, _)| *idx).collect();
 
@@ -855,6 +859,44 @@ impl KnowledgeGraph {
     /// Render a subset of nodes as natural language.
     pub fn render_subgraph(&self, indices: &[NodeIndex], max_chars: usize) -> String {
         self.render_nodes(indices, max_chars)
+    }
+
+    /// Render query result as compact JSON — easier for AI to parse than prose.
+    /// Each node with its edges, sorted by relevance. Truncated to max_chars.
+    #[allow(dead_code)]
+    pub fn render_query_json(&self, result: &QueryResult, max_chars: usize) -> String {
+        let mut nodes_json: Vec<serde_json::Value> = Vec::new();
+
+        for (idx, node, score) in &result.nodes {
+            let edges: Vec<serde_json::Value> = self.graph.edges(*idx)
+                .filter(|e| e.weight().confidence >= MIN_PROMPT_CONFIDENCE)
+                .map(|e| {
+                    let target = &self.graph[e.target()];
+                    serde_json::json!({
+                        "to": target.label,
+                        "rel": e.weight().relation,
+                        "conf": format!("{:.0}%", e.weight().confidence * 100.0),
+                    })
+                })
+                .collect();
+
+            nodes_json.push(serde_json::json!({
+                "label": node.label,
+                "kind": format!("{:?}", node.kind).to_lowercase(),
+                "summary": node.summary,
+                "score": format!("{:.2}", score),
+                "edges": edges,
+            }));
+
+            // Check budget.
+            let partial = serde_json::to_string(&nodes_json).unwrap_or_default();
+            if partial.len() > max_chars {
+                nodes_json.pop();
+                break;
+            }
+        }
+
+        serde_json::to_string_pretty(&nodes_json).unwrap_or_else(|_| "[]".into())
     }
 
     fn render_nodes(&self, indices: &[NodeIndex], max_chars: usize) -> String {
@@ -1719,7 +1761,8 @@ impl CachedGraph {
         result.nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         let method = if !similar.is_empty() { "Hybrid (semantic + keyword)" } else { "Keyword" };
-        let mut r = graph.render_query_result(&result, max_chars);
+        // Use compact JSON for structured results — AI parses it more accurately.
+        let mut r = graph.render_query_json(&result, max_chars);
         r.push_str(&format!("\n({} search. Read knowledge.json for full graph.)\n", method));
         r
     }

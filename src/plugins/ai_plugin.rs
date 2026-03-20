@@ -287,6 +287,9 @@ impl AiPlugin {
                     .map(|t| t.task_id);
                 if let Some(id) = latest {
                     if let Some(task) = map.remove(&id) {
+                        if let Ok(mut s) = task.state.lock() {
+                            *s = crate::ai_worker::TaskState::Cancelled;
+                        }
                         task.handle.abort();
                         self.send_telegram(chat_id, &format!("Cancelled task #{}.", id));
                     }
@@ -294,6 +297,9 @@ impl AiPlugin {
                     self.send_telegram(chat_id, "No running tasks.");
                 }
             } else if let Some(task) = map.remove(&task_id) {
+                if let Ok(mut s) = task.state.lock() {
+                    *s = crate::ai_worker::TaskState::Cancelled;
+                }
                 task.handle.abort();
                 self.send_telegram(chat_id, &format!("Cancelled task #{}.", task_id));
             } else {

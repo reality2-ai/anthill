@@ -71,6 +71,20 @@ pub struct UserStats {
     pub started: Option<Instant>,
 }
 
+/// Task lifecycle state.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub enum TaskState {
+    /// Task is running and producing output.
+    Running,
+    /// Task was cancelled by user (via /cancel or !interrupt).
+    Cancelled,
+    /// Task completed successfully.
+    Completed,
+    /// Task failed (backend error, timeout, etc.)
+    Failed(String),
+}
+
 /// Tracks a running task.
 #[derive(Debug)]
 pub struct RunningTask {
@@ -83,6 +97,8 @@ pub struct RunningTask {
     pub last_progress: Arc<Mutex<Option<String>>>,
     /// Which AI backend is running this task.
     pub backend: Arc<Mutex<String>>,
+    /// Current lifecycle state.
+    pub state: Arc<Mutex<TaskState>>,
 }
 
 /// A queued follow-up message for a running task's session.
@@ -193,12 +209,17 @@ pub fn detect_backends() -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Build command args for a specific backend.
+/// Build command and args for a specific backend.
+///
+/// To add a new backend:
+/// 1. Add a match arm here
+/// 2. Add a parse case in `parse_backend_line`
+/// 3. Add detection in `detect_backends`
 fn build_backend_command(
     backend: &str,
     message: &str,
     system_prompt: &str,
-    _working_dir: &str,
+    working_dir: &str,
     skip_permissions: bool,
     continue_session: bool,
 ) -> (String, Vec<String>) {
@@ -208,8 +229,20 @@ fn build_backend_command(
             args.push(message.to_string());
             ("codex".to_string(), args)
         }
+        "gemini" => {
+            // Google Gemini CLI.
+            let mut args = vec![
+                "-p".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+            ];
+            args.push("--append-system-prompt".to_string());
+            args.push(system_prompt.to_string());
+            args.push(message.to_string());
+            ("gemini".to_string(), args)
+        }
         _ => {
-            // Claude (default).
+            // Claude (default) — also handles "claude" explicitly.
             let mut args = vec![
                 "-p".to_string(),
                 "--verbose".to_string(),
@@ -221,6 +254,10 @@ fn build_backend_command(
             }
             if continue_session {
                 args.push("-c".to_string());
+            }
+            if !working_dir.is_empty() {
+                args.push("--cwd".to_string());
+                args.push(working_dir.to_string());
             }
             args.push("--append-system-prompt".to_string());
             args.push(system_prompt.to_string());
@@ -425,7 +462,9 @@ pub async fn ai_worker_loop(
     let knowledge_cache = crate::knowledge::CachedGraph::new(&knowledge_file);
 
     // Ollama client for embeddings and as an AI backend.
-    let ollama_client = crate::ollama::OllamaClient::new(None, None);
+    // Persistent embedding cache stored in the memory directory.
+    let embed_cache_path = config.memory_dir.join("embeddings.json");
+    let ollama_client = crate::ollama::OllamaClient::with_cache(None, None, embed_cache_path);
 
     // Episodic memory file.
     let episodes_file = config.memory_dir.join("episodes.json");
@@ -923,6 +962,11 @@ pub async fn ai_worker_loop(
                 if let Ok(mut map) = tm.lock() {
                     if let Some(task) = map.remove(&task_id) {
                         dur = task.started.elapsed().as_secs();
+                        if let Ok(mut s) = task.state.lock() {
+                            if *s == TaskState::Running {
+                                *s = TaskState::Completed;
+                            }
+                        }
                     }
                 }
                 dur
@@ -967,6 +1011,7 @@ pub async fn ai_worker_loop(
                     handle,
                     last_progress: live_progress,
                     backend: live_backend,
+                    state: Arc::new(Mutex::new(TaskState::Running)),
                 },
             );
         }

@@ -17,6 +17,9 @@ const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 /// Default embedding model.
 const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
 
+/// Maximum number of cached embeddings (prevents unbounded memory growth).
+const MAX_CACHE_ENTRIES: usize = 500;
+
 /// Ollama client for embeddings and chat.
 #[derive(Clone)]
 pub struct OllamaClient {
@@ -25,6 +28,8 @@ pub struct OllamaClient {
     client: reqwest::Client,
     /// Cache: label → embedding vector. Avoids re-embedding unchanged nodes.
     embed_cache: Arc<Mutex<std::collections::HashMap<String, Vec<f32>>>>,
+    /// Path for persisting the cache to disk. Empty = no persistence.
+    cache_file: Option<std::path::PathBuf>,
 }
 
 impl OllamaClient {
@@ -38,6 +43,41 @@ impl OllamaClient {
                 .build()
                 .unwrap_or_default(),
             embed_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            cache_file: None,
+        }
+    }
+
+    /// Create with persistent disk cache.
+    pub fn with_cache(base_url: Option<&str>, embed_model: Option<&str>, cache_path: std::path::PathBuf) -> Self {
+        let mut client = Self::new(base_url, embed_model);
+        // Load existing cache from disk.
+        if cache_path.exists() {
+            if let Ok(data) = std::fs::read_to_string(&cache_path) {
+                if let Ok(cache) = serde_json::from_str::<std::collections::HashMap<String, Vec<f32>>>(&data) {
+                    log::info!("Loaded {} cached embeddings from {}", cache.len(), cache_path.display());
+                    client.embed_cache = Arc::new(Mutex::new(cache));
+                }
+            }
+        }
+        client.cache_file = Some(cache_path);
+        client
+    }
+
+    /// Persist the cache to disk (non-blocking, best-effort).
+    fn save_cache(&self) {
+        if let Some(ref path) = self.cache_file {
+            let cache = self.embed_cache.clone();
+            let path = path.clone();
+            // Spawn blocking to avoid holding the async lock.
+            tokio::spawn(async move {
+                let data = cache.lock().await;
+                if let Ok(json) = serde_json::to_string(&*data) {
+                    let tmp = path.with_extension("json.tmp");
+                    if std::fs::write(&tmp, &json).is_ok() {
+                        let _ = std::fs::rename(&tmp, &path);
+                    }
+                }
+            });
         }
     }
 
@@ -80,7 +120,7 @@ impl OllamaClient {
         Ok(result.embeddings)
     }
 
-    /// Embed a single text (with caching).
+    /// Embed a single text (with caching and LRU eviction).
     pub async fn embed_cached(&self, key: &str, text: &str) -> Result<Vec<f32>, String> {
         {
             let cache = self.embed_cache.lock().await;
@@ -95,8 +135,17 @@ impl OllamaClient {
 
         {
             let mut cache = self.embed_cache.lock().await;
+            // Evict oldest entries if cache exceeds limit.
+            if cache.len() >= MAX_CACHE_ENTRIES {
+                let keys: Vec<String> = cache.keys().take(cache.len() / 4).cloned().collect();
+                for k in keys { cache.remove(&k); }
+                log::debug!("Embedding cache evicted to {} entries", cache.len());
+            }
             cache.insert(key.to_string(), vec.clone());
         }
+
+        // Persist to disk periodically (after every new embedding).
+        self.save_cache();
 
         Ok(vec)
     }
@@ -112,13 +161,16 @@ impl OllamaClient {
     }
 
     /// Find the top-N most similar texts from a set of embeddings.
+    /// Filters out candidates below a minimum similarity threshold (0.3).
     pub fn top_similar(
         query_embedding: &[f32],
         candidates: &[(String, Vec<f32>)],
         top_n: usize,
     ) -> Vec<(String, f32)> {
+        const MIN_SIMILARITY: f32 = 0.3;
         let mut scored: Vec<(String, f32)> = candidates.iter()
             .map(|(label, vec)| (label.clone(), Self::cosine_similarity(query_embedding, vec)))
+            .filter(|(_, sim)| *sim >= MIN_SIMILARITY)
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored.truncate(top_n);
