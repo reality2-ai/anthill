@@ -946,8 +946,8 @@ async function loadGraph(graphName) {
     }
 
     graphInstance
-      .linkWidth(l => Math.max(2, l.confidence * 6))
-      .linkOpacity(0.8)
+      .linkWidth(l => Math.max(1, l.confidence * 3))
+      .linkOpacity(0.7)
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
         if (l.confidence >= 0.5) return '#fbbf24';
@@ -989,52 +989,40 @@ async function loadGraph(graphName) {
         );
       });
 
-    // Subtle tumble on connected nodes — slerp between random target orientations.
+    // Subtle tumble on connected nodes — sine-driven rotation on 3 axes.
     const connectedNodes = new Set();
     data.links.forEach(l => {
       connectedNodes.add(l.source.id !== undefined ? l.source.id : l.source);
       connectedNodes.add(l.target.id !== undefined ? l.target.id : l.target);
     });
 
-    // Per-node tumble state: current quaternion, target quaternion, interpolation progress.
-    const tumbleState = {};
-    function randomQuat() {
-      // Random unit quaternion (uniform distribution on SO(3)).
-      const u1 = Math.random(), u2 = Math.random() * 6.2832, u3 = Math.random() * 6.2832;
-      const s1 = Math.sqrt(1 - u1), s2 = Math.sqrt(u1);
-      return new THREE.Quaternion(s1 * Math.sin(u2), s1 * Math.cos(u2), s2 * Math.sin(u3), s2 * Math.cos(u3));
-    }
+    // Per-node random phase offsets and frequencies.
+    const tumble = {};
     data.nodes.forEach(n => {
       if (connectedNodes.has(n.id)) {
-        const q = randomQuat();
-        tumbleState[n.id] = {
-          current: q.clone(),
-          target: randomQuat(),
-          t: 0,
-          // Each node transitions at a slightly different speed (8–15 seconds per slerp).
-          speed: 0.0001 + (((n.id * 2654435761) >>> 0) % 100) * 0.000002,
+        const h = ((n.id * 2654435761) >>> 0); // hash
+        tumble[n.id] = {
+          // Random phases (0–2π).
+          px: ((h >> 0) & 0xFF) / 255 * 6.28,
+          py: ((h >> 8) & 0xFF) / 255 * 6.28,
+          pz: ((h >> 16) & 0xFF) / 255 * 6.28,
+          // Slightly different frequencies so nodes don't sync.
+          fx: 0.07 + ((h >> 4) & 0xF) / 150,
+          fy: 0.09 + ((h >> 12) & 0xF) / 150,
+          fz: 0.06 + ((h >> 20) & 0xF) / 150,
         };
       }
     });
 
     graphInstance.onEngineTick(() => {
+      const t = Date.now() * 0.001; // seconds
       for (const n of data.nodes) {
-        const st = tumbleState[n.id];
-        if (!st || !n.__threeObj) continue;
-
-        // Advance interpolation.
-        st.t += st.speed;
-        if (st.t >= 1) {
-          // Arrived at target — pick a new target for the next slerp.
-          st.current.copy(st.target);
-          st.target = randomQuat();
-          st.t = 0;
-        }
-
-        // Slerp with sine easing — slow at endpoints, smooth through middle.
-        const eased = (1 - Math.cos(st.t * Math.PI)) * 0.5;
-        const q = st.current.clone().slerp(st.target, eased);
-        n.__threeObj.quaternion.copy(q);
+        const tb = tumble[n.id];
+        if (!tb || !n.__threeObj) continue;
+        // Sine-driven rotation: smooth, continuously changing direction.
+        n.__threeObj.rotation.x = Math.sin(t * tb.fx + tb.px) * 0.3;
+        n.__threeObj.rotation.y = Math.sin(t * tb.fy + tb.py) * 0.3;
+        n.__threeObj.rotation.z = Math.sin(t * tb.fz + tb.pz) * 0.2;
       }
     });
 
