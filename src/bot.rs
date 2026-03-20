@@ -112,6 +112,7 @@ pub async fn run_bot(
     backup::ensure_git_repo(std::path::Path::new(&working_dir))?;
 
     let backup_working_dir = working_dir.clone();
+    let maintenance_memory_dir = memory_dir.clone();
     let worker_config = ai_worker::CliWorkerConfig {
         working_dir,
         memory_dir,
@@ -154,6 +155,14 @@ pub async fn run_bot(
             backup_credential,
         ));
     }
+
+    // Spawn background knowledge graph maintenance daemon.
+    tokio::spawn(crate::maintenance::maintenance_loop(crate::maintenance::MaintenanceConfig {
+        memory_dir: maintenance_memory_dir,
+        consolidation_interval: std::time::Duration::from_secs(3600),  // 1 hour
+        cross_link_interval: std::time::Duration::from_secs(21600),    // 6 hours
+        ant_name: bot_name.clone(),
+    }));
 
     bus.init_all();
     log::info!("[{}] running", bot_name);

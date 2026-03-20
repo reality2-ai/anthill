@@ -471,6 +471,52 @@ impl KnowledgeGraph {
         self.graph.node_count()
     }
 
+    /// All node labels (for cross-referencing between graphs).
+    pub fn all_node_labels(&self) -> Vec<String> {
+        self.graph.node_indices()
+            .map(|idx| self.graph[idx].label.clone())
+            .collect()
+    }
+
+    /// Add a topic node (for the meta-graph).
+    pub fn add_topic_node(&mut self, topic: &str) -> NodeIndex {
+        self.graph.add_node(KnowledgeNode {
+            label: topic.into(),
+            kind: NodeKind::Concept,
+            summary: format!("Topic graph: memory/graphs/{}.json", topic),
+            created: String::new(),
+            updated: String::new(),
+            tags: vec!["graph".into(), "topic".into()],
+        })
+    }
+
+    /// Check if an edge with a given relation exists between two nodes.
+    pub fn has_edge_between(&self, from: NodeIndex, to: NodeIndex, relation: &str) -> bool {
+        self.graph.edges_directed(from, Direction::Outgoing)
+            .any(|e| e.target() == to && e.weight().relation == relation)
+    }
+
+    /// Add a cross-reference edge between two topic nodes in the meta-graph.
+    pub fn add_cross_link(&mut self, from: NodeIndex, to: NodeIndex, context: &str) {
+        let edge = KnowledgeEdge {
+            relation: "shares_entities".into(),
+            context: context.into(),
+            since: String::new(),
+            confidence: 0.6,
+            tests: 0,
+            survived: 0,
+            basis: Basis::Observed,
+            last_tested: String::new(),
+            importance: 0.5,
+            references: 0,
+            valid_from: String::new(),
+            valid_until: String::new(),
+            view: EdgeView::Semantic,
+            source: "maintenance: cross-link".into(),
+        };
+        self.graph.add_edge(from, to, edge);
+    }
+
     /// Export the graph in a format suitable for 3D force-directed visualization.
     /// Returns { nodes: [...], links: [...] } compatible with 3d-force-graph.
     pub fn to_visualization(&self) -> serde_json::Value {
