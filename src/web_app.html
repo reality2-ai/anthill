@@ -1032,9 +1032,9 @@ async function loadGraph(graphName) {
       .d3VelocityDecay(0.4);
     // Weaker repulsion between unconnected nodes, keep connected nodes close.
     const charge = graphInstance.d3Force('charge');
-    if (charge) charge.strength(-5);
+    if (charge) charge.strength(-5);   // unconnected nodes barely push apart
     const link = graphInstance.d3Force('link');
-    if (link) link.distance(15).strength(1.5);
+    if (link) link.distance(50).strength(1.5);  // connected nodes: visible gap between them
 
     graphInstance.onEngineTick(() => {
       const t = Date.now() * 0.001;
