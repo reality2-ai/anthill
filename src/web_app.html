@@ -958,7 +958,7 @@ async function loadGraph(graphName) {
     }
 
     graphInstance
-      .linkWidth(l => Math.max(1, l.confidence * 3))
+      .linkWidth(l => Math.max(0.5, l.confidence * 1.5))
       .linkOpacity(0.6)
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
@@ -966,8 +966,14 @@ async function loadGraph(graphName) {
         if (l.confidence >= 0.3) return '#fb923c';
         return '#f87171';
       })
-      .linkDirectionalArrowLength(3)
-      .linkDirectionalArrowRelPos(1)
+      .linkDirectionalArrowLength(6)
+      .linkDirectionalArrowRelPos(0.95)
+      .linkDirectionalArrowColor(l => {
+        if (l.confidence >= 0.8) return '#4ade80';
+        if (l.confidence >= 0.5) return '#fbbf24';
+        if (l.confidence >= 0.3) return '#fb923c';
+        return '#f87171';
+      })
       .backgroundColor('#1a1a2e')
       .enableNodeDrag(true)
       .onNodeClick(node => {
