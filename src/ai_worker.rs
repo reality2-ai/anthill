@@ -1274,36 +1274,66 @@ DOCUMENT:
             content = content
         )
     } else {
-        // Long document — instruct the AI to read the file in full and perform all phases.
+        // Long document — full 6-phase thematic analysis.
         format!(
             r#"You MUST perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on a large document.
 Document: "{source_name}" ({n} chunks, located at: {path})
 
-This is a large document. Follow this process:
+Follow these phases IN ORDER. Complete each phase before starting the next.
+Show your work for each phase.
 
-STEP 1: Read the ENTIRE file at {path} — all of it, not just the first part.
+PHASE 1 — FAMILIARISATION:
+Read the ENTIRE file at {path} — all of it, not just the first part.
+Write a 2-3 sentence overview of what the document covers.
 
-STEP 2 — CODING: As you read, extract every significant entity, concept, decision,
-tool, person, and fact. For each, note: label, kind, summary, evidence quote.
+PHASE 2 — CODING:
+Extract every significant entity, concept, decision, tool, person, and fact.
+For each code, state:
+  - Label (short name)
+  - Kind (person/project/server/tool/concept/decision/event/fact)
+  - One-line summary
+  - Evidence (quote or paraphrase from the document)
 
-STEP 3 — THEMES: After reading everything, group codes into 3-8 themes.
-Each theme: name, central concept, member codes, support level (0.0-1.0).
+PHASE 3 — THEME GENERATION:
+Group your codes into 3-8 themes. Each theme is a pattern of shared meaning.
+For each theme, state:
+  - Theme name
+  - Central concept
+  - Which codes belong to it
+  - Support level (how well-evidenced: 0.0-1.0)
 
-STEP 4 — REVIEW: Go back and verify your themes against the source.
-Did you miss anything? Are themes well-supported?
+PHASE 4 — REVIEW:
+Re-read the document. Check each theme against the source:
+  - Does the evidence support the theme?
+  - Did you miss any codes?
+  - Are any themes too broad or too narrow?
+Revise themes and codes as needed.
 
-STEP 5 — RELATIONSHIPS: Identify relationships between entities.
-Each: from, to, relation, view (semantic/temporal/causal/entity),
-basis (observed→0.7, inferred→0.4, assumed→0.3), source: "{source_name}".
+PHASE 5 — RELATIONSHIPS:
+Identify relationships between entities. For each relationship:
+  - From → To (must match code labels)
+  - Relation type (uses, deployed_on, depends_on, part_of, decided, etc.)
+  - View: semantic, temporal, causal, or entity
+  - Basis: observed (explicit in text, confidence 0.7), inferred (implied, 0.4), or assumed (interpretation, 0.3)
+  - Source: "{source_name}"
 
-STEP 6 — INTEGRATION:
-  - Determine a topic name (lowercase-hyphenated)
-  - Run: mkdir -p memory/graphs/
-  - Write all nodes and edges to memory/graphs/<topic>.json (NOT knowledge.json)
-  - Update the meta-graph (knowledge.json) with a node for this topic + links to related topics
-  - Add "{source_name}" as an event node, set valid_from to today
+PHASE 6 — INTEGRATION:
+Determine the topic name for this document (lowercase-hyphenated).
+Run: mkdir -p memory/graphs/
+Read or create memory/graphs/<topic>.json and UPDATE it:
+  1. For each code → add or update a node (don't duplicate existing ones)
+  2. For each theme → add a concept node, link member codes with "part_of" edges
+  3. For each relationship → add an edge with confidence, basis, view, and source fields
+  4. Add "{source_name}" as an event node with today's date
+  5. Set valid_from on all new edges to today's date
+  6. Write the updated memory/graphs/<topic>.json
 
-Show your work for each step. Write the updated graphs. Summarise findings."#,
+Then update the META-GRAPH (memory/knowledge.json):
+  7. Add a node for this topic graph if not already there (kind: "concept", tags: ["graph", "topic"])
+  8. Add edges from this topic to related existing topics
+  9. Write the updated knowledge.json
+
+Finally, summarise: what themes you found, how many nodes/edges added, which graph(s)."#,
             source_name = source_name,
             n = chunks.len(),
             path = full_path.display(),
