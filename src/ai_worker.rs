@@ -219,7 +219,7 @@ fn build_backend_command(
     backend: &str,
     message: &str,
     system_prompt: &str,
-    _working_dir: &str,
+    working_dir: &str,
     skip_permissions: bool,
     continue_session: bool,
 ) -> (String, Vec<String>) {
@@ -254,6 +254,11 @@ fn build_backend_command(
             }
             if continue_session {
                 args.push("-c".to_string());
+            }
+            // Explicitly grant access to the working directory.
+            if !working_dir.is_empty() {
+                args.push("--add-dir".to_string());
+                args.push(working_dir.to_string());
             }
             args.push("--append-system-prompt".to_string());
             args.push(system_prompt.to_string());
