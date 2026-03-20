@@ -60,6 +60,8 @@ pub struct CliWorkerConfig {
     pub backends: Vec<String>,
     /// Worker timeout in seconds (0 = no timeout). Default: 600 (10 minutes).
     pub worker_timeout_secs: u64,
+    /// Allow the AI to modify files outside the working directory. Default: false.
+    pub allow_base_code_changes: bool,
 }
 
 /// Per-user usage statistics (shared with sentant for /usage command).
@@ -552,6 +554,7 @@ pub async fn ai_worker_loop(
             &config.working_dir,
             &config.repos_dir,
             is_analytical,
+            config.allow_base_code_changes,
         );
         let cfg = Arc::clone(&config);
         let message_for_backends = actual_message.clone();
@@ -1040,8 +1043,20 @@ fn build_system_prompt(
     working_dir: &str,
     repos_dir: &Path,
     is_analytical: bool,
+    allow_base_code_changes: bool,
 ) -> String {
     let mut prompt = String::new();
+
+    // File access restriction — before anything else.
+    if !allow_base_code_changes {
+        prompt.push_str(&format!(
+            "RESTRICTION: You MUST NOT create, edit, or delete files outside your working directory ({}).\n\
+            You may read files anywhere, but ONLY write within your workspace and repos/ subdirectory.\n\
+            If asked to modify external code (e.g. Anthill source), explain what changes are needed\n\
+            but do NOT make them. This restriction is enforced by policy.\n\n",
+            working_dir
+        ));
+    }
 
     // Fixed sections always included.
     if let Some(custom) = custom {

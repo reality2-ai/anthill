@@ -66,6 +66,10 @@ pub struct ClaudeConfig {
     pub backup_remote: String,
     /// Worker timeout in seconds — kill if no output for this long. Default: 600 (10 min).
     pub worker_timeout_secs: u64,
+    /// Allow the AI to modify files outside the working directory (e.g. Anthill source code).
+    /// Default: false — the AI can only modify files within its workspace and repos/.
+    #[serde(default)]
+    pub allow_base_code_changes: bool,
 }
 
 impl Default for ClaudeConfig {
@@ -82,6 +86,7 @@ impl Default for ClaudeConfig {
             backup_interval_hours: 0,
             backup_remote: String::new(),
             worker_timeout_secs: 600,
+            allow_base_code_changes: false,
         }
     }
 }

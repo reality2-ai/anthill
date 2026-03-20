@@ -594,6 +594,12 @@
       <span>Show user messages from other channels <span style="color:var(--text-dim)">(e.g. Telegram messages appear in Slack and web)</span></span>
     </label>
 
+    <h3 class="section-title">Code access</h3>
+    <label class="toggle-row">
+      <input type="checkbox" id="c-allow-base-code">
+      <span>Allow modifying files outside workspace <span style="color:var(--text-dim)">(e.g. Anthill source code — off by default for safety)</span></span>
+    </label>
+
     <h3 class="section-title">Personality</h3>
     <div class="field">
       <span class="field-label">System Prompt</span>
@@ -1588,6 +1594,7 @@ async function showConfigModal(antId) {
       document.getElementById('c-slack-app').value = cfg.slack_app_token || '';
       document.getElementById('c-backup-hrs').value = cfg.backup_interval_hours || 0;
       document.getElementById('c-sync-channels').checked = cfg.sync_channels || false;
+      document.getElementById('c-allow-base-code').checked = cfg.allow_base_code_changes || false;
       document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
       document.getElementById('c-prompt').value = cfg.system_prompt || '';
 
@@ -1642,6 +1649,7 @@ async function saveConfig() {
     slack_app_token: document.getElementById('c-slack-app').value.trim(),
     skip_permissions: true,
     sync_channels: document.getElementById('c-sync-channels').checked,
+    allow_base_code_changes: document.getElementById('c-allow-base-code').checked,
     backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
     backup_remote: document.getElementById('c-backup-remote').value.trim(),
     system_prompt: document.getElementById('c-prompt').value.trim(),

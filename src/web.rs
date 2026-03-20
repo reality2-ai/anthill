@@ -252,6 +252,7 @@ async fn get_config(
                     "slack_app_token": cfg.slack.app_token.unwrap_or_default(),
                     "working_dir": cfg.claude.working_dir.unwrap_or_default(),
                     "sync_channels": cfg.claude.sync_channels,
+                    "allow_base_code_changes": cfg.claude.allow_base_code_changes,
                     "backup_interval_hours": cfg.claude.backup_interval_hours,
                     "backup_remote": cfg.claude.backup_remote,
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
@@ -281,6 +282,7 @@ struct ConfigUpdate {
     repos_dir: Option<String>,
     skip_permissions: Option<bool>,
     sync_channels: Option<bool>,
+    allow_base_code_changes: Option<bool>,
     backup_interval_hours: Option<u32>,
     backup_remote: Option<String>,
     system_prompt: Option<String>,
@@ -308,6 +310,7 @@ async fn put_config(
             working_dir: req.working_dir.clone().filter(|s| !s.is_empty()),
             system_prompt: req.system_prompt.clone().filter(|s| !s.is_empty()),
             sync_channels: req.sync_channels.unwrap_or(false),
+            allow_base_code_changes: req.allow_base_code_changes.unwrap_or(false),
             backup_interval_hours: req.backup_interval_hours.unwrap_or(0),
             backup_remote: req.backup_remote.clone().unwrap_or_default(),
             ..Default::default()
