@@ -977,6 +977,12 @@ async function loadGraph(graphName) {
     }
     container.innerHTML = '';
 
+    // Filter out links referencing missing nodes or self-loops.
+    const nodeIds = new Set(data.nodes.map(n => n.id));
+    data.links = (data.links || []).filter(l =>
+      l.source !== l.target && nodeIds.has(l.source) && nodeIds.has(l.target)
+    );
+
     const cs = () => getComputedStyle(document.documentElement);
     graphInstance = ForceGraph3D()(container)
       .graphData(data)

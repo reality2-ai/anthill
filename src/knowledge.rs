@@ -1056,8 +1056,16 @@ impl KnowledgeGraph {
             })
         }).collect();
 
+        // Build a set of valid node IDs for filtering edges.
+        let valid_nodes: HashSet<usize> = self.graph.node_indices().map(|i| i.index()).collect();
+
         let links: Vec<serde_json::Value> = self.graph.edge_indices().filter_map(|e| {
             let (src, tgt) = self.graph.edge_endpoints(e)?;
+            // Skip self-loops and edges referencing missing nodes.
+            if src == tgt { return None; }
+            if !valid_nodes.contains(&src.index()) || !valid_nodes.contains(&tgt.index()) {
+                return None;
+            }
             let edge = &self.graph[e];
             let is_orphan_link = edge.relation == "?";
             Some(serde_json::json!({
