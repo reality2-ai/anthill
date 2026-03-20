@@ -1520,10 +1520,12 @@ Identify relationships between entities. For each:
 
 PHASE 6 — INTEGRATION:
 Run: mkdir -p memory/graphs/
-Determine topic name(s) for this conversation (lowercase-hyphenated).
-Read or create memory/graphs/<topic>.json and add all nodes and edges.
-Set valid_from to today's date on all new edges.
-Update the meta-graph (knowledge.json) with topic nodes if new.
+Read or create memory/graphs/conversation.json and add all nodes and edges from phases 2-5.
+Set valid_from to today, source to "conversation-compact".
+Then update the meta-graph (knowledge.json):
+  - Ensure a node exists for "conversation" (kind: "concept", tags: ["graph", "topic"])
+  - Add edges between "conversation" and any related topic graphs
+  - Write knowledge.json
 
 PHASE 7 — EPISODE:
 Write an episode to {episodes_path}:
