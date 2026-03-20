@@ -974,6 +974,15 @@ async function loadGraph(graphName) {
         }
         info.innerHTML = html;
         info.style.display = 'block';
+
+        // Smoothly centre the camera on the selected node.
+        const distance = 60;
+        const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+        graphInstance.cameraPosition(
+          { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+          { x: node.x, y: node.y, z: node.z },
+          1500  // ms transition
+        );
       });
 
     // Resize handling.
