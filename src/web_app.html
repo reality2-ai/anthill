@@ -957,7 +957,7 @@ async function loadGraph(graphName) {
       .linkDirectionalArrowLength(3)
       .linkDirectionalArrowRelPos(1)
       .backgroundColor('#1a1a2e')
-      .enableNodeDrag(false)
+      .enableNodeDrag(true)
       .onNodeClick(node => {
         // Show node details.
         const edges = data.links.filter(l =>
@@ -1014,16 +1014,23 @@ async function loadGraph(graphName) {
       }
     });
 
+    // Keep the simulation warm so gentle nudges propagate.
+    graphInstance.d3AlphaDecay(0.005).d3VelocityDecay(0.4);
+
     graphInstance.onEngineTick(() => {
-      const t = Date.now() * 0.001; // seconds
+      const t = Date.now() * 0.001;
       for (const n of data.nodes) {
         const tb = tumble[n.id];
-        if (!tb || !n.__threeObj) continue;
-        // Rotate the group — sphere itself is round so invisible,
-        // but the label sprite orbits around it like a satellite.
-        n.__threeObj.rotation.x = Math.sin(t * tb.fx + tb.px) * 0.4;
-        n.__threeObj.rotation.y = Math.sin(t * tb.fy + tb.py) * 0.4;
-        n.__threeObj.rotation.z = Math.sin(t * tb.fz + tb.pz) * 0.3;
+        if (!tb) continue;
+        // Tiny velocity nudges on the simulation — propagates through springs.
+        // Connected neighbors get pulled along, creating organic group drift.
+        n.vx = (n.vx || 0) + Math.sin(t * tb.fx + tb.px) * 0.003;
+        n.vy = (n.vy || 0) + Math.sin(t * tb.fy + tb.py) * 0.003;
+        n.vz = (n.vz || 0) + Math.sin(t * tb.fz + tb.pz) * 0.002;
+        // Also rotate the label around the sphere.
+        if (n.__threeObj) {
+          n.__threeObj.rotation.y = Math.sin(t * tb.fy * 0.3 + tb.py) * 0.5;
+        }
       }
     });
 
