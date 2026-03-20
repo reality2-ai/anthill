@@ -1019,11 +1019,11 @@ async function loadGraph(graphName) {
       for (const n of data.nodes) {
         const tb = tumble[n.id];
         if (!tb || !n.__threeObj) continue;
-        // Gentle position drift — spheres are round so rotation is invisible.
-        // Small sine-based offset gives a floating/breathing feel.
-        n.__threeObj.position.x = (n.x || 0) + Math.sin(t * tb.fx + tb.px) * 0.5;
-        n.__threeObj.position.y = (n.y || 0) + Math.sin(t * tb.fy + tb.py) * 0.5;
-        n.__threeObj.position.z = (n.z || 0) + Math.sin(t * tb.fz + tb.pz) * 0.3;
+        // Rotate the group — sphere itself is round so invisible,
+        // but the label sprite orbits around it like a satellite.
+        n.__threeObj.rotation.x = Math.sin(t * tb.fx + tb.px) * 0.4;
+        n.__threeObj.rotation.y = Math.sin(t * tb.fy + tb.py) * 0.4;
+        n.__threeObj.rotation.z = Math.sin(t * tb.fz + tb.pz) * 0.3;
       }
     });
 
