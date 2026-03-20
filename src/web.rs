@@ -1329,6 +1329,7 @@ async fn handle_web_command(
                                 .unwrap_or_default();
                             let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
                             if kg.node_count() > 0 {
+                                kg.backfill_refutation_logs();
                                 kg.consolidate();
                                 kg.link_orphans(&topic);
                                 kg.save();
@@ -1343,13 +1344,14 @@ async fn handle_web_command(
             if meta_path.exists() {
                 let mut meta = crate::knowledge::KnowledgeGraph::load(&meta_path);
                 if meta.node_count() > 0 {
+                    meta.backfill_refutation_logs();
                     meta.consolidate();
                     meta.link_orphans("meta");
                     meta.save();
                     processed += 1;
                 }
             }
-            Some(format!("Reprocessed {} graph(s): consolidated + orphans linked.", processed))
+            Some(format!("Reprocessed {} graph(s): backfilled refutation logs, consolidated, orphans linked.", processed))
         },
         "/new" => {
             drop(bots);

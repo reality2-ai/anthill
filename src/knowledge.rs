@@ -705,6 +705,57 @@ impl KnowledgeGraph {
     /// Link orphan nodes to a central hub. Call this to reprocess an existing graph.
     /// The hub node is named after the graph. Orphan edges use relation "?" with
     /// very low confidence (0.05) and are flagged as provisional.
+    /// Backfill refutation logs on edges that predate the audit trail.
+    /// Creates an initial entry from existing metadata (basis, confidence, source).
+    pub fn backfill_refutation_logs(&mut self) {
+        let edge_indices: Vec<_> = self.graph.edge_indices().collect();
+        let mut backfilled = 0;
+        for eid in edge_indices {
+            let edge = &self.graph[eid];
+            if !edge.refutation_log.is_empty() { continue; }
+
+            // Build initial entry from what we know.
+            let basis_name = format!("{:?}", edge.basis).to_lowercase();
+            let date = if !edge.since.is_empty() { edge.since.clone() }
+                else if !edge.valid_from.is_empty() { edge.valid_from.clone() }
+                else { "unknown".into() };
+            let source = if !edge.source.is_empty() {
+                format!("Source: {}", edge.source)
+            } else {
+                "No source recorded (pre-audit edge)".into()
+            };
+
+            let mut log = vec![RefutationEntry {
+                date: date.clone(),
+                test: "Initial conjecture (backfilled from pre-audit edge)".into(),
+                evidence: source,
+                outcome: format!("conjectured (basis: {})", basis_name),
+                confidence_before: 0.0,
+                confidence_after: edge.basis.initial_confidence(),
+            }];
+
+            // If there have been tests, record a summary entry.
+            if edge.tests > 0 {
+                log.push(RefutationEntry {
+                    date: if !edge.last_tested.is_empty() { edge.last_tested.clone() } else { date },
+                    test: format!("Historical: {} tests, {} survived (backfilled)", edge.tests, edge.survived),
+                    evidence: "Pre-audit testing history — individual test details not recorded".into(),
+                    outcome: if edge.survived == edge.tests { "survived".into() }
+                        else if edge.confidence < 0.2 { "weakened significantly".into() }
+                        else { "partially survived".into() },
+                    confidence_before: edge.basis.initial_confidence(),
+                    confidence_after: edge.confidence,
+                });
+            }
+
+            self.graph[eid].refutation_log = log;
+            backfilled += 1;
+        }
+        if backfilled > 0 {
+            log::info!("Backfilled refutation logs on {} edges", backfilled);
+        }
+    }
+
     pub fn link_orphans(&mut self, graph_name: &str) {
         // Find or create the hub node.
         let hub_idx = self.find_by_label(graph_name).unwrap_or_else(|| {
