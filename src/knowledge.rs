@@ -15,13 +15,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Node types the AI can create.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
     Person,
     Project,
     Server,
     Tool,
+    #[default]
     Concept,
     Decision,
     Event,
@@ -85,7 +86,7 @@ impl std::fmt::Display for NodeKind {
 
 /// A node in the knowledge graph.
 /// Tolerates extra fields from topic-specific graphs (e.g. "id", "spec", "source", "deps", "layer").
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct KnowledgeNode {
     pub label: String,
     pub kind: NodeKind,
@@ -98,8 +99,9 @@ pub struct KnowledgeNode {
     #[serde(default)]
     pub tags: Vec<String>,
     /// Extra fields from topic graphs (id, spec, source, deps, layer, status, etc.)
-    #[serde(flatten)]
-    pub extra: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Not used in code — only consumed by serde to avoid parse failures.
+    #[serde(flatten, default, skip_serializing)]
+    _extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// How a conjecture was originally formed.
@@ -589,10 +591,8 @@ impl KnowledgeGraph {
             label: topic.into(),
             kind: NodeKind::Concept,
             summary: format!("Topic graph: memory/graphs/{}.json", topic),
-            created: String::new(),
-            updated: String::new(),
             tags: vec!["graph".into(), "topic".into()],
-            extra: None,
+            ..Default::default()
         })
     }
 
@@ -2264,6 +2264,7 @@ mod tests {
             created: "2026-03-20".into(),
             updated: "2026-03-20".into(),
             tags: vec!["architect".into()],
+            ..Default::default()
         });
         let anthill = kg.graph.add_node(KnowledgeNode {
             label: "Anthill".into(),
@@ -2272,6 +2273,7 @@ mod tests {
             created: "2026-03-10".into(),
             updated: "2026-03-20".into(),
             tags: vec!["rust".into(), "ai".into()],
+            ..Default::default()
         });
         kg.graph.add_edge(roy, anthill, KnowledgeEdge::new(
             "works_on", "Lead developer", "2026-03-10", Basis::Observed,
@@ -2313,6 +2315,7 @@ mod tests {
             created: "2026-03-20".into(),
             updated: "2026-03-20".into(),
             tags: vec![],
+            ..Default::default()
         });
         let anthill = kg.graph.add_node(KnowledgeNode {
             label: "Anthill".into(),
@@ -2321,6 +2324,7 @@ mod tests {
             created: "2026-03-10".into(),
             updated: "2026-03-20".into(),
             tags: vec!["rust".into()],
+            ..Default::default()
         });
         let _unrelated = kg.graph.add_node(KnowledgeNode {
             label: "Weather".into(),
@@ -2329,6 +2333,7 @@ mod tests {
             created: "2026-03-20".into(),
             updated: "2026-03-20".into(),
             tags: vec![],
+            ..Default::default()
         });
         kg.graph.add_edge(roy, anthill, KnowledgeEdge::new(
             "works_on", "", "", Basis::Observed,
@@ -2363,6 +2368,7 @@ mod tests {
             created: "2026-03-20".into(),
             updated: "2026-03-20".into(),
             tags: vec![],
+            ..Default::default()
         });
         let anthill = kg.graph.add_node(KnowledgeNode {
             label: "Anthill".into(),
@@ -2371,6 +2377,7 @@ mod tests {
             created: "2026-03-10".into(),
             updated: "2026-03-20".into(),
             tags: vec![],
+            ..Default::default()
         });
         kg.graph.add_edge(roy, anthill, KnowledgeEdge::new(
             "works_on", "", "", Basis::Observed,
@@ -2450,10 +2457,12 @@ mod tests {
         let a = kg.graph.add_node(KnowledgeNode {
             label: "A".into(), kind: NodeKind::Fact, summary: "Node A".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let b = kg.graph.add_node(KnowledgeNode {
             label: "B".into(), kind: NodeKind::Fact, summary: "Node B".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
 
         // High confidence edge — should render.
@@ -2516,10 +2525,12 @@ mod tests {
         kg.graph.add_node(KnowledgeNode {
             label: "Anthill".into(), kind: NodeKind::Project, summary: "Short".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         kg.graph.add_node(KnowledgeNode {
             label: "anthill".into(), kind: NodeKind::Project, summary: "AI colony platform, detailed".into(),
             created: String::new(), updated: String::new(), tags: vec!["rust".into()],
+            ..Default::default()
         });
         assert_eq!(kg.node_count(), 2);
 
@@ -2546,10 +2557,12 @@ mod tests {
         let a = kg.graph.add_node(KnowledgeNode {
             label: "A".into(), kind: NodeKind::Person, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let b = kg.graph.add_node(KnowledgeNode {
             label: "B".into(), kind: NodeKind::Project, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         // Two edges with same relation.
         let mut e1 = KnowledgeEdge::new("works_on", "context 1", "", Basis::Told);
@@ -2590,14 +2603,17 @@ mod tests {
         let a = kg.graph.add_node(KnowledgeNode {
             label: "Roy".into(), kind: NodeKind::Person, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let mid = kg.graph.add_node(KnowledgeNode {
             label: "uses Rust".into(), kind: NodeKind::Fact, summary: "intermediate".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let c = kg.graph.add_node(KnowledgeNode {
             label: "Anthill".into(), kind: NodeKind::Project, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let mut e1 = KnowledgeEdge::new("knows", "", "", Basis::Observed);
         e1.confidence = 0.8;
@@ -2631,10 +2647,12 @@ mod tests {
         let a = kg.graph.add_node(KnowledgeNode {
             label: "Team".into(), kind: NodeKind::Concept, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let b = kg.graph.add_node(KnowledgeNode {
             label: "Python".into(), kind: NodeKind::Tool, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let mut e1 = KnowledgeEdge::new("uses", "main language", "", Basis::Told);
         e1.confidence = 0.85;
@@ -2664,18 +2682,22 @@ mod tests {
         let roy = kg.graph.add_node(KnowledgeNode {
             label: "Roy".into(), kind: NodeKind::Person, summary: "Architect".into(),
             created: "2026-03-20".into(), updated: "2026-03-20".into(), tags: vec![],
+            ..Default::default()
         });
         let anthill = kg.graph.add_node(KnowledgeNode {
             label: "Anthill".into(), kind: NodeKind::Project, summary: "AI colony".into(),
             created: "2026-03-10".into(), updated: "2026-03-20".into(), tags: vec!["rust".into()],
+            ..Default::default()
         });
         let alfred = kg.graph.add_node(KnowledgeNode {
             label: "Alfred".into(), kind: NodeKind::Server, summary: "Production server".into(),
             created: "2026-03-15".into(), updated: "2026-03-20".into(), tags: vec!["linux".into()],
+            ..Default::default()
         });
         let rust = kg.graph.add_node(KnowledgeNode {
             label: "Rust".into(), kind: NodeKind::Tool, summary: "Programming language".into(),
             created: "2026-03-10".into(), updated: "2026-03-20".into(), tags: vec![],
+            ..Default::default()
         });
         let mut e1 = KnowledgeEdge::new("works_on", "Lead dev", "2026-03-10", Basis::Observed);
         e1.confidence = 0.85;
@@ -2758,6 +2780,7 @@ mod tests {
         kg.graph.add_node(KnowledgeNode {
             label: "Unrelated".into(), kind: NodeKind::Fact, summary: "No connections".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         kg.rebuild_index();
 
@@ -2874,6 +2897,7 @@ mod tests {
             label: "Recovered".into(), kind: NodeKind::Fact,
             summary: "From archive".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         archive.save();
 
@@ -2903,10 +2927,12 @@ mod tests {
         let a = kg.graph.add_node(KnowledgeNode {
             label: "A".into(), kind: NodeKind::Concept, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let b = kg.graph.add_node(KnowledgeNode {
             label: "B".into(), kind: NodeKind::Concept, summary: "".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
 
         let mut e1 = KnowledgeEdge::new("uses", "ctx1", "2026-01-01", Basis::Observed);
@@ -2942,14 +2968,17 @@ mod tests {
         let a = kg.graph.add_node(KnowledgeNode {
             label: "Rust".into(), kind: NodeKind::Concept, summary: "programming language".into(),
             created: String::new(), updated: String::new(), tags: vec!["rust".into()],
+            ..Default::default()
         });
         let b = kg.graph.add_node(KnowledgeNode {
             label: "HighConf".into(), kind: NodeKind::Fact, summary: "well-known".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
         let c = kg.graph.add_node(KnowledgeNode {
             label: "LowConf".into(), kind: NodeKind::Fact, summary: "uncertain".into(),
             created: String::new(), updated: String::new(), tags: vec![],
+            ..Default::default()
         });
 
         let mut high = KnowledgeEdge::new("uses", "", "2026-01-01", Basis::Observed);
