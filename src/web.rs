@@ -1319,7 +1319,7 @@ async fn handle_web_command(
             let _ = std::fs::create_dir_all(&graphs_dir);
 
             // Move stray graph files from memory/ into memory/graphs/.
-            // Skip known non-graph files.
+            // Only moves files that look like knowledge graphs (have "nodes" and "edges" keys).
             let skip = ["knowledge.json", "episodes.json", "embeddings.json",
                          "knowledge-archive.json"];
             if let Ok(entries) = std::fs::read_dir(&memory_dir) {
@@ -1329,6 +1329,12 @@ async fn handle_web_command(
                         && path.extension().map(|e| e == "json").unwrap_or(false)
                         && !skip.iter().any(|s| path.file_name().map(|f| f == *s).unwrap_or(false))
                     {
+                        // Check if it's actually a knowledge graph by looking for "nodes" key.
+                        let is_graph = std::fs::read_to_string(&path)
+                            .map(|c| c.contains("\"nodes\"") && c.contains("\"edges\""))
+                            .unwrap_or(false);
+                        if !is_graph { continue; }
+
                         let dest = graphs_dir.join(path.file_name().unwrap());
                         if !dest.exists() {
                             if let Err(e) = std::fs::rename(&path, &dest) {
