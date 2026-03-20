@@ -1253,20 +1253,30 @@ Identify relationships between entities. For each relationship:
 PHASE 6 — INTEGRATION:
 Determine the topic name for this document (lowercase-hyphenated, e.g. "anthill-architecture").
 Run: mkdir -p memory/graphs/
-Read or create memory/graphs/<topic>.json and UPDATE it:
-  1. For each code → add or update a node (don't duplicate existing ones)
-  2. For each theme → add a concept node, link member codes to it with "part_of" edges
-  3. For each relationship → add an edge with the confidence, basis, view, and source fields
-  4. Add "{source_name}" as an event node with today's date
-  5. Set valid_from on all new edges to today's date
-  6. Write the updated memory/graphs/<topic>.json
+FIRST, read the existing memory/graphs/<topic>.json (if it exists).
+Study its nodes and edges to understand:
+  - What topics and entities are already captured
+  - What themes already exist
+  - What confidence levels existing edges have
+Then integrate your findings:
+  - If a code matches an existing node → update (don't duplicate). Strengthen edges
+    that are confirmed (increment survived + tests). Update summary if richer.
+  - If a code is new → add the node and its edges
+  - If a theme fits an existing theme → add new codes as members
+  - If a theme is new → add a concept node and link its codes with "part_of" edges
+  - If a relationship already exists → strengthen (increment survived + tests)
+  - If a relationship contradicts an existing edge → weaken the old one (tests only)
+  - If a relationship is new → add with appropriate confidence
+  - Add "{source_name}" as an event node with today's date
+  - Set valid_from on all new edges to today's date
+  - Write the updated memory/graphs/<topic>.json
 
 Then update the META-GRAPH (memory/knowledge.json):
-  7. Add a node for this topic graph if not already there (kind: "concept", tags: ["graph", "topic"])
-  8. Add edges from this topic to related existing topics
-  9. Write the updated knowledge.json
+  - Add a node for this topic graph if not already there (kind: "concept", tags: ["graph", "topic"])
+  - Add edges from this topic to related existing topics
+  - Write the updated knowledge.json
 
-Finally, write a brief summary of what you found and added to the graph.
+Finally, summarise: what themes you found, how many nodes/edges added vs updated, which graph(s).
 
 DOCUMENT:
 {content}"#,
@@ -1320,20 +1330,30 @@ Identify relationships between entities. For each relationship:
 PHASE 6 — INTEGRATION:
 Determine the topic name for this document (lowercase-hyphenated).
 Run: mkdir -p memory/graphs/
-Read or create memory/graphs/<topic>.json and UPDATE it:
-  1. For each code → add or update a node (don't duplicate existing ones)
-  2. For each theme → add a concept node, link member codes with "part_of" edges
-  3. For each relationship → add an edge with confidence, basis, view, and source fields
-  4. Add "{source_name}" as an event node with today's date
-  5. Set valid_from on all new edges to today's date
-  6. Write the updated memory/graphs/<topic>.json
+FIRST, read the existing memory/graphs/<topic>.json (if it exists).
+Study its nodes and edges to understand:
+  - What topics and entities are already captured
+  - What themes already exist
+  - What confidence levels existing edges have
+Then integrate your findings:
+  - If a code matches an existing node → update (don't duplicate). Strengthen edges
+    that are confirmed (increment survived + tests). Update summary if richer.
+  - If a code is new → add the node and its edges
+  - If a theme fits an existing theme → add new codes as members
+  - If a theme is new → add a concept node and link its codes with "part_of" edges
+  - If a relationship already exists → strengthen (increment survived + tests)
+  - If a relationship contradicts an existing edge → weaken the old one (tests only)
+  - If a relationship is new → add with appropriate confidence
+  - Add "{source_name}" as an event node with today's date
+  - Set valid_from on all new edges to today's date
+  - Write the updated memory/graphs/<topic>.json
 
 Then update the META-GRAPH (memory/knowledge.json):
-  7. Add a node for this topic graph if not already there (kind: "concept", tags: ["graph", "topic"])
-  8. Add edges from this topic to related existing topics
-  9. Write the updated knowledge.json
+  - Add a node for this topic graph if not already there (kind: "concept", tags: ["graph", "topic"])
+  - Add edges from this topic to related existing topics
+  - Write the updated knowledge.json
 
-Finally, summarise: what themes you found, how many nodes/edges added, which graph(s)."#,
+Finally, summarise: what themes you found, how many nodes/edges added vs updated, which graph(s)."#,
             source_name = source_name,
             n = chunks.len(),
             path = full_path.display(),
@@ -1520,8 +1540,24 @@ Identify relationships between entities. For each:
 
 PHASE 6 — INTEGRATION:
 Run: mkdir -p memory/graphs/
-Read or create memory/graphs/conversation.json and add all nodes and edges from phases 2-5.
+FIRST, read the existing memory/graphs/conversation.json (if it exists).
+Study its nodes and edges to understand:
+  - What topics and entities are already captured
+  - What themes already exist
+  - What confidence levels existing edges have
+Then for each code from Phase 2:
+  - If it matches an existing node → update (don't duplicate). Strengthen edges
+    that are confirmed (increment survived + tests). Update summary if richer.
+  - If it's new → add the node and its edges
+For each theme from Phase 3:
+  - If it fits an existing theme → add the new codes as members
+  - If it's a new theme → add a concept node and link its codes
+For each relationship from Phase 5:
+  - If it already exists → strengthen (increment survived + tests)
+  - If it contradicts an existing edge → weaken the old one (increment tests only)
+  - If it's new → add with appropriate confidence
 Set valid_from to today, source to "conversation-compact".
+Write the updated memory/graphs/conversation.json.
 Then update the meta-graph (knowledge.json):
   - Ensure a node exists for "conversation" (kind: "concept", tags: ["graph", "topic"])
   - Add edges between "conversation" and any related topic graphs
