@@ -1316,6 +1316,31 @@ async fn handle_web_command(
             let memory_dir = handle.working_dir.join("memory");
             drop(bots);
             let graphs_dir = memory_dir.join("graphs");
+            let _ = std::fs::create_dir_all(&graphs_dir);
+
+            // Move stray graph files from memory/ into memory/graphs/.
+            // Skip known non-graph files.
+            let skip = ["knowledge.json", "episodes.json", "embeddings.json",
+                         "knowledge-archive.json"];
+            if let Ok(entries) = std::fs::read_dir(&memory_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && path.extension().map(|e| e == "json").unwrap_or(false)
+                        && !skip.iter().any(|s| path.file_name().map(|f| f == *s).unwrap_or(false))
+                    {
+                        let dest = graphs_dir.join(path.file_name().unwrap());
+                        if !dest.exists() {
+                            if let Err(e) = std::fs::rename(&path, &dest) {
+                                log::warn!("Failed to move {} to graphs/: {}", path.display(), e);
+                            } else {
+                                log::info!("Moved {} → graphs/", path.file_name().unwrap().to_string_lossy());
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut processed = 0;
             if graphs_dir.exists() {
                 if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
