@@ -101,7 +101,7 @@ pub struct KnowledgeNode {
     /// Extra fields from topic graphs (id, spec, source, deps, layer, status, etc.)
     /// Not used in code — only consumed by serde to avoid parse failures.
     #[serde(flatten, default, skip_serializing)]
-    _extra: serde_json::Map<String, serde_json::Value>,
+    pub(crate) _extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// How a conjecture was originally formed.
@@ -368,7 +368,7 @@ struct GraphData {
 
 /// Knowledge graph with keyword index for retrieval.
 pub struct KnowledgeGraph {
-    graph: StableGraph<KnowledgeNode, KnowledgeEdge>,
+    pub(crate) graph: StableGraph<KnowledgeNode, KnowledgeEdge>,
     keyword_index: HashMap<String, HashSet<NodeIndex>>,
     #[allow(dead_code)]
     file_path: PathBuf,
@@ -642,19 +642,49 @@ impl KnowledgeGraph {
             })
         });
 
-        // Find orphans (no edges at all).
+        // Find all nodes not reachable from the hub (disconnected components).
+        // This catches both true orphans AND disconnected sub-clusters.
+        let mut reachable = HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(hub_idx);
+        reachable.insert(hub_idx);
+        while let Some(current) = queue.pop_front() {
+            for neighbor in self.graph.neighbors_undirected(current) {
+                if reachable.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        // Any node NOT reachable from hub needs a "?" link.
         let orphans: Vec<NodeIndex> = self.graph.node_indices()
-            .filter(|&idx| idx != hub_idx)
-            .filter(|&idx| {
-                self.graph.edges(idx).next().is_none()
-                    && self.graph.neighbors_undirected(idx).next().is_none()
-            })
+            .filter(|idx| !reachable.contains(idx))
             .collect();
 
-        for orphan in orphans {
-            // Don't create duplicate "?" edges.
-            if !self.has_edge_between(hub_idx, orphan, "?") {
-                self.graph.add_edge(hub_idx, orphan, KnowledgeEdge {
+        // Group orphans into their connected components.
+        // Link one representative from each component to the hub.
+        let mut linked = HashSet::new();
+        for &orphan in &orphans {
+            if linked.contains(&orphan) { continue; }
+            // BFS to find this orphan's component.
+            let mut component = Vec::new();
+            let mut q = std::collections::VecDeque::new();
+            q.push_back(orphan);
+            linked.insert(orphan);
+            while let Some(n) = q.pop_front() {
+                component.push(n);
+                for neighbor in self.graph.neighbors_undirected(n) {
+                    if !reachable.contains(&neighbor) && linked.insert(neighbor) {
+                        q.push_back(neighbor);
+                    }
+                }
+            }
+            // Pick the most connected node as representative.
+            let rep = component.iter()
+                .max_by_key(|&&n| self.graph.edges(n).count())
+                .copied()
+                .unwrap_or(orphan);
+            if !self.has_edge_between(hub_idx, rep, "?") {
+                self.graph.add_edge(hub_idx, rep, KnowledgeEdge {
                     relation: "?".into(),
                     context: "Unlinked — connection not yet determined".into(),
                     since: String::new(),

@@ -13,6 +13,7 @@ mod history;
 mod knowledge;
 mod thematic;
 mod maintenance;
+mod mcp;
 mod ollama;
 mod specgen;
 mod plugins;
@@ -92,6 +93,14 @@ struct Args {
     /// Run diagnostics — check all prerequisites, config, and services.
     #[arg(long)]
     doctor: bool,
+
+    /// Run as MCP server (knowledge graph tools for Claude Code).
+    #[arg(long)]
+    mcp_server: bool,
+
+    /// Memory directory for MCP server mode.
+    #[arg(long)]
+    memory_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -228,6 +237,16 @@ async fn main() -> anyhow::Result<()> {
         println!("  URL: {}", url);
         println!("  Code: {}  (expires in 5 minutes)", code);
         println!();
+        return Ok(());
+    }
+
+    // MCP server mode — knowledge graph tools for Claude Code.
+    if args.mcp_server {
+        let memory_dir = args.memory_dir.unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            PathBuf::from(format!("{}/.config/anthill/ants/default/working/memory", home))
+        });
+        mcp::run_mcp_server(memory_dir);
         return Ok(());
     }
 
