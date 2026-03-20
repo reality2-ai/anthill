@@ -1351,6 +1351,33 @@ async fn handle_web_command(
                     processed += 1;
                 }
             }
+            // Ensure every topic graph has a node in the meta-graph.
+            if meta_path.exists() && graphs_dir.exists() {
+                let mut meta = crate::knowledge::KnowledgeGraph::load(&meta_path);
+                let mut linked = 0;
+                if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "json").unwrap_or(false)
+                            && !path.to_string_lossy().contains("-archive")
+                        {
+                            let topic = path.file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            if meta.find_by_label(&topic).is_none() {
+                                let kg = crate::knowledge::KnowledgeGraph::load(&path);
+                                meta.add_topic_node(&topic);
+                                log::info!("Linked unregistered topic graph '{}' ({} nodes) into meta-graph",
+                                    topic, kg.node_count());
+                                linked += 1;
+                            }
+                        }
+                    }
+                }
+                if linked > 0 {
+                    meta.save();
+                }
+            }
             Some(format!("Reprocessed {} graph(s): backfilled refutation logs, consolidated, orphans linked.", processed))
         },
         "/new" => {
