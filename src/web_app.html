@@ -904,6 +904,28 @@ async function loadGraph(graphName) {
     }
     container.innerHTML = '';
 
+    // Helper: create a text sprite for 3D labels.
+    function makeTextSprite(text, color, fontSize) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const font = `${fontSize || 48}px sans-serif`;
+      ctx.font = font;
+      const w = ctx.measureText(text).width + 16;
+      canvas.width = w;
+      canvas.height = (fontSize || 48) + 16;
+      ctx.font = font;
+      ctx.fillStyle = color || '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(w / 10, (canvas.height) / 10, 1);
+      return sprite;
+    }
+
     graphInstance = ForceGraph3D()(container)
       .graphData(data)
       .nodeLabel(n => `<div style="background:rgba(0,0,0,0.8);padding:6px 10px;border-radius:6px;font-size:13px">
@@ -911,10 +933,33 @@ async function loadGraph(graphName) {
       .nodeColor(n => NODE_COLORS[n.kind] || '#888')
       .nodeVal(n => 3)
       .nodeResolution(12)
+      .nodeThreeObjectExtend(true)
+      .nodeThreeObject(n => {
+        // Add a text label floating above each node.
+        const sprite = makeTextSprite(n.label, NODE_COLORS[n.kind] || '#ccc', 36);
+        sprite.position.set(0, 5, 0);
+        return sprite;
+      })
       .linkLabel(l => `<div style="background:rgba(0,0,0,0.8);padding:4px 8px;border-radius:4px;font-size:12px">
         ${l.relation} [${Math.round(l.confidence * 100)}%]</div>`)
       .linkWidth(l => Math.max(0.5, l.confidence * 3))
       .linkOpacity(0.6)
+      .linkThreeObjectExtend(true)
+      .linkThreeObject(l => {
+        // Add relation label on each edge.
+        const sprite = makeTextSprite(l.relation, '#aaa', 24);
+        return sprite;
+      })
+      .linkPositionUpdate((sprite, { start, end }) => {
+        // Position edge label at midpoint.
+        if (sprite && start && end) {
+          Object.assign(sprite.position, {
+            x: start.x + (end.x - start.x) / 2,
+            y: start.y + (end.y - start.y) / 2,
+            z: start.z + (end.z - start.z) / 2,
+          });
+        }
+      })
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
         if (l.confidence >= 0.5) return '#fbbf24';
