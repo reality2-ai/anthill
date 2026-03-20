@@ -953,6 +953,7 @@ async function loadGraph(graphName) {
       .linkDirectionalArrowLength(3)
       .linkDirectionalArrowRelPos(1)
       .backgroundColor('#1a1a2e')
+      .enableNodeDrag(false)
       .onNodeClick(node => {
         // Show node details.
         const edges = data.links.filter(l =>
