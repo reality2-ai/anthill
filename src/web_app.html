@@ -676,7 +676,9 @@
         <span style="color:#60a5fa">●</span> concept
         <span style="color:#c084fc">●</span> decision
         <span style="color:#f472b6">●</span> server
-        &nbsp;| Edge width = confidence
+        <span style="color:#fb923c">●</span> event
+        <span style="color:#94a3b8">●</span> fact
+        &nbsp;| Edge: green=high conf, yellow=med, red=low
       </div>
     </div>
     <div id="graph-info" style="display:none;position:absolute;bottom:10px;left:10px;right:10px;background:rgba(0,0,0,0.85);padding:12px 16px;border-radius:8px;font-size:13px;color:#eee"></div>
@@ -944,6 +946,8 @@ async function loadGraph(graphName) {
     }
 
     graphInstance
+      .linkWidth(l => Math.max(2, l.confidence * 6))
+      .linkOpacity(0.8)
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
         if (l.confidence >= 0.5) return '#fbbf24';
