@@ -710,31 +710,40 @@ pub async fn ai_worker_loop(
                                         // Update activity timestamp.
                                         if let Ok(mut t) = activity_for_reader.lock() { *t = Instant::now(); }
 
-                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                            let (prog, result) = parse_backend_line(&cmd_name_clone, &json);
+                                        match serde_json::from_str::<serde_json::Value>(&line) {
+                                            Ok(json) => {
+                                                let (prog, result) = parse_backend_line(&cmd_name_clone, &json);
 
-                                            if let Some((kind, detail)) = prog {
-                                                if let Ok(mut p) = progress.lock() {
-                                                    *p = Some(detail.clone());
+                                                if let Some((kind, detail)) = prog {
+                                                    if let Ok(mut p) = progress.lock() {
+                                                        *p = Some(detail.clone());
+                                                    }
+                                                    // Forward questions to Telegram/Slack so chat users see them.
+                                                    if kind == "question" && tg_chat_for_reader != 0 {
+                                                        let _ = ttx_for_reader.send((tg_chat_for_reader,
+                                                            format!("[Task #{}] {}\n\nReply with /followup <answer>", task_id, detail)));
+                                                    }
+                                                    if let Some(ref tx) = etx {
+                                                        let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                                            bot: bname.to_string(),
+                                                            task_id,
+                                                            kind,
+                                                            detail,
+                                                        });
+                                                    }
                                                 }
-                                                // Forward questions to Telegram/Slack so chat users see them.
-                                                if kind == "question" && tg_chat_for_reader != 0 {
-                                                    let _ = ttx_for_reader.send((tg_chat_for_reader,
-                                                        format!("[Task #{}] {}\n\nReply with /followup <answer>", task_id, detail)));
-                                                }
-                                                if let Some(ref tx) = etx {
-                                                    let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                                        bot: bname.to_string(),
-                                                        task_id,
-                                                        kind,
-                                                        detail,
-                                                    });
+
+                                                if let Some(text) = result {
+                                                    if !text.is_empty() {
+                                                        lines_result = text;
+                                                    }
                                                 }
                                             }
-
-                                            if let Some(text) = result {
-                                                if !text.is_empty() {
-                                                    lines_result = text;
+                                            Err(_) => {
+                                                // Log non-JSON lines from backend (e.g. raw stderr mixed into stdout).
+                                                if !line.trim().is_empty() {
+                                                    log::debug!("[{}] Non-JSON line from {}: {}", bname, cmd_name_clone,
+                                                        if line.len() > 200 { &line[..200] } else { &line });
                                                 }
                                             }
                                         }
@@ -821,15 +830,21 @@ pub async fn ai_worker_loop(
                         if !result_text.is_empty() && success {
                             Ok(result_text)
                         } else if is_retriable_error(&result_text) || is_retriable_error(&stderr_text) || !success {
-                            let detail = if !result_text.is_empty() {
-                                result_text
-                            } else if !stderr_text.is_empty() {
-                                stderr_text
+                            // If the backend crashed but produced partial output, preserve it
+                            // so the user can see what was generated before the failure.
+                            if !result_text.is_empty() && !stderr_text.is_empty() {
+                                Ok(format!("{}\n\n⚠️ Backend error (output may be incomplete): {}", result_text, stderr_text.lines().next().unwrap_or("")))
                             } else {
-                                let code = status.as_ref().map(|s| format!("exit {}", s)).unwrap_or_else(|e| format!("{}", e));
-                                format!("process {}", code)
-                            };
-                            Err(format!("{} failed: {}", backend, detail))
+                                let detail = if !result_text.is_empty() {
+                                    result_text
+                                } else if !stderr_text.is_empty() {
+                                    stderr_text
+                                } else {
+                                    let code = status.as_ref().map(|s| format!("exit {}", s)).unwrap_or_else(|e| format!("{}", e));
+                                    format!("process {}", code)
+                                };
+                                Err(format!("{} failed: {}", backend, detail))
+                            }
                         } else if result_text.is_empty() {
                             let hint = if !stderr_text.is_empty() {
                                 format!(": {}", stderr_text.lines().next().unwrap_or(""))

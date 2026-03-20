@@ -1827,6 +1827,13 @@ pub fn extract_keywords(text: &str) -> Vec<String> {
     for word in tokenize(text) {
         // Add the word itself.
         keywords.push(word.clone());
+        // Skip suffix variants for acronyms/abbreviations (all-uppercase words
+        // like "api", "aws", "sql" — already lowercased by tokenize).
+        // Also skip short words where suffix stripping would leave too little.
+        let is_acronym = word.len() <= 5 && word.chars().all(|c| c.is_ascii_alphanumeric());
+        if is_acronym && word.len() <= 4 {
+            continue;
+        }
         // Add suffix-stripped variants for fuzzy matching (language-agnostic).
         // This catches plurals, conjugations, etc. across many languages.
         // Use char boundaries (not byte positions) to handle multi-byte UTF-8.

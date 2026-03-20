@@ -64,7 +64,10 @@ impl BotHistory {
     }
 
     fn rewrite(&self) {
-        if let Ok(f) = std::fs::File::create(&self.file_path) {
+        // Atomic rewrite: write to temp file, then rename to avoid corruption
+        // if the process is interrupted mid-write.
+        let tmp = self.file_path.with_extension("jsonl.tmp");
+        if let Ok(f) = std::fs::File::create(&tmp) {
             use std::io::Write;
             let mut w = std::io::BufWriter::new(f);
             for msg in &self.messages {
@@ -72,7 +75,9 @@ impl BotHistory {
                     let _ = writeln!(w, "{}", json);
                 }
             }
+            let _ = w.flush();
         }
+        let _ = std::fs::rename(&tmp, &self.file_path);
     }
 
     fn get_messages(&self) -> &[ChatMessage] {

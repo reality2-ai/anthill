@@ -50,7 +50,7 @@ pub fn ensure_git_repo(working_dir: &Path) -> anyhow::Result<()> {
     if !output.status.success() {
         anyhow::bail!(
             "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            redact_credentials(&String::from_utf8_lossy(&output.stderr))
         );
     }
 
@@ -158,7 +158,7 @@ fn run_backup(working_dir: &Path, remote: &str, credential: &str) -> anyhow::Res
     if !output.status.success() {
         anyhow::bail!(
             "git commit failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            redact_credentials(&String::from_utf8_lossy(&output.stderr))
         );
     }
 
@@ -173,11 +173,8 @@ fn run_backup(working_dir: &Path, remote: &str, credential: &str) -> anyhow::Res
         if output.status.success() {
             log::info!("Backup pushed to remote '{}'", remote);
         } else {
-            log::warn!(
-                "Backup push to '{}' failed: {}",
-                remote,
-                String::from_utf8_lossy(&output.stderr)
-            );
+            let stderr = redact_credentials(&String::from_utf8_lossy(&output.stderr));
+            log::warn!("Backup push to '{}' failed: {}", remote, stderr);
         }
     }
 
@@ -208,6 +205,27 @@ pub async fn backup_loop(
             Err(e) => log::error!("Backup failed: {}", e),
         }
     }
+}
+
+/// Redact credentials from git error output (e.g. https://user:pass@host).
+fn redact_credentials(text: &str) -> String {
+    // Match patterns like https://user:pass@host or http://token@host
+    let mut result = text.to_string();
+    while let Some(start) = result.find("://") {
+        let after_scheme = start + 3;
+        if let Some(at_pos) = result[after_scheme..].find('@') {
+            let at_abs = after_scheme + at_pos;
+            // Only redact if there's something between :// and @
+            if at_abs > after_scheme {
+                result = format!("{}://[REDACTED]@{}", &result[..start], &result[at_abs + 1..]);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    result
 }
 
 fn chrono_timestamp() -> String {
