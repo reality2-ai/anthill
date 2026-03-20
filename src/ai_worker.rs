@@ -126,32 +126,54 @@ const MEMORY_PREAMBLE: &str = "\
 You have a knowledge graph and a per-user memory file:\n\
 - Knowledge graph (shared, structured): memory/knowledge.json — shown below as [KNOWLEDGE GRAPH]\n\
 - User memory (per-user, freeform): shown below as [USER MEMORY]\n\n\
-THE KNOWLEDGE GRAPH IS POPPERIAN — all edges are conjectures with confidence weights.\n\
-Edges gain strength by surviving refutation, not by confirmation.\n\n\
+THE KNOWLEDGE GRAPH IS THURISAZ-COMPLIANT — it uses sequential Bayesian updating with:\n\
+- Log-odds representation (numerical stability)\n\
+- Reputation-weighted evidence (source reliability modulates strength)\n\
+- Fading foundations (beliefs decay toward uncertainty without fresh evidence)\n\
+- Active falsification (claims must survive disproof)\n\
+- Justificatory chains (every belief traces back through its reasoning)\n\n\
 AFTER EVERY RESPONSE, silently review and update the knowledge graph:\n\
   1. New entity? → add a node\n\
-  2. New relationship? → add an edge as a CONJECTURE with basis, confidence, and source\n\
-  3. Does this conversation CONFIRM an existing edge? → strengthen it\n\
-  4. Does this conversation CONTRADICT an existing edge? → weaken or contradict it\n\
-  5. User-specific fact? → append to user memory file\n\
-EVERY change to an edge MUST include a refutation_log entry:\n\
-  {\"date\": \"YYYY-MM-DD\", \"test\": \"what was tested\", \"evidence\": \"what was found\",\n\
-   \"outcome\": \"survived|weakened|contradicted\", \"confidence_before\": N, \"confidence_after\": N}\n\
-This log IS the Popperian process — it records WHY confidence changed.\n\
-Do this WITHOUT telling the user — just quietly read, modify, and write the files.\n\n\
+  2. New relationship? → add an edge as a CONJECTURE with basis, evidence_type, and source_id\n\
+  3. Does this conversation CONFIRM an existing edge? → use evidence type 'corroboration' or 'refutation_survived'\n\
+  4. Does this conversation CONTRADICT an existing edge? → use 'contradiction' or 'refutation_failed'\n\
+  5. Is this consistent/inconsistent with existing knowledge? → use 'consistency' or 'inconsistency'\n\
+  6. User confirms something? → use 'human_attestation'\n\
+  7. User-specific fact? → append to user memory file\n\n\
+EVIDENCE TYPES (Bayes Factors):\n\
+  corroboration: BF=2.0×r — supporting evidence from another source\n\
+  contradiction: BF=0.3/r — contradicting evidence\n\
+  refutation_survived: BF=2.5 — actively tried to disprove, claim held\n\
+  refutation_failed: BF=0.1 — actively tried to disprove, claim failed\n\
+  human_attestation: BF=1.5×r — user confirms or corrects\n\
+  consistency: BF=1.5 — consistent with existing graph\n\
+  inconsistency: BF=0.4 — inconsistent with existing graph\n\n\
+EVERY edge update MUST include:\n\
+  - evidence_type (one of the above)\n\
+  - source_id (e.g. 'document:README.md', 'user:roy', 'ai:inference')\n\
+  - evidence_log entry with Bayes factor, log-odds before/after\n\
+  - refutation_log entry (backward compat)\n\
+  - justificatory_chain step (provenance)\n\n\
+DECAY CATEGORIES (beliefs fade without fresh evidence):\n\
+  fact: 30-day half-life | decision: 14 days | observation: 7 days\n\
+  inference: 3 days | assumed: 1 day\n\n\
 Knowledge graph JSON format:\n\
   nodes: [{\"label\": \"...\", \"kind\": \"person|project|server|tool|concept|decision|event|fact\",\n\
            \"summary\": \"...\", \"created\": \"YYYY-MM-DD\", \"updated\": \"YYYY-MM-DD\", \"tags\": [...]}]\n\
   edges: [[from_idx, to_idx, {\n\
     \"relation\": \"...\", \"context\": \"...\", \"since\": \"YYYY-MM-DD\",\n\
-    \"confidence\": 0.0-1.0, \"tests\": N, \"survived\": N,\n\
+    \"confidence\": 0.0-1.0, \"log_odds\": N, \"tests\": N, \"survived\": N,\n\
     \"basis\": \"observed|told|inferred|assumed\", \"last_tested\": \"YYYY-MM-DD\",\n\
-    \"valid_from\": \"YYYY-MM-DD\", \"valid_until\": \"\" (empty=current, set when superseded),\n\
+    \"decay_category\": \"fact|decision|observation|inference|assumed\",\n\
+    \"source_id\": \"document:name|user:name|ai:inference\",\n\
+    \"evidence_log\": [{\"date\": \"...\", \"evidence_type\": \"...\", \"bayes_factor\": N, ...}],\n\
+    \"justificatory_chain\": [{\"step\": N, \"process\": \"...\", \"confidence\": N, \"source\": \"...\"}],\n\
+    \"valid_from\": \"YYYY-MM-DD\", \"valid_until\": \"\",\n\
     \"view\": \"semantic|temporal|causal|entity\",\n\
     \"source\": \"document name, conversation date, or how you know this\"\n\
   }]]\n\
 Initial confidence by basis: observed=0.7, told=0.6, inferred=0.4, assumed=0.3\n\
-Confidence formula: blend(basis_prior, survived/tests) weighted by test count.\n\
+Confidence is computed from log_odds via sigmoid. Log-odds is the source of truth.\n\
 Edges below 0.15 confidence are hidden from this prompt but kept in the graph.\n\
 Importance: edges have an 'importance' field (0-1) and 'references' count.\n\n\
 EDGE VIEWS: semantic (conceptual), temporal (ordering), causal (why), entity (structural).\n\
@@ -176,17 +198,23 @@ ALL knowledge MUST go into topic graphs in memory/graphs/<topic>.json — NOT in
 /// (/analyse, /reflect, /specify, /test-vectors). Saves ~1KB per regular request.
 const METHODOLOGY_PREAMBLE: &str = "\n\n\
 DEFAULT METHODOLOGY — when asked to analyse, review, assess, or study ANYTHING:\n\
-Use THEMATIC ANALYSIS (Braun & Clarke, 2022) and record findings in the knowledge graph:\n\
+Use THEMATIC ANALYSIS (Braun & Clarke, 2022) with Thurisaz-compliant integration:\n\
   1. Familiarise — read the material thoroughly\n\
   2. Code — extract entities, concepts, decisions as graph nodes\n\
   3. Theme — group codes into higher-level concept nodes\n\
   4. Review — validate against the source, assess confidence\n\
-  5. Refine — identify relationships, set basis (observed/told/inferred/assumed)\n\
-  6. Integrate — update memory/knowledge.json with Popperian confidence weights\n\
-All findings are CONJECTURES. Confidence reflects how well-evidenced they are:\n\
-  - Explicit in the material → observed (0.7)\n\
-  - Implied by multiple sources → inferred (0.4)\n\
-  - Your interpretation → assumed (0.3)\n\
+  5. Refine — identify relationships, set basis and evidence_type\n\
+  6. Integrate — each finding is a CONJECTURE tested against existing knowledge:\n\
+     - New finding consistent with graph? → add with 'consistency' evidence\n\
+     - Corroborates existing edge? → update with 'corroboration' evidence\n\
+     - Contradicts existing edge? → update with 'contradiction' evidence\n\
+     - Set decay_category based on content (fact/decision/observation/inference/assumed)\n\
+     - Set source_id to 'document:<filename>' for the source being analysed\n\
+     - Build justificatory_chain: what process produced this finding and at what confidence\n\
+All findings are CONJECTURES with typed evidence. Confidence reflects Bayesian updating:\n\
+  - Explicit in the material → observed (0.7), evidence_type: corroboration\n\
+  - Implied by multiple sources → inferred (0.4), evidence_type: consistency\n\
+  - Your interpretation → assumed (0.3), evidence_type: consistency\n\
 Always structure analytical findings as a knowledge graph update, not just prose.";
 
 const WORKSPACE_PREAMBLE: &str = "\

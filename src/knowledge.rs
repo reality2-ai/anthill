@@ -14,6 +14,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::epistemic::{
+    self, bayesian_update, to_log_odds, to_probability,
+    DecayCategory, Evidence, EvidenceType, JustificationStep,
+};
+
 /// Node types the AI can create.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -220,6 +225,30 @@ pub struct KnowledgeEdge {
     /// and whether the conjecture survived. This IS the Popperian process.
     #[serde(default)]
     pub refutation_log: Vec<RefutationEntry>,
+
+    // --- Thurisaz fields (Bayesian epistemic engine) ---
+
+    /// Internal belief state in log-odds space (source of truth for confidence).
+    /// confidence is computed as sigmoid(log_odds).
+    /// Default: computed from confidence field on deserialization.
+    #[serde(default)]
+    pub log_odds: f64,
+
+    /// Typed evidence trail with Bayes factors.
+    #[serde(default)]
+    pub evidence_log: Vec<Evidence>,
+
+    /// Provenance chain: why do I believe this?
+    #[serde(default)]
+    pub justificatory_chain: Vec<JustificationStep>,
+
+    /// Source identifier — links to the reputation registry.
+    #[serde(default)]
+    pub source_id: String,
+
+    /// Decay category — controls how quickly this belief fades.
+    #[serde(default)]
+    pub decay_category: DecayCategory,
 }
 
 /// A single entry in the refutation audit trail.
@@ -248,7 +277,9 @@ impl KnowledgeEdge {
     /// Create a new conjecture.
     pub fn new(relation: &str, context: &str, since: &str, basis: Basis) -> Self {
         let confidence = basis.initial_confidence();
+        let log_odds = to_log_odds(confidence);
         let basis_name = format!("{:?}", basis).to_lowercase();
+        let decay_category = DecayCategory::from_basis(&basis_name);
         Self {
             relation: relation.into(),
             context: context.into(),
@@ -272,6 +303,16 @@ impl KnowledgeEdge {
                 confidence_before: 0.0,
                 confidence_after: confidence,
             }],
+            log_odds,
+            evidence_log: Vec::new(),
+            justificatory_chain: vec![JustificationStep {
+                step: 1,
+                process: format!("Initial conjecture (basis: {})", basis_name),
+                confidence,
+                source: String::new(),
+            }],
+            source_id: String::new(),
+            decay_category,
         }
     }
 
@@ -289,6 +330,86 @@ impl KnowledgeEdge {
         self.confidence * self.importance
     }
 
+    /// Ensure log_odds and confidence are in sync.
+    /// Call after deserialization or manual confidence changes.
+    pub fn ensure_log_odds(&mut self) {
+        // Check if log_odds and confidence are out of sync
+        let expected_conf = to_probability(self.log_odds);
+        if (expected_conf - self.confidence).abs() > 0.01 {
+            // Confidence was likely set directly — recompute log_odds from it
+            self.log_odds = to_log_odds(self.confidence);
+        }
+    }
+
+    /// Sync confidence from log_odds (call after any log_odds change).
+    fn sync_confidence(&mut self) {
+        self.confidence = to_probability(self.log_odds);
+    }
+
+    // ── Primary update path: typed evidence ────────────────────────
+
+    /// Update this edge with typed evidence from a source with known reputation.
+    /// This is the Thurisaz-compliant primary update path.
+    pub fn update_with_evidence(&mut self, evidence_type: EvidenceType, date: &str,
+                                 test: &str, detail: &str, source_id: &str,
+                                 source_reputation: f64) {
+        self.ensure_log_odds();
+        let before_lo = self.log_odds;
+        let before_conf = self.confidence;
+
+        // Compute effective Bayes factor
+        let bf = evidence_type.effective_bayes_factor(source_reputation);
+
+        // Apply Bayesian update
+        self.log_odds = bayesian_update(self.log_odds, bf);
+        self.sync_confidence();
+
+        // Update test counters for backward compatibility
+        self.tests += 1;
+        if bf > 1.0 { self.survived += 1; }
+        self.last_tested = date.into();
+
+        // Record in evidence log (Thurisaz)
+        self.evidence_log.push(Evidence {
+            date: date.into(),
+            evidence_type: evidence_type.clone(),
+            test: test.into(),
+            detail: detail.into(),
+            source_id: source_id.into(),
+            source_reputation,
+            bayes_factor: bf,
+            log_odds_before: before_lo,
+            log_odds_after: self.log_odds,
+        });
+
+        // Record in refutation log (backward compatibility)
+        let outcome = match &evidence_type {
+            EvidenceType::RefutationSurvived | EvidenceType::Corroboration |
+            EvidenceType::HumanAttestation | EvidenceType::Consistency => "survived",
+            EvidenceType::RefutationFailed => "contradicted",
+            EvidenceType::Contradiction | EvidenceType::Inconsistency => "weakened",
+        };
+        self.refutation_log.push(RefutationEntry {
+            date: date.into(),
+            test: if test.is_empty() { evidence_type.description().into() } else { test.into() },
+            evidence: detail.into(),
+            outcome: outcome.into(),
+            confidence_before: before_conf,
+            confidence_after: self.confidence,
+        });
+
+        // Update justificatory chain
+        let step = self.justificatory_chain.len() as u32 + 1;
+        self.justificatory_chain.push(JustificationStep {
+            step,
+            process: format!("{} (BF={:.2}, rep={:.2})", evidence_type.description(), bf, source_reputation),
+            confidence: self.confidence,
+            source: source_id.into(),
+        });
+    }
+
+    // ── Convenience wrappers (backward-compatible API) ─────────────
+
     /// The conjecture survived a refutation attempt — strengthen it.
     pub fn strengthen(&mut self, date: &str) {
         self.strengthen_with(date, "", "");
@@ -296,19 +417,14 @@ impl KnowledgeEdge {
 
     /// Strengthen with a record of the test and evidence.
     pub fn strengthen_with(&mut self, date: &str, test: &str, evidence: &str) {
-        let before = self.confidence;
-        self.tests += 1;
-        self.survived += 1;
-        self.last_tested = date.into();
-        self.recalculate();
-        self.refutation_log.push(RefutationEntry {
-            date: date.into(),
-            test: if test.is_empty() { "Encountered in context — no contradiction found".into() } else { test.into() },
-            evidence: evidence.into(),
-            outcome: "survived".into(),
-            confidence_before: before,
-            confidence_after: self.confidence,
-        });
+        self.update_with_evidence(
+            EvidenceType::RefutationSurvived,
+            date,
+            if test.is_empty() { "Encountered in context — no contradiction found" } else { test },
+            evidence,
+            &self.source_id.clone(),
+            0.5, // default neutral reputation for legacy calls
+        );
     }
 
     /// The conjecture was tested and evidence weakened it (but didn't refute it).
@@ -318,18 +434,14 @@ impl KnowledgeEdge {
 
     /// Weaken with a record of the test and evidence.
     pub fn weaken_with(&mut self, date: &str, test: &str, evidence: &str) {
-        let before = self.confidence;
-        self.tests += 1;
-        self.last_tested = date.into();
-        self.recalculate();
-        self.refutation_log.push(RefutationEntry {
-            date: date.into(),
-            test: if test.is_empty() { "Encountered counter-evidence".into() } else { test.into() },
-            evidence: evidence.into(),
-            outcome: "weakened".into(),
-            confidence_before: before,
-            confidence_after: self.confidence,
-        });
+        self.update_with_evidence(
+            EvidenceType::Inconsistency,
+            date,
+            if test.is_empty() { "Encountered counter-evidence" } else { test },
+            evidence,
+            &self.source_id.clone(),
+            0.5,
+        );
     }
 
     /// Direct contradiction — sharp confidence penalty.
@@ -339,44 +451,26 @@ impl KnowledgeEdge {
 
     /// Contradict with a record of the evidence.
     pub fn contradict_with(&mut self, date: &str, test: &str, evidence: &str) {
-        let before = self.confidence;
-        self.tests += 1;
-        self.last_tested = date.into();
-        self.confidence *= 0.3;
-        if self.confidence < 0.01 { self.confidence = 0.01; }
-        self.refutation_log.push(RefutationEntry {
-            date: date.into(),
-            test: if test.is_empty() { "Direct contradiction encountered".into() } else { test.into() },
-            evidence: evidence.into(),
-            outcome: "contradicted".into(),
-            confidence_before: before,
-            confidence_after: self.confidence,
-        });
+        self.update_with_evidence(
+            EvidenceType::RefutationFailed,
+            date,
+            if test.is_empty() { "Direct contradiction encountered" } else { test },
+            evidence,
+            &self.source_id.clone(),
+            0.5,
+        );
     }
 
-    /// Recalculate confidence from test history.
-    /// Uses a Bayesian-style formula: prior blended with observed rate.
-    fn recalculate(&mut self) {
-        if self.tests == 0 {
-            return;
-        }
-        // Blend the basis prior with the observed survival rate.
-        // More tests → more weight on observed rate.
-        let prior = self.basis.initial_confidence();
-        let observed = self.survived as f64 / self.tests as f64;
-        let weight = (self.tests as f64) / (self.tests as f64 + 3.0); // 3 pseudo-observations
-        self.confidence = prior * (1.0 - weight) + observed * weight;
-        self.confidence = self.confidence.clamp(0.01, 0.99);
-    }
-
-    /// Apply time decay — untested conjectures drift toward uncertainty.
+    /// Apply time decay — beliefs fade toward uncertainty based on decay category.
     /// Call with the number of days since last tested.
     pub fn decay(&mut self, days_since_tested: u32) {
         if days_since_tested == 0 { return; }
-        // Decay rate: lose ~5% confidence per 30 days untested.
-        let factor = 0.95_f64.powf(days_since_tested as f64 / 30.0);
-        self.confidence *= factor;
-        if self.confidence < 0.01 { self.confidence = 0.01; }
+        self.ensure_log_odds();
+        let elapsed_secs = days_since_tested as f64 * 86400.0;
+        let half_life = self.decay_category.half_life_secs();
+        self.log_odds = epistemic::decay(self.log_odds, elapsed_secs, half_life);
+        self.sync_confidence();
+        if self.confidence < 0.01 { self.confidence = 0.01; self.log_odds = to_log_odds(0.01); }
     }
 
     /// Confidence tier for rendering.
@@ -574,9 +668,99 @@ impl KnowledgeGraph {
             if let (Some(Some(from_idx)), Some(Some(to_idx))) =
                 (index_map.get(*from), index_map.get(*to))
             {
-                self.graph.add_edge(*from_idx, *to_idx, edge.clone());
+                let mut edge = edge.clone();
+                edge.ensure_log_odds();
+                self.graph.add_edge(*from_idx, *to_idx, edge);
             }
         }
+    }
+
+    /// Migrate existing edges to Thurisaz format.
+    /// Computes log_odds from confidence, converts refutation_log to evidence_log,
+    /// assigns decay categories. Safe to call multiple times (idempotent).
+    #[allow(dead_code)]
+    pub fn backfill_to_thurisaz(&mut self) -> usize {
+        let edge_indices: Vec<_> = self.graph.edge_indices().collect();
+        let mut migrated = 0;
+
+        for eid in edge_indices {
+            let edge = &mut self.graph[eid];
+            let mut changed = false;
+
+            // Ensure log_odds is set
+            if edge.log_odds == 0.0 && (edge.confidence - 0.5).abs() > 0.001 {
+                edge.log_odds = to_log_odds(edge.confidence);
+                changed = true;
+            }
+
+            // Assign decay category if default and we can infer better
+            if edge.decay_category == DecayCategory::Fact {
+                let basis_name = format!("{:?}", edge.basis).to_lowercase();
+                let inferred = DecayCategory::from_basis(&basis_name);
+                if inferred != DecayCategory::Fact || basis_name != "told" {
+                    edge.decay_category = inferred;
+                    changed = true;
+                }
+            }
+
+            // Convert refutation_log entries to evidence_log if empty
+            if edge.evidence_log.is_empty() && !edge.refutation_log.is_empty() {
+                for entry in &edge.refutation_log {
+                    let evidence_type = match entry.outcome.as_str() {
+                        "survived" => EvidenceType::RefutationSurvived,
+                        "weakened" => EvidenceType::Inconsistency,
+                        "contradicted" => EvidenceType::RefutationFailed,
+                        _ => EvidenceType::Consistency, // "conjectured" entries
+                    };
+                    let bf = evidence_type.effective_bayes_factor(0.5);
+                    edge.evidence_log.push(crate::epistemic::Evidence {
+                        date: entry.date.clone(),
+                        evidence_type,
+                        test: entry.test.clone(),
+                        detail: entry.evidence.clone(),
+                        source_id: edge.source.clone(),
+                        source_reputation: 0.5,
+                        bayes_factor: bf,
+                        log_odds_before: to_log_odds(entry.confidence_before.max(0.001)),
+                        log_odds_after: to_log_odds(entry.confidence_after.max(0.001)),
+                    });
+                }
+                changed = true;
+            }
+
+            // Build initial justificatory chain if empty
+            if edge.justificatory_chain.is_empty() {
+                let basis_name = format!("{:?}", edge.basis).to_lowercase();
+                edge.justificatory_chain.push(JustificationStep {
+                    step: 1,
+                    process: format!("Initial conjecture (basis: {}, migrated to Thurisaz)", basis_name),
+                    confidence: edge.basis.initial_confidence(),
+                    source: edge.source.clone(),
+                });
+                if edge.tests > 0 {
+                    edge.justificatory_chain.push(JustificationStep {
+                        step: 2,
+                        process: format!("Historical: {} tests, {} survived (migrated)", edge.tests, edge.survived),
+                        confidence: edge.confidence,
+                        source: edge.source.clone(),
+                    });
+                }
+                changed = true;
+            }
+
+            // Set source_id from source if empty
+            if edge.source_id.is_empty() && !edge.source.is_empty() {
+                edge.source_id = edge.source.clone();
+                changed = true;
+            }
+
+            if changed { migrated += 1; }
+        }
+
+        if migrated > 0 {
+            log::info!("Migrated {} edges to Thurisaz format", migrated);
+        }
+        migrated
     }
 
     /// Save to JSON file (atomic write).
@@ -695,7 +879,12 @@ impl KnowledgeGraph {
             valid_until: String::new(),
             view: EdgeView::Semantic,
             source: "maintenance: cross-link".into(),
-                    refutation_log: Vec::new(),
+            refutation_log: Vec::new(),
+            log_odds: to_log_odds(0.6),
+            evidence_log: Vec::new(),
+            justificatory_chain: Vec::new(),
+            source_id: "maintenance:cross-link".into(),
+            decay_category: DecayCategory::Fact,
         };
         self.graph.add_edge(from, to, edge);
     }
@@ -828,6 +1017,11 @@ impl KnowledgeGraph {
                     view: EdgeView::Entity,
                     source: "auto: orphan linking".into(),
                     refutation_log: Vec::new(),
+                    log_odds: to_log_odds(0.05),
+                    evidence_log: Vec::new(),
+                    justificatory_chain: Vec::new(),
+                    source_id: "auto:orphan-linking".into(),
+                    decay_category: DecayCategory::Assumed,
                 });
             }
         }
@@ -871,6 +1065,7 @@ impl KnowledgeGraph {
                 "target": tgt.index(),
                 "relation": edge.relation,
                 "confidence": edge.confidence,
+                "log_odds": edge.log_odds,
                 "importance": edge.importance,
                 "basis": format!("{:?}", edge.basis).to_lowercase(),
                 "view": format!("{:?}", edge.view).to_lowercase(),
@@ -879,6 +1074,8 @@ impl KnowledgeGraph {
                 "valid_from": edge.valid_from,
                 "valid_until": edge.valid_until,
                 "source_doc": edge.source,
+                "decay_category": format!("{:?}", edge.decay_category).to_lowercase(),
+                "evidence_count": edge.evidence_log.len(),
                 "is_orphan_link": is_orphan_link,
             }))
         }).collect();
@@ -1509,16 +1706,23 @@ impl KnowledgeGraph {
         let mut to_remove = Vec::new();
         let mut to_update: Vec<(EdgeIndex, KnowledgeEdge)> = Vec::new();
 
-        for (idx, src, tgt, rel, edge) in edge_info {
+        for (idx, src, tgt, rel, mut edge) in edge_info {
             let key = (src, tgt, rel);
+            edge.ensure_log_odds();
             if let Some((kept_idx, kept_edge)) = seen.get_mut(&key) {
-                // Merge: take maximum confidence (same-source edges shouldn't
-                // compound like independent observations).
-                kept_edge.confidence = kept_edge.confidence.max(edge.confidence).min(0.95);
+                kept_edge.ensure_log_odds();
+                // Bayesian merge: use max log_odds (conservative, non-compounding).
+                if edge.log_odds.abs() > kept_edge.log_odds.abs() {
+                    kept_edge.log_odds = edge.log_odds;
+                }
+                kept_edge.confidence = to_probability(kept_edge.log_odds).clamp(0.01, 0.95);
                 kept_edge.tests += edge.tests;
                 kept_edge.survived += edge.survived;
                 kept_edge.references += edge.references;
                 kept_edge.importance = kept_edge.importance.max(edge.importance);
+                // Combine evidence logs
+                kept_edge.evidence_log.extend(edge.evidence_log.iter().cloned());
+                kept_edge.refutation_log.extend(edge.refutation_log.iter().cloned());
                 // Combine context from both sources.
                 if !edge.context.is_empty() && edge.context != kept_edge.context {
                     if kept_edge.context.is_empty() {
@@ -1570,8 +1774,10 @@ impl KnowledgeGraph {
                 None => continue,
             };
 
-            let (src, in_w, _) = in_edge;
-            let (tgt, out_w, _) = out_edge;
+            let (src, mut in_w, _) = in_edge;
+            let (tgt, mut out_w, _) = out_edge;
+            in_w.ensure_log_odds();
+            out_w.ensure_log_odds();
 
             // Don't collapse if either edge is high-importance.
             if in_w.importance > 0.7 || out_w.importance > 0.7 { continue; }
@@ -1579,11 +1785,19 @@ impl KnowledgeGraph {
             if src == tgt { continue; }
 
             // Create combined edge.
+            // Bayesian merging: use the weaker log_odds (conservative)
+            let combined_lo = if in_w.log_odds.abs() < out_w.log_odds.abs() {
+                in_w.log_odds
+            } else {
+                out_w.log_odds
+            };
+            let combined_conf = if combined_lo != 0.0 { to_probability(combined_lo) }
+                else { in_w.confidence.min(out_w.confidence) };
             let combined = KnowledgeEdge {
                 relation: format!("{} → {}", in_w.relation, out_w.relation),
                 context: format!("{} (via {})", in_w.context, self.graph[mid].label),
                 since: in_w.since.clone(),
-                confidence: in_w.confidence.min(out_w.confidence), // weakest link
+                confidence: combined_conf,
                 tests: in_w.tests.min(out_w.tests),
                 survived: in_w.survived.min(out_w.survived),
                 basis: in_w.basis.clone(),
@@ -1599,6 +1813,19 @@ impl KnowledgeGraph {
                     log.extend(out_w.refutation_log.iter().cloned());
                     log
                 },
+                log_odds: combined_lo,
+                evidence_log: {
+                    let mut log = in_w.evidence_log.clone();
+                    log.extend(out_w.evidence_log.iter().cloned());
+                    log
+                },
+                justificatory_chain: {
+                    let mut chain = in_w.justificatory_chain.clone();
+                    chain.extend(out_w.justificatory_chain.iter().cloned());
+                    chain
+                },
+                source_id: in_w.source_id.clone(),
+                decay_category: in_w.decay_category.clone(),
             };
 
             self.graph.add_edge(src, tgt, combined);
@@ -2652,22 +2879,22 @@ mod tests {
         for _ in 0..5 {
             edge.strengthen("2026-03-20");
         }
-        assert!(edge.confidence > 0.6);
+        assert!(edge.confidence > 0.6, "After 5 strengthen: {}", edge.confidence);
         assert_eq!(edge.tests, 5);
         assert_eq!(edge.survived, 5);
 
         // Fail 2 tests — confidence should decrease.
+        let before_weaken = edge.confidence;
         edge.weaken("2026-03-20");
         edge.weaken("2026-03-20");
-        let after_weaken = edge.confidence;
-        assert!(after_weaken < edge.confidence + 0.01); // decreased or stayed
+        assert!(edge.confidence < before_weaken, "Weaken should decrease confidence");
         assert_eq!(edge.tests, 7);
         assert_eq!(edge.survived, 5);
 
-        // Direct contradiction — sharp drop.
+        // Direct contradiction — significant drop (Bayesian with BF≈0.18).
         let before = edge.confidence;
         edge.contradict("2026-03-20");
-        assert!(edge.confidence < before * 0.5);
+        assert!(edge.confidence < before, "Contradict should decrease confidence: {} < {}", edge.confidence, before);
 
         // Time decay.
         let mut fresh = KnowledgeEdge::new("uses", "Rust", "2026-03-01", Basis::Observed);

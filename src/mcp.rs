@@ -10,6 +10,8 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
 use crate::knowledge::*;
+use crate::epistemic::{to_log_odds, DecayCategory, EvidenceType, JustificationStep};
+use crate::reputation::{ReputationRegistry, SourceCategory};
 use petgraph::visit::EdgeRef;
 
 /// Run the MCP server loop (stdio JSON-RPC).
@@ -236,6 +238,49 @@ fn tool_definitions() -> Vec<serde_json::Value> {
                 }
             }
         }),
+        serde_json::json!({
+            "name": "graph_update_evidence",
+            "description": "Submit typed evidence to update an edge using Thurisaz Bayesian updating. This is the primary update path — prefer this over graph_strengthen/weaken/contradict.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Source entity label" },
+                    "to": { "type": "string", "description": "Target entity label" },
+                    "relation": { "type": "string", "description": "Edge relation" },
+                    "evidence_type": { "type": "string", "enum": ["corroboration", "contradiction", "refutation_survived", "refutation_failed", "human_attestation", "consistency", "inconsistency"], "description": "Type of evidence being submitted" },
+                    "test": { "type": "string", "description": "What was tested or observed?" },
+                    "detail": { "type": "string", "description": "The evidence detail" },
+                    "source_id": { "type": "string", "description": "Source identifier (e.g. 'document:README.md', 'user:roy', 'ai:inference')", "default": "ai:inference" },
+                    "graph": { "type": "string", "default": "meta" }
+                },
+                "required": ["from", "to", "relation", "evidence_type", "test", "detail"]
+            }
+        }),
+        serde_json::json!({
+            "name": "graph_query_justification",
+            "description": "Return the provenance chain (justificatory chain + evidence log) for an edge. Answers 'why do I believe this?'",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Source entity label" },
+                    "to": { "type": "string", "description": "Target entity label" },
+                    "relation": { "type": "string", "description": "Edge relation" },
+                    "graph": { "type": "string", "default": "meta" }
+                },
+                "required": ["from", "to", "relation"]
+            }
+        }),
+        serde_json::json!({
+            "name": "graph_query_reputation",
+            "description": "Check the reputation score of an information source.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_id": { "type": "string", "description": "Source identifier to query (e.g. 'document:README.md', 'user:roy')" }
+                },
+                "required": ["source_id"]
+            }
+        }),
     ]
 }
 
@@ -359,6 +404,8 @@ fn handle_tool_call(
             let today = chrono_today();
             let confidence = basis.initial_confidence();
 
+            let log_odds = to_log_odds(confidence);
+            let decay_category = DecayCategory::from_basis(basis_str);
             kg.graph.add_edge(from_idx, to_idx, KnowledgeEdge {
                 relation: relation.into(),
                 context: context.into(),
@@ -374,7 +421,17 @@ fn handle_tool_call(
                 valid_until: String::new(),
                 view,
                 source: "mcp".into(),
-                refutation_log: vec![RefutationEntry { date: today, test: "Initial conjecture via MCP".into(), evidence: context.into(), outcome: format!("conjectured (basis: {})", basis_str), confidence_before: 0.0, confidence_after: confidence }],
+                refutation_log: vec![RefutationEntry { date: today.clone(), test: "Initial conjecture via MCP".into(), evidence: context.into(), outcome: format!("conjectured (basis: {})", basis_str), confidence_before: 0.0, confidence_after: confidence }],
+                log_odds,
+                evidence_log: Vec::new(),
+                justificatory_chain: vec![JustificationStep {
+                    step: 1,
+                    process: format!("Initial conjecture via MCP (basis: {})", basis_str),
+                    confidence,
+                    source: "mcp".into(),
+                }],
+                source_id: "mcp".into(),
+                decay_category,
             });
             kg.save();
             format!("Added edge: '{}' → {} → '{}' [confidence: {:.0}%]", from, relation, to, confidence * 100.0)
@@ -485,6 +542,139 @@ fn handle_tool_call(
                 "No orphan nodes".into()
             } else {
                 format!("{} orphan(s):\n{}", orphans.len(), orphans.join("\n"))
+            }
+        }
+        "graph_update_evidence" => {
+            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+            let evidence_type_str = args.get("evidence_type").and_then(|e| e.as_str()).unwrap_or("");
+            let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
+            let detail = args.get("detail").and_then(|d| d.as_str()).unwrap_or("");
+            let source_id = args.get("source_id").and_then(|s| s.as_str()).unwrap_or("ai:inference");
+
+            let evidence_type = match evidence_type_str {
+                "corroboration" => EvidenceType::Corroboration,
+                "contradiction" => EvidenceType::Contradiction,
+                "refutation_survived" => EvidenceType::RefutationSurvived,
+                "refutation_failed" => EvidenceType::RefutationFailed,
+                "human_attestation" => EvidenceType::HumanAttestation,
+                "consistency" => EvidenceType::Consistency,
+                "inconsistency" => EvidenceType::Inconsistency,
+                _ => return format!("Unknown evidence type: '{}'. Use: corroboration, contradiction, refutation_survived, refutation_failed, human_attestation, consistency, inconsistency", evidence_type_str),
+            };
+
+            let mut kg = KnowledgeGraph::load(&path);
+            let from_idx = match kg.find_by_label(from) {
+                Some(idx) => idx,
+                None => return format!("Node '{}' not found", from),
+            };
+            let to_idx = match kg.find_by_label(to) {
+                Some(idx) => idx,
+                None => return format!("Node '{}' not found", to),
+            };
+
+            let edge_idx = kg.graph.edges_directed(from_idx, petgraph::Direction::Outgoing)
+                .find(|e| e.target() == to_idx && e.weight().relation == relation)
+                .map(|e| e.id());
+
+            match edge_idx {
+                Some(eid) => {
+                    let today = chrono_today();
+                    // Get source reputation
+                    let rep_path = meta_path.parent().unwrap_or(std::path::Path::new(".")).join("reputation.json");
+                    let mut registry = ReputationRegistry::load(&rep_path);
+                    let category = if source_id.starts_with("user:") { SourceCategory::User }
+                        else if source_id.starts_with("document:") { SourceCategory::Document }
+                        else if source_id.starts_with("ai:") { SourceCategory::AiInference }
+                        else { SourceCategory::Unknown };
+                    let reputation = registry.get_reputation(source_id, category);
+
+                    let before = kg.graph[eid].confidence;
+                    kg.graph[eid].update_with_evidence(evidence_type, &today, test, detail, source_id, reputation);
+                    let after = kg.graph[eid].confidence;
+                    let lo = kg.graph[eid].log_odds;
+
+                    // Update source reputation based on evidence direction
+                    if after > before {
+                        registry.record_corroboration(source_id);
+                    } else if after < before {
+                        registry.record_contradiction(source_id);
+                    }
+                    registry.save(&rep_path);
+                    kg.save();
+
+                    format!("'{}' → {} → '{}': confidence {:.0}% → {:.0}% (log-odds: {:.2}, BF applied, rep: {:.2})",
+                        from, relation, to, before * 100.0, after * 100.0, lo, reputation)
+                }
+                None => format!("Edge '{}' → {} → '{}' not found", from, relation, to),
+            }
+        }
+        "graph_query_justification" => {
+            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+
+            let kg = KnowledgeGraph::load(&path);
+            let from_idx = match kg.find_by_label(from) {
+                Some(idx) => idx,
+                None => return format!("Node '{}' not found", from),
+            };
+            let to_idx = match kg.find_by_label(to) {
+                Some(idx) => idx,
+                None => return format!("Node '{}' not found", to),
+            };
+
+            let edge = kg.graph.edges_directed(from_idx, petgraph::Direction::Outgoing)
+                .find(|e| e.target() == to_idx && e.weight().relation == relation)
+                .map(|e| e.weight());
+
+            match edge {
+                Some(e) => {
+                    let mut result = format!("'{}' → {} → '{}'\n", from, relation, to);
+                    result.push_str(&format!("Confidence: {:.0}% (log-odds: {:.2})\n", e.confidence * 100.0, e.log_odds));
+                    result.push_str(&format!("Decay category: {:?} (half-life: {:.0} days)\n", e.decay_category, e.decay_category.half_life_days()));
+                    result.push_str(&format!("Source: {} (id: {})\n\n", e.source, e.source_id));
+
+                    if !e.justificatory_chain.is_empty() {
+                        result.push_str("JUSTIFICATORY CHAIN:\n");
+                        for step in &e.justificatory_chain {
+                            result.push_str(&format!("  {}. {} [confidence: {:.0}%, source: {}]\n",
+                                step.step, step.process, step.confidence * 100.0, step.source));
+                        }
+                    }
+
+                    if !e.evidence_log.is_empty() {
+                        result.push_str(&format!("\nEVIDENCE LOG ({} entries):\n", e.evidence_log.len()));
+                        for ev in &e.evidence_log {
+                            result.push_str(&format!("  [{}] {:?} BF={:.2} (rep={:.2}): {} → {}\n",
+                                ev.date, ev.evidence_type, ev.bayes_factor, ev.source_reputation,
+                                ev.test, ev.detail));
+                        }
+                    }
+
+                    result
+                }
+                None => format!("Edge '{}' → {} → '{}' not found", from, relation, to),
+            }
+        }
+        "graph_query_reputation" => {
+            let source_id = args.get("source_id").and_then(|s| s.as_str()).unwrap_or("");
+            let rep_path = meta_path.parent().unwrap_or(std::path::Path::new(".")).join("reputation.json");
+            let registry = ReputationRegistry::load(&rep_path);
+
+            if source_id.is_empty() {
+                // List all sources
+                registry.render_summary()
+            } else {
+                match registry.peek_reputation(source_id) {
+                    Some(score) => {
+                        let entry = &registry.sources[source_id];
+                        format!("{}: {:.0}% reputation ({} corroborations, {} contradictions, category: {:?})",
+                            source_id, score * 100.0, entry.corroborations, entry.contradictions, entry.category)
+                    }
+                    None => format!("Source '{}' not tracked. It will be created on first evidence submission.", source_id),
+                }
             }
         }
         _ => format!("Unknown tool: {}", tool),

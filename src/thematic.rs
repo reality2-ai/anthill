@@ -260,15 +260,20 @@ pub fn integration_prompt(result: &ThematicResult, source_name: &str) -> String 
         r#"THEMATIC ANALYSIS COMPLETE for document: "{source_name}"
 
 The following codes, themes, and relationships were identified.
-Integrate them into memory/knowledge.json:
+Integrate them into the appropriate topic graph in memory/graphs/:
 
 1. For each CODE, add or update a node in the knowledge graph.
 2. For each THEME, add a concept node and link its member codes to it.
-3. For each RELATIONSHIP, add an edge with the appropriate confidence:
-   - basis "observed" → confidence 0.7
-   - basis "inferred" → confidence 0.4
-   - basis "assumed" → confidence 0.3
-4. If a node already exists, DON'T duplicate — update its summary if the new one is better.
+3. For each RELATIONSHIP, add an edge as a Thurisaz-compliant conjecture:
+   - Set basis and initial confidence: observed=0.7, inferred=0.4, assumed=0.3
+   - Set log_odds from confidence (log_odds = ln(p / (1-p)))
+   - Set source_id: "document:{source_name}"
+   - Set decay_category based on content type (fact, decision, observation, inference, assumed)
+   - Test against existing graph: if corroborating existing edge, use evidence_type "corroboration"
+     If contradicting, use "contradiction". If new, use "consistency".
+   - Add justificatory_chain entry: step=1, process="Thematic analysis of {source_name}",
+     confidence=<initial>, source="document:{source_name}"
+4. If a node already exists, DON'T duplicate — update its summary if better.
 5. Add the source document as an event node: "{source_name}" with today's date.
 
 CODES:
@@ -280,7 +285,7 @@ THEMES:
 RELATIONSHIPS:
 {rels_json}
 
-Read memory/knowledge.json, integrate these results, and write it back.
+Read the relevant topic graph, integrate these results, and write it back.
 Do NOT output the JSON — just silently update the file."#,
         source_name = source_name,
         codes_json = codes_json,
@@ -383,6 +388,8 @@ mod tests {
         let result = ThematicResult::default();
         let prompt = integration_prompt(&result, "my-document.md");
         assert!(prompt.contains("my-document.md"));
-        assert!(prompt.contains("knowledge.json"));
+        assert!(prompt.contains("topic graph"));
+        assert!(prompt.contains("Thurisaz"));
+        assert!(prompt.contains("justificatory_chain"));
     }
 }
