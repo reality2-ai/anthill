@@ -1470,9 +1470,22 @@ async function loadFiles(path) {
     const contentType = resp.headers.get('content-type') || '';
 
     if (contentType.includes('application/json')) {
-      // Directory listing.
-      const entries = await resp.json();
-      renderFileList(entries, path);
+      // Could be a directory listing (array) or a JSON file (object/other).
+      const text = await resp.text();
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].name !== undefined) {
+          // Directory listing — array of {name, is_dir, size} entries.
+          renderFileList(parsed, path);
+        } else {
+          // JSON file — show as formatted preview.
+          // Create a fake response for showFilePreview.
+          await showFilePreview(path, contentType, { text: () => Promise.resolve(text) });
+        }
+      } catch {
+        // Malformed JSON — show as raw text.
+        await showFilePreview(path, 'text/plain', { text: () => Promise.resolve(text) });
+      }
     } else {
       // It's a file — show preview.
       await showFilePreview(path, contentType, resp);
