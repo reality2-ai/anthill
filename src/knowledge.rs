@@ -59,7 +59,7 @@ pub struct KnowledgeNode {
 }
 
 /// How a conjecture was originally formed.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Basis {
     /// Directly observed by the AI.
@@ -69,6 +69,7 @@ pub enum Basis {
     /// Inferred from other knowledge.
     Inferred,
     /// Assumed without evidence.
+    #[default]
     Assumed,
 }
 
@@ -85,13 +86,9 @@ impl Basis {
     }
 }
 
-impl Default for Basis {
-    fn default() -> Self { Self::Assumed }
-}
-
 /// Edge view classification (MAGMA-inspired orthogonal perspectives).
 /// The same pair of nodes can have edges in different views.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeView {
     /// What things mean and how they relate conceptually.
@@ -101,11 +98,8 @@ pub enum EdgeView {
     /// Why things happened, cause-and-effect chains.
     Causal,
     /// Which entities are involved, structural connections.
+    #[default]
     Entity,
-}
-
-impl Default for EdgeView {
-    fn default() -> Self { Self::Entity }
 }
 
 /// An edge in the knowledge graph — a conjecture with confidence.
@@ -905,6 +899,7 @@ pub struct ConsolidationReport {
     pub chains_collapsed: usize,
     pub contradictions: Vec<String>,
     /// Disconnected clusters found (GraphRAG-inspired community detection).
+    #[allow(dead_code)]
     pub clusters: Vec<Vec<String>>,
 }
 
@@ -912,25 +907,19 @@ impl KnowledgeGraph {
     /// Run a full consolidation pass: dedup nodes, merge parallel edges,
     /// collapse chains, detect contradictions.
     pub fn consolidate(&mut self) -> ConsolidationReport {
-        let mut report = ConsolidationReport::default();
-
         // 1. Deduplicate nodes.
-        report.nodes_merged = self.dedup_nodes();
-
+        let nodes_merged = self.dedup_nodes();
         // 2. Merge parallel edges (same source, target, relation).
-        report.edges_merged = self.merge_parallel_edges();
-
+        let edges_merged = self.merge_parallel_edges();
         // 3. Collapse chains: A→B→C where B has degree 2 and is a Fact.
-        report.chains_collapsed = self.collapse_chains();
-
+        let chains_collapsed = self.collapse_chains();
         // 4. Detect contradictions.
-        report.contradictions = self.detect_contradictions();
-
-        // 5. Community detection (GraphRAG-inspired) — find disconnected clusters.
-        report.clusters = self.detect_communities();
+        let contradictions = self.detect_contradictions();
+        // 5. Community detection (GraphRAP-inspired) — find disconnected clusters.
+        let clusters = self.detect_communities();
 
         self.rebuild_index();
-        report
+        ConsolidationReport { nodes_merged, edges_merged, chains_collapsed, contradictions, clusters }
     }
 
     /// Find and merge nodes with similar labels and same kind.
@@ -1481,11 +1470,14 @@ impl CachedGraph {
         if report.nodes_merged > 0 || report.edges_merged > 0 || report.chains_collapsed > 0 {
             graph.save();
             log::info!(
-                "Graph consolidated: {} nodes merged, {} edges merged, {} chains collapsed, {} contradictions",
-                report.nodes_merged, report.edges_merged, report.chains_collapsed, report.contradictions.len()
+                "Graph consolidated: {} nodes merged, {} edges merged, {} chains collapsed, {} contradictions, {} clusters",
+                report.nodes_merged, report.edges_merged, report.chains_collapsed, report.contradictions.len(), report.clusters.len()
             );
             for warning in &report.contradictions {
                 log::warn!("Contradiction: {}", warning);
+            }
+            if report.clusters.len() > 1 {
+                log::info!("Graph has {} disconnected clusters — consider linking related topics", report.clusters.len());
             }
         }
         report
@@ -1878,7 +1870,7 @@ mod tests {
             updated: "2026-03-20".into(),
             tags: vec!["rust".into()],
         });
-        let unrelated = kg.graph.add_node(KnowledgeNode {
+        let _unrelated = kg.graph.add_node(KnowledgeNode {
             label: "Weather".into(),
             kind: NodeKind::Fact,
             summary: "It rains in Auckland".into(),

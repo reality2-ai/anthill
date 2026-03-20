@@ -727,12 +727,19 @@ async fn get_file(
     }
 }
 
+/// Maximum upload size: 50 MiB.
+const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
+
 /// POST /api/ants/:id/upload/{*path} — upload a file.
 async fn upload_file(
     State(state): State<AppState>,
     Path((id, subpath)): Path<(String, String)>,
     body: Bytes,
 ) -> impl IntoResponse {
+    if body.len() > MAX_UPLOAD_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Upload exceeds 50 MiB limit").into_response();
+    }
+
     let (_, full) = match resolve_ant_path(&state.registry, &id, &subpath).await {
         Some(p) => p,
         None => return StatusCode::NOT_FOUND.into_response(),
@@ -740,12 +747,15 @@ async fn upload_file(
 
     // Create parent directories.
     if let Some(parent) = full.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create parent dirs for upload: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create directories").into_response();
+        }
     }
 
     match std::fs::write(&full, &body) {
         Ok(()) => {
-            log::info!("[{}] uploaded: {}", id, subpath);
+            log::info!("[{}] uploaded: {} ({} bytes)", id, subpath, body.len());
             StatusCode::CREATED.into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -950,7 +960,7 @@ async fn handle_ws(
                             WsCommand::Chat { bot, message, chat_id } => {
                                 let cid = chat_id.unwrap_or(0);
                                 let handled = handle_web_command(
-                                    &registry, &bot, cid, &message,
+                                    registry, &bot, cid, &message,
                                 ).await;
                                 if !handled {
                                     // Regular message → dispatch to AI worker.

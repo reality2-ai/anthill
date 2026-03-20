@@ -48,6 +48,12 @@ pub struct TimerRegistry {
     timers: Vec<PendingTimer>,
 }
 
+impl Default for TimerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimerRegistry {
     /// Create an empty timer registry.
     pub fn new() -> Self {

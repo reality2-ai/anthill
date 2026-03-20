@@ -67,6 +67,12 @@ pub struct EventQueue<const N: usize = DEFAULT_QUEUE_CAPACITY> {
     count: usize,
 }
 
+impl<const N: usize> Default for EventQueue<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const N: usize> EventQueue<N> {
     /// Create a new empty queue.
     ///

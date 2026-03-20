@@ -56,18 +56,12 @@ pub struct Decoder<'a> {
 }
 
 /// Tracks position within a map to detect key vs value positions.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct MapTracker {
     /// Number of remaining items (2*n for map, n for array).
     remaining: usize,
     /// True if this level is a map (as opposed to array).
     is_map: bool,
-}
-
-impl Default for MapTracker {
-    fn default() -> Self {
-        MapTracker { remaining: 0, is_map: false }
-    }
 }
 
 impl<'a> Decoder<'a> {
@@ -118,7 +112,7 @@ impl<'a> Decoder<'a> {
         let t = &self.nesting[self.depth - 1];
         // In a map, items alternate key(even remaining from pair boundary)/value.
         // remaining counts individual items (2*n_pairs). Even remaining = key position.
-        t.is_map && t.remaining > 0 && t.remaining % 2 == 0
+        t.is_map && t.remaining > 0 && t.remaining.is_multiple_of(2)
     }
 
     /// Advance nesting tracker after consuming one item (not a container header).
@@ -136,6 +130,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decode the next CBOR item.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Item<'a>, Error> {
         let is_key_pos = self.at_map_key();
 

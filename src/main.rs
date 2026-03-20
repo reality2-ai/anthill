@@ -521,7 +521,7 @@ async fn run_doctor() {
             "missing" => {
                 format!("\x1b[33m{}\x1b[0m", icon)              // yellow
             }
-            _ => format!("{}", icon),
+            _ => icon.to_string(),
         };
 
         println!("  {} {} — {}", color_status, check.name, check.detail);

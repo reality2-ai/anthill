@@ -193,7 +193,7 @@ already have their own version control.";
 
 /// Detect which AI backends are installed on this system.
 pub fn detect_backends() -> Vec<(String, bool)> {
-    let backends = vec![
+    let backends = [
         ("claude", "claude"),
         ("codex", "codex"),
         ("gemini", "gemini"),
@@ -385,6 +385,7 @@ fn is_retriable_error(text: &str) -> bool {
 ///
 /// Each incoming request is spawned as a concurrent task. Multiple
 /// requests can be in flight simultaneously.
+#[allow(clippy::too_many_arguments)]
 pub async fn ai_worker_loop(
     mut rx: mpsc::UnboundedReceiver<CliRequest>,
     response_queue: Arc<Mutex<VecDeque<CliResponse>>>,
@@ -397,6 +398,10 @@ pub async fn ai_worker_loop(
     event_tx: Option<tokio::sync::broadcast::Sender<crate::registry::WsEvent>>,
     bot_name: String,
 ) {
+    // Wrap config and bot_name in Arc to avoid cloning per-request.
+    let config = Arc::new(config);
+    let bot_name: Arc<str> = bot_name.into();
+
     // Per-source chat ID mapping for cross-channel forwarding.
     // Maps source ("telegram", "slack") → last known chat_id from that source.
     let mut source_chat_ids: HashMap<String, i64> = HashMap::new();
@@ -435,11 +440,11 @@ pub async fn ai_worker_loop(
 
         // Periodic maintenance.
         request_count += 1;
-        if request_count % 50 == 0 {
+        if request_count.is_multiple_of(50) {
             // Consolidate: merge duplicate nodes, parallel edges, collapse chains.
             knowledge_cache.consolidate();
         }
-        if request_count % 100 == 0 {
+        if request_count.is_multiple_of(100) {
             // Archive low-confidence edges to separate file.
             knowledge_cache.archive_stale();
         }
@@ -452,17 +457,14 @@ pub async fn ai_worker_loop(
         }
 
         // --- Special commands ---
-        let actual_message = if req.message.starts_with("/analyse ") {
-            let file_path = req.message.strip_prefix("/analyse ").unwrap().trim();
-            build_analyse_message(file_path, &config.working_dir, &knowledge_file)
+        let actual_message = if let Some(path) = req.message.strip_prefix("/analyse ") {
+            build_analyse_message(path.trim(), &config.working_dir, &knowledge_file)
         } else if req.message == "/reflect" {
             build_reflect_message(&knowledge_file)
-        } else if req.message.starts_with("/specify ") {
-            let file_path = req.message.strip_prefix("/specify ").unwrap().trim();
-            build_specify_message(file_path, &config.working_dir)
-        } else if req.message.starts_with("/test-vectors ") {
-            let file_path = req.message.strip_prefix("/test-vectors ").unwrap().trim();
-            build_test_vectors_message(file_path, &config.working_dir)
+        } else if let Some(path) = req.message.strip_prefix("/specify ") {
+            build_specify_message(path.trim(), &config.working_dir)
+        } else if let Some(path) = req.message.strip_prefix("/test-vectors ") {
+            build_test_vectors_message(path.trim(), &config.working_dir)
         } else {
             req.message.clone()
         };
@@ -490,33 +492,28 @@ pub async fn ai_worker_loop(
             &config.working_dir,
             &config.repos_dir,
         );
-        let backends = config.backends.clone();
+        let cfg = Arc::clone(&config);
         let message_for_backends = actual_message.clone();
-        let system_prompt_for_backends = system_prompt.clone();
-        let working_dir_for_backends = config.working_dir.clone();
-        let skip_perms = config.skip_permissions;
+        let system_prompt_for_backends = system_prompt;
         let continue_session = !req.new_session;
-
-        let working_dir = config.working_dir.clone();
         let input_len = req.message.len() as u64;
         let chat_id = req.chat_id;
         let task_id = req.task_id;
         let req_source = req.source.clone();
-        let sync = config.sync_channels;
         let tg_chat = source_chat_ids.get("telegram").copied().unwrap_or(0);
         let rq = Arc::clone(&response_queue);
         let st = Arc::clone(&stats);
         let tm = Arc::clone(&tasks);
         let ttx = telegram_tx.clone();
         let etx = event_tx.clone();
-        let bname = bot_name.clone();
+        let bname = Arc::clone(&bot_name);
         let rq_tx = request_tx.clone();
         let timeout_secs = if config.worker_timeout_secs > 0 { config.worker_timeout_secs } else { 600 };
 
         // Broadcast user message (for history and cross-device sync).
         if let Some(ref tx) = etx {
             let _ = tx.send(crate::registry::WsEvent::UserMessage {
-                bot: bname.clone(),
+                bot: bname.to_string(),
                 chat_id,
                 text: req.message.clone(),
                 source: req.source.clone(),
@@ -541,7 +538,7 @@ pub async fn ai_worker_loop(
         };
         if let Some(ref tx) = etx {
             let _ = tx.send(crate::registry::WsEvent::TaskStarted {
-                bot: bname.clone(),
+                bot: bname.to_string(),
                 task_id,
                 preview: preview.clone(),
             });
@@ -568,10 +565,10 @@ pub async fn ai_worker_loop(
             });
 
             // Try each backend in order — fallback on failure.
-            let backend_list = if backends.is_empty() {
+            let backend_list = if cfg.backends.is_empty() {
                 vec!["claude".to_string()]
             } else {
-                backends.clone()
+                cfg.backends.clone()
             };
             let mut response_text = String::new();
             let mut _used_backend = String::new();
@@ -606,7 +603,7 @@ pub async fn ai_worker_loop(
                             if idx + 1 < backend_list.len() {
                                 if let Some(ref tx) = etx {
                                     let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                        bot: bname.clone(), task_id,
+                                        bot: bname.to_string(), task_id,
                                         kind: "fallback".into(),
                                         detail: format!("ollama:{} empty, trying {}...", model, backend_list[idx + 1]),
                                     });
@@ -620,7 +617,7 @@ pub async fn ai_worker_loop(
                             if idx + 1 < backend_list.len() {
                                 if let Some(ref tx) = etx {
                                     let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                        bot: bname.clone(), task_id,
+                                        bot: bname.to_string(), task_id,
                                         kind: "fallback".into(),
                                         detail: format!("ollama failed, trying {}...", backend_list[idx + 1]),
                                     });
@@ -629,7 +626,7 @@ pub async fn ai_worker_loop(
                                 response_text = format!("⚠️ All backends failed. Last error: {}", err);
                                 if let Some(ref tx) = etx {
                                     let _ = tx.send(crate::registry::WsEvent::TaskError {
-                                        bot: bname.clone(), task_id, error: err,
+                                        bot: bname.to_string(), task_id, error: err,
                                     });
                                 }
                             }
@@ -642,15 +639,15 @@ pub async fn ai_worker_loop(
                     backend,
                     &message_for_backends,
                     &system_prompt_for_backends,
-                    &working_dir_for_backends,
-                    skip_perms,
+                    &cfg.working_dir,
+                    cfg.skip_permissions,
                     continue_session,
                 );
 
                 let cmd_name_clone = cmd_name.clone();
                 let mut cmd = tokio::process::Command::new(&cmd_name);
                 cmd.args(&args);
-                cmd.current_dir(&working_dir);
+                cmd.current_dir(&cfg.working_dir);
                 cmd.stdin(std::process::Stdio::null());  // Never wait for input.
                 cmd.stdout(std::process::Stdio::piped());
                 cmd.stderr(std::process::Stdio::piped());
@@ -699,7 +696,7 @@ pub async fn ai_worker_loop(
                                                 }
                                                 if let Some(ref tx) = etx {
                                                     let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                                        bot: bname.clone(),
+                                                        bot: bname.to_string(),
                                                         task_id,
                                                         kind,
                                                         detail,
@@ -755,7 +752,7 @@ pub async fn ai_worker_loop(
                                     warned = true;
                                     if let Some(ref tx) = watchdog_etx {
                                         let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                            bot: watchdog_bname.clone(),
+                                            bot: watchdog_bname.to_string(),
                                             task_id,
                                             kind: "warning".into(),
                                             detail: format!("No output for {}s — worker may be stalled", idle_secs),
@@ -831,7 +828,7 @@ pub async fn ai_worker_loop(
                             log::info!("[{}] Falling back to '{}'", bname, backend_list[idx + 1]);
                             if let Some(ref tx) = etx {
                                 let _ = tx.send(crate::registry::WsEvent::TaskProgress {
-                                    bot: bname.clone(),
+                                    bot: bname.to_string(),
                                     task_id,
                                     kind: "fallback".into(),
                                     detail: format!("{} failed, trying {}...", backend, backend_list[idx + 1]),
@@ -843,7 +840,7 @@ pub async fn ai_worker_loop(
                             // Broadcast error event.
                             if let Some(ref tx) = etx {
                                 let _ = tx.send(crate::registry::WsEvent::TaskError {
-                                    bot: bname.clone(),
+                                    bot: bname.to_string(),
                                     task_id,
                                     error: err.clone(),
                                 });
@@ -869,7 +866,7 @@ pub async fn ai_worker_loop(
             // Broadcast to WebSocket clients.
             if let Some(ref tx) = etx {
                 let _ = tx.send(crate::registry::WsEvent::Message {
-                    bot: bname.clone(),
+                    bot: bname.to_string(),
                     chat_id,
                     text: response_text.clone(),
                     task_id,
@@ -877,7 +874,7 @@ pub async fn ai_worker_loop(
             }
 
             // Forward response to Telegram if from another channel and sync is enabled.
-            if sync && req_source != "telegram" && tg_chat != 0 {
+            if cfg.sync_channels && req_source != "telegram" && tg_chat != 0 {
                 let _ = ttx.send((tg_chat, response_text.clone()));
             }
 
@@ -902,7 +899,7 @@ pub async fn ai_worker_loop(
             };
             if let Some(ref tx) = etx {
                 let _ = tx.send(crate::registry::WsEvent::TaskCompleted {
-                    bot: bname.clone(),
+                    bot: bname.to_string(),
                     task_id,
                     duration_secs,
                 });

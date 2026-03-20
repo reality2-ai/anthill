@@ -20,6 +20,12 @@ pub struct ActionBuf {
     count: u8,
 }
 
+impl Default for ActionBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActionBuf {
     /// Create an empty action buffer.
     pub const fn new() -> Self {
