@@ -989,33 +989,52 @@ async function loadGraph(graphName) {
         );
       });
 
-    // Subtle tumble on connected nodes — random axes, slowly drifting.
+    // Subtle tumble on connected nodes — slerp between random target orientations.
     const connectedNodes = new Set();
     data.links.forEach(l => {
       connectedNodes.add(l.source.id !== undefined ? l.source.id : l.source);
       connectedNodes.add(l.target.id !== undefined ? l.target.id : l.target);
     });
-    // Seed per-node random rotation axes using a simple hash.
-    const nodeSpins = {};
+
+    // Per-node tumble state: current quaternion, target quaternion, interpolation progress.
+    const tumbleState = {};
+    function randomQuat() {
+      // Random unit quaternion (uniform distribution on SO(3)).
+      const u1 = Math.random(), u2 = Math.random() * 6.2832, u3 = Math.random() * 6.2832;
+      const s1 = Math.sqrt(1 - u1), s2 = Math.sqrt(u1);
+      return new THREE.Quaternion(s1 * Math.sin(u2), s1 * Math.cos(u2), s2 * Math.sin(u3), s2 * Math.cos(u3));
+    }
     data.nodes.forEach(n => {
       if (connectedNodes.has(n.id)) {
-        const s = n.id * 2654435761; // Knuth hash
-        nodeSpins[n.id] = {
-          px: ((s >> 0) & 0xFF) / 255,   // phase offsets
-          py: ((s >> 8) & 0xFF) / 255,
-          pz: ((s >> 16) & 0xFF) / 255,
+        const q = randomQuat();
+        tumbleState[n.id] = {
+          current: q.clone(),
+          target: randomQuat(),
+          t: 0,
+          // Each node transitions at a slightly different speed (8–15 seconds per slerp).
+          speed: 0.0001 + (((n.id * 2654435761) >>> 0) % 100) * 0.000002,
         };
       }
     });
+
     graphInstance.onEngineTick(() => {
-      const t = Date.now() * 0.00005; // very slow time base
       for (const n of data.nodes) {
-        if (!nodeSpins[n.id] || !n.__threeObj) continue;
-        const sp = nodeSpins[n.id];
-        // Sin-based drift: each axis oscillates independently, giving a tumble.
-        n.__threeObj.rotation.x += Math.sin(t * 1.3 + sp.px * 6.28) * 0.001;
-        n.__threeObj.rotation.y += Math.sin(t * 1.7 + sp.py * 6.28) * 0.001;
-        n.__threeObj.rotation.z += Math.sin(t * 1.1 + sp.pz * 6.28) * 0.0008;
+        const st = tumbleState[n.id];
+        if (!st || !n.__threeObj) continue;
+
+        // Advance interpolation.
+        st.t += st.speed;
+        if (st.t >= 1) {
+          // Arrived at target — pick a new target for the next slerp.
+          st.current.copy(st.target);
+          st.target = randomQuat();
+          st.t = 0;
+        }
+
+        // Slerp with sine easing — slow at endpoints, smooth through middle.
+        const eased = (1 - Math.cos(st.t * Math.PI)) * 0.5;
+        const q = st.current.clone().slerp(st.target, eased);
+        n.__threeObj.quaternion.copy(q);
       }
     });
 
