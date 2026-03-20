@@ -87,6 +87,7 @@ pub struct AiPlugin {
 }
 
 impl AiPlugin {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: PluginId,
         response_queue: Arc<Mutex<VecDeque<CliResponse>>>,
@@ -117,9 +118,23 @@ impl AiPlugin {
         if text.len() <= TELEGRAM_MAX {
             let _ = self.telegram_tx.send((chat_id, text.to_string()));
         } else {
-            for chunk in text.as_bytes().chunks(TELEGRAM_MAX) {
-                let chunk_str = String::from_utf8_lossy(chunk);
-                let _ = self.telegram_tx.send((chat_id, chunk_str.to_string()));
+            // Split on char boundaries to avoid corrupting multibyte UTF-8.
+            let mut start = 0;
+            while start < text.len() {
+                let mut end = (start + TELEGRAM_MAX).min(text.len());
+                // Walk back to a char boundary if we landed mid-character.
+                while end > start && !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                if end == start {
+                    // Pathological case: advance to next char boundary.
+                    end = start + 1;
+                    while end < text.len() && !text.is_char_boundary(end) {
+                        end += 1;
+                    }
+                }
+                let _ = self.telegram_tx.send((chat_id, text[start..end].to_string()));
+                start = end;
             }
         }
     }

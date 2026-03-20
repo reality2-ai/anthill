@@ -77,6 +77,12 @@ pub struct EventBus {
     timers: TimerRegistry,
 }
 
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventBus {
     /// Create a new empty event bus.
     pub fn new() -> Self {

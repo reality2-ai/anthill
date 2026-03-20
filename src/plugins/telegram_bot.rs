@@ -230,7 +230,7 @@ fn classify_command(text: &str) -> u8 {
         "/usage" => 3,
         "/new" => 6,
         "/status" => 7,
-        s if s == "/cancel all" => 5,
+        "/cancel all" => 5,
         s if s == "/cancel" || s.starts_with("/cancel ") => 4,
         s if s == "/followup" || s.starts_with("/followup ") => 8,
         s if s.starts_with("/analyse ") || s.starts_with("/analyze ") => 9,

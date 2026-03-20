@@ -132,7 +132,7 @@ pub struct CompactHeader {
 /// Compact route stack — 2-byte entries, max 8 (SPEC.md §3.3).
 ///
 /// Each entry is bits [31:16] of FNV-1a 32-bit of the hive's device UUID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CompactRouteStack {
     /// Number of entries (1–8).
     pub len: u8,
@@ -143,10 +143,7 @@ pub struct CompactRouteStack {
 impl CompactRouteStack {
     /// Create an empty route stack.
     pub fn new() -> Self {
-        CompactRouteStack {
-            len: 0,
-            entries: [0; 8],
-        }
+        Self::default()
     }
 }
 
@@ -191,7 +188,7 @@ pub struct ExtendedHeader {
 }
 
 /// Extended route stack — 4-byte entries, max 8 (SPEC.md §4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ExtendedRouteStack {
     /// Number of entries (1–8).
     pub len: u8,
@@ -202,10 +199,7 @@ pub struct ExtendedRouteStack {
 impl ExtendedRouteStack {
     /// Create an empty route stack.
     pub fn new() -> Self {
-        ExtendedRouteStack {
-            len: 0,
-            entries: [0; 8],
-        }
+        Self::default()
     }
 }
 
