@@ -947,7 +947,7 @@ async function loadGraph(graphName) {
 
     graphInstance
       .linkWidth(l => Math.max(1, l.confidence * 3))
-      .linkOpacity(0.7)
+      .linkOpacity(0.5)
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
         if (l.confidence >= 0.5) return '#fbbf24';
@@ -1019,10 +1019,11 @@ async function loadGraph(graphName) {
       for (const n of data.nodes) {
         const tb = tumble[n.id];
         if (!tb || !n.__threeObj) continue;
-        // Sine-driven rotation: smooth, continuously changing direction.
-        n.__threeObj.rotation.x = Math.sin(t * tb.fx + tb.px) * 0.3;
-        n.__threeObj.rotation.y = Math.sin(t * tb.fy + tb.py) * 0.3;
-        n.__threeObj.rotation.z = Math.sin(t * tb.fz + tb.pz) * 0.2;
+        // Gentle position drift — spheres are round so rotation is invisible.
+        // Small sine-based offset gives a floating/breathing feel.
+        n.__threeObj.position.x = (n.x || 0) + Math.sin(t * tb.fx + tb.px) * 0.5;
+        n.__threeObj.position.y = (n.y || 0) + Math.sin(t * tb.fy + tb.py) * 0.5;
+        n.__threeObj.position.z = (n.z || 0) + Math.sin(t * tb.fz + tb.pz) * 0.3;
       }
     });
 
