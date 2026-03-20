@@ -1,6 +1,6 @@
 # ANTHILL-WEB: Web Dashboard and API
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, ANTHILL-COLONY
@@ -113,6 +113,12 @@ On connection, the server sends a `snapshot` message containing:
 - Chat history for each ANT
 
 Subsequently, the server broadcasts events as they occur (see ANTHILL-WORKER §7.2). The supervisor also broadcasts ANT crash and restart status events, so the web UI can reflect real-time ANT health.
+
+If a client's WebSocket falls behind (slow network, browser tab backgrounded), the broadcast channel drops oldest events. The server detects this and sends a `lag_warning` event:
+```json
+{"type": "lag_warning", "dropped": 5, "message": "Connection fell behind — 5 events dropped. Refresh for current state."}
+```
+The web UI displays this as a system message in the chat.
 
 ### 4.4 Client → Server Commands
 

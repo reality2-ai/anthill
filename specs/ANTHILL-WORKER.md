@@ -1,6 +1,6 @@
 # ANTHILL-WORKER: AI Worker Lifecycle
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, ANTHILL-COLONY, ANTHILL-MEMORY

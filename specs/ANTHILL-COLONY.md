@@ -1,6 +1,6 @@
 # ANTHILL-COLONY: Colony Architecture
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, R2-TRUST, R2-SENTANT, R2-PLUGIN

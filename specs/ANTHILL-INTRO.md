@@ -1,6 +1,6 @@
 # ANTHILL-INTRO: Introduction to Anthill
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-20
 **Status:** Informative (not normative)
 

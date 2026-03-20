@@ -52,7 +52,9 @@ Each AI request spawns a **worker** — a tokio task running an AI backend proce
 - **Stderr capture**: read concurrently with stdout to prevent pipe deadlock, included in error messages
 - **Process groups**: `process_group(0)` + `kill_on_drop` ensures cancel kills the entire process tree
 - **Follow-up queue**: messages queued for running tasks, dispatched with session continuity when the task completes
-- **Multi-backend fallback**: try each configured backend in order (Claude, Codex, Ollama); fall back on failure/rate limits
+- **Multi-backend fallback**: try each configured backend in order (Claude, Codex, Gemini, Ollama); fall back on failure/rate limits with error classification (retriable vs non-retriable)
+- **Task state machine**: Running → Completed/Cancelled/Failed lifecycle tracking
+- **System prompt budgeting**: 16KB cap with priority allocation (70% knowledge graph, 15% user memory, 15% episodes); methodology instructions only for analytical commands
 
 ## Memory architecture
 
@@ -64,16 +66,18 @@ A directed graph of entities and conjectural relationships, following **Popperia
 
 - **Cached in memory** — loaded once, reloaded when the AI modifies the file
 - **Graph query API** — traversal (BFS), path-finding (shortest paths with cumulative confidence), kind filtering, uncertainty queries
-- **Semantic retrieval** — Ollama embeddings (nomic-embed-text) enable semantic search over graph nodes; falls back to keyword extraction when Ollama is unavailable
+- **Hybrid retrieval** — combines Ollama embeddings (nomic-embed-text) for semantic similarity with TF-IDF keyword matching; JSON-formatted output for structured AI consumption; falls back to keyword-only when Ollama is unavailable
 - **MAGMA-inspired edge views** — edges carry semantic, temporal, causal, and entity classification metadata for multi-perspective graph queries
 - **Temporal validity** — edges have `valid_from`/`valid_until` fields (Zep-inspired) for time-scoped knowledge
 - **Provenance tracking** — edges carry a `source` field for "why do I believe this?" tracing
 - **Community detection** — GraphRAG-inspired connected component analysis during consolidation identifies knowledge clusters
 - **Episode entity linking** — episodes link to graph nodes via an `entities[]` field for cross-referencing narrative and structured knowledge
 - **Context-aware prompt** — for small graphs, full render; for large graphs, entity extraction from user message + graph traversal (or semantic nearest-neighbour when embeddings available)
-- **Consolidation** — periodic deduplication, parallel edge merging, chain collapsing, contradiction detection, community detection
+- **Consolidation** — periodic deduplication (with Levenshtein fuzzy matching), parallel edge merging (MAX confidence), chain collapsing, contradiction detection, community detection
+- **Corruption recovery** — on parse failure, preserves corrupted file and recovers from archive
 - **Confidence decay** — time-based (24h idle trigger), not just request-count-based
 - **Archiving** — low-confidence edges moved to `knowledge-archive.json`
+- **Persistent embedding cache** — embeddings cached to disk with LRU eviction (500 entries max)
 
 ### Episodic memory (`memory/episodes.json`)
 
@@ -122,7 +126,7 @@ In production mode (`--supervise`), the supervisor:
 2. Spawns each ANT on a dedicated thread (EventBus is `!Send`)
 3. Starts the web server with auth middleware
 4. Starts the history recorder (listens to broadcast events)
-5. Monitors ANT tasks, restarts crashed ones with exponential backoff
+5. Monitors ANT tasks, restarts crashed ones with true exponential backoff (2^attempt, capped at 5 min)
 6. Periodically consolidates knowledge graphs and archives stale conjectures
 
 ANTS register their handles with a shared `BotRegistry`, which the web server reads for the dashboard. ANTS that exist on disk but aren't running show as "Configured" in the UI.

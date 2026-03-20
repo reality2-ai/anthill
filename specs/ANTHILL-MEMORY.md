@@ -1,6 +1,6 @@
 # ANTHILL-MEMORY: Knowledge Graph and Memory Architecture
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, ANTHILL-COLONY
@@ -300,7 +300,7 @@ The AI SHOULD write an episode after:
 
 ### 5.5 Retrieval
 
-Episodes are retrieved by keyword search against summary, outcomes, and tags. The most recent 5 episodes plus keyword matches are included in the prompt.
+Episodes are retrieved by keyword search against summary, outcomes, and tags, weighted by **recency** (exponential decay with 30-day half-life). Recent episodes score higher than old ones with identical keyword matches. The most relevant 5 episodes are included in the prompt.
 
 ---
 
@@ -314,19 +314,22 @@ Over time, the graph accumulates duplicate nodes, redundant edges, and low-value
 
 | Operation | Trigger | Behaviour |
 |-----------|---------|-----------|
-| **Node dedup** | Labels match (case-insensitive or substring) + same kind | Merge: keep longer summary, union tags, move all edges |
-| **Edge merge** | Same source, target, and relation | Combine: confidence = 1-(1-c1)(1-c2), cap 0.95. Sum tests/survived/references. |
+| **Node dedup** | Labels match (case-insensitive, substring, or Levenshtein ≤15% edit distance for labels ≥6 chars) + same kind | Merge: keep longer summary, union tags, move all edges |
+| **Edge merge** | Same source, target, and relation | Combine: confidence = max(c1, c2), cap 0.95. Sum tests/survived/references. Concatenate contexts. |
 | **Chain collapse** | A→B→C where B is a Fact with degree 2 and low importance | Collapse to A→C: confidence = min(c1, c2), combined relation |
 | **Contradiction detect** | Same node pair with high/low confidence divergence | Flag as warning for AI review |
 | **Community detection** | During consolidation | GraphRAG-inspired connected component analysis identifies knowledge clusters. Communities are labelled and can seed focused graph queries |
 
 ### 6.3 Confidence Merging
 
-When merging parallel edges (independent observations of the same relationship):
+When merging parallel edges (same source, target, and relation):
 
 ```
-combined_confidence = 1 - (1 - c1)(1 - c2)
+combined_confidence = max(c1, c2)   // capped at 0.95
+combined_context = "ctx1; ctx2"     // preserve both sources
 ```
+
+The MAX strategy is used because parallel edges typically come from the same source (the AI processing different conversations). Using probabilistic OR (`1-(1-c1)(1-c2)`) would incorrectly compound confidence for non-independent observations.
 
 This models independent confirmation: if two sources both say the same thing, the combined confidence exceeds either individual. Capped at 0.95.
 
