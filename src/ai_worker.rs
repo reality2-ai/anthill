@@ -156,10 +156,16 @@ After significant conversations, append: {\"date\": \"YYYY-MM-DD\", \"participan
  \"summary\": \"2-3 sentences\", \"outcomes\": [...], \"tags\": [...], \"entities\": [...]}\n\
 Recent episodes are shown below as [EPISODES].\n\n\
 KNOWLEDGE GRAPH ORGANISATION:\n\
-- memory/knowledge.json is the META-GRAPH — an index of all knowledge graphs.\n\
-- memory/graphs/<topic>.json — per-topic graphs for major subjects.\n\
-- When analysing something new, decide: existing topic graph, new graph, or meta-graph.\n\
-- Ensure mkdir -p memory/graphs/ before creating the first topic graph.";
+ALL knowledge MUST go into topic graphs in memory/graphs/<topic>.json — NOT into knowledge.json directly.\n\
+- memory/knowledge.json is ONLY the META-GRAPH — it contains nodes representing each topic graph\n\
+  and edges showing how topics relate. NO domain knowledge goes here.\n\
+- memory/graphs/<topic>.json — where ALL actual knowledge lives.\n\
+  Use lowercase-hyphenated names: anthill.json, r2-architecture.json, infrastructure.json\n\
+- WHEN TO CREATE A NEW TOPIC GRAPH: if the subject doesn't fit an existing topic, create a new file.\n\
+  Always run mkdir -p memory/graphs/ first.\n\
+- WHEN TO UPDATE THE META-GRAPH: after creating a new topic graph, add a node for it in\n\
+  knowledge.json (kind: 'concept', tags: ['graph', 'topic']) with edges to related topics.\n\
+- NEVER put domain-specific nodes (people, tools, decisions) in knowledge.json — always in a topic graph.";
 
 /// Extended methodology preamble — included only for analytical commands
 /// (/analyse, /reflect, /specify, /test-vectors). Saves ~1KB per regular request.
@@ -1227,13 +1233,20 @@ Identify relationships between entities. For each relationship:
   - Source: "{source_name}"
 
 PHASE 6 — INTEGRATION:
-Now read memory/knowledge.json and UPDATE it:
+Determine the topic name for this document (lowercase-hyphenated, e.g. "anthill-architecture").
+Run: mkdir -p memory/graphs/
+Read or create memory/graphs/<topic>.json and UPDATE it:
   1. For each code → add or update a node (don't duplicate existing ones)
   2. For each theme → add a concept node, link member codes to it with "part_of" edges
   3. For each relationship → add an edge with the confidence, basis, view, and source fields
   4. Add "{source_name}" as an event node with today's date
   5. Set valid_from on all new edges to today's date
-  6. Write the updated knowledge.json
+  6. Write the updated memory/graphs/<topic>.json
+
+Then update the META-GRAPH (memory/knowledge.json):
+  7. Add a node for this topic graph if not already there (kind: "concept", tags: ["graph", "topic"])
+  8. Add edges from this topic to related existing topics
+  9. Write the updated knowledge.json
 
 Finally, write a brief summary of what you found and added to the graph.
 
@@ -1265,10 +1278,14 @@ STEP 5 — RELATIONSHIPS: Identify relationships between entities.
 Each: from, to, relation, view (semantic/temporal/causal/entity),
 basis (observed→0.7, inferred→0.4, assumed→0.3), source: "{source_name}".
 
-STEP 6 — INTEGRATION: Read memory/knowledge.json, add all nodes and edges,
-set valid_from to today, write back. Add "{source_name}" as an event node.
+STEP 6 — INTEGRATION:
+  - Determine a topic name (lowercase-hyphenated)
+  - Run: mkdir -p memory/graphs/
+  - Write all nodes and edges to memory/graphs/<topic>.json (NOT knowledge.json)
+  - Update the meta-graph (knowledge.json) with a node for this topic + links to related topics
+  - Add "{source_name}" as an event node, set valid_from to today
 
-Show your work for each step. Write the updated graph. Summarise findings."#,
+Show your work for each step. Write the updated graphs. Summarise findings."#,
             source_name = source_name,
             n = chunks.len(),
             path = full_path.display(),
