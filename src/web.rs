@@ -61,6 +61,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/ants/reload", post(reload_ants))
         .route("/api/ants/{id}/restart", post(restart_ant))
+        .route("/api/ants/{id}/compact-history", post(compact_history))
         .route("/api/ants/{id}/graph", get(get_graph))
         .route("/api/backends", get(list_backends))
         .route("/api/doctor", get(doctor_check))
@@ -502,6 +503,29 @@ async fn get_graph(
         ));
     }
     Json(viz).into_response()
+}
+
+/// POST /api/ants/:id/compact-history — trim chat history to last 4 messages.
+async fn compact_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Ok(mut h) = state.history.lock() {
+        let msgs = h.get_history(&id);
+        if msgs.len() > 4 {
+            let compacted = msgs.len() - 4;
+            let kept: Vec<_> = msgs.iter().rev().take(4).rev().cloned().collect();
+            let mut new_msgs = vec![crate::history::ChatMessage {
+                role: "system".into(),
+                text: format!("{} earlier messages compacted to knowledge graph.", compacted),
+                task_id: 0,
+                timestamp: crate::trust::now_secs(),
+            }];
+            new_msgs.extend(kept);
+            h.replace_history(&id, new_msgs);
+        }
+    }
+    StatusCode::OK
 }
 
 /// POST /api/ants/:id/restart — stop an ANT and trigger reload to restart with new config.

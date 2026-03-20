@@ -1194,17 +1194,32 @@ function compactChat() {
     alert('Chat is too short to compact (need at least 6 messages).');
     return;
   }
-  // Send the compact command — the worker will analyse the chat and trim it.
+
+  const compactedCount = msgs.length - 4;
+
+  // Send the compact command — the worker will analyse the chat into the graph.
   wsSendSigned({
     type: 'chat',
     bot: state.activeBot,
     message: '/compact-chat',
   });
-  // Show immediate feedback.
-  if (!state.messages[state.activeBot]) state.messages[state.activeBot] = [];
-  state.messages[state.activeBot].push({ role: 'user', text: '/compact-chat' });
+
+  // Trim the visible chat: keep only last 4 messages, replace earlier with a banner.
+  const kept = msgs.slice(-4);
+  state.messages[state.activeBot] = [
+    {
+      role: 'system',
+      text: `📦 **${compactedCount} earlier messages compacted to knowledge graph.**\nSwitch to the **Graph** tab to explore what was learned.`
+    },
+    ...kept,
+    { role: 'user', text: '/compact-chat' },
+  ];
+
   showTyping(state.activeBot);
   renderChat();
+
+  // Also trim the server-side history file.
+  authFetch('/api/ants/' + state.activeBot + '/compact-history', { method: 'POST' }).catch(() => {});
 }
 
 function sendMessage() {
@@ -1276,6 +1291,11 @@ function renderChat() {
   const chat = document.getElementById('chat');
   const msgs = state.messages[state.activeBot] || [];
   chat.innerHTML = msgs.map((m, i) => {
+    if (m.role === 'system') {
+      return `<div style="text-align:center;padding:12px 20px;margin:8px 0;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text-dim);cursor:pointer" onclick="switchTab('graph')">
+        ${formatMarkdown(m.text)}
+      </div>`;
+    }
     const replyBtn = `<button class="reply-btn" onclick="replyTo(${i})" title="Reply">↩</button>`;
     if (m.role === 'bot') {
       return `<div class="msg bot">${formatMarkdown(m.text)}${replyBtn}</div>`;

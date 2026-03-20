@@ -21,7 +21,7 @@ pub struct ChatMessage {
 
 /// Per-bot chat history, backed by a file.
 pub struct BotHistory {
-    messages: Vec<ChatMessage>,
+    pub(crate) messages: Vec<ChatMessage>,
     file_path: PathBuf,
 }
 
@@ -117,6 +117,24 @@ impl HistoryStore {
         }
         if let Some(h) = self.histories.get_mut(bot_name) {
             h.append(&msg);
+        }
+    }
+
+    pub fn get_history(&mut self, bot_name: &str) -> Vec<ChatMessage> {
+        self.get_or_load(bot_name).to_vec()
+    }
+
+    pub fn replace_history(&mut self, bot_name: &str, msgs: Vec<ChatMessage>) {
+        let path = self.base_dir.join(format!("{}.jsonl", bot_name));
+        // Rewrite the JSONL file.
+        let content: String = msgs.iter()
+            .filter_map(|m| serde_json::to_string(m).ok())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let _ = std::fs::write(&path, content);
+        // Update in-memory.
+        if let Some(h) = self.histories.get_mut(bot_name) {
+            h.messages = msgs;
         }
     }
 
