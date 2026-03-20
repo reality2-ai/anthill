@@ -1514,6 +1514,89 @@ impl CachedGraph {
         }
     }
 
+    /// Semantic search using Ollama embeddings.
+    /// Collects node data synchronously, then embeds asynchronously.
+    pub async fn semantic_search(
+        &self,
+        ollama: &crate::ollama::OllamaClient,
+        message: &str,
+        top_n: usize,
+    ) -> Vec<(String, f32)> {
+        self.maybe_reload();
+
+        // Collect node data under the lock, then drop it before async work.
+        let node_data: Vec<(String, String)> = {
+            let graph = match self.graph.lock() {
+                Ok(g) => g,
+                Err(_) => return Vec::new(),
+            };
+            graph.graph.node_indices()
+                .map(|idx| {
+                    let n = &graph.graph[idx];
+                    (n.label.clone(), format!("{}: {}", n.label, n.summary))
+                })
+                .collect()
+        };
+
+        if node_data.is_empty() { return Vec::new(); }
+
+        // Embed all nodes (with caching) — async, no lock held.
+        let mut node_embeddings: Vec<(String, Vec<f32>)> = Vec::new();
+        for (label, text) in &node_data {
+            match ollama.embed_cached(label, text).await {
+                Ok(vec) => node_embeddings.push((label.clone(), vec)),
+                Err(e) => log::debug!("Embed failed for '{}': {}", label, e),
+            }
+        }
+
+        // Embed the query.
+        let query_vec = match ollama.embed(&[message]).await {
+            Ok(vecs) if !vecs.is_empty() => vecs.into_iter().next().unwrap(),
+            _ => return Vec::new(),
+        };
+
+        crate::ollama::OllamaClient::top_similar(&query_vec, &node_embeddings, top_n)
+    }
+
+    /// Enhanced render_for_prompt that uses embeddings when Ollama is available.
+    pub async fn render_for_prompt_semantic(
+        &self,
+        ollama: &crate::ollama::OllamaClient,
+        message: &str,
+        max_chars: usize,
+    ) -> String {
+        // Try embedding-based search first.
+        let similar = self.semantic_search(ollama, message, 10).await;
+        if !similar.is_empty() {
+            self.maybe_reload();
+            let graph = match self.graph.lock() {
+                Ok(g) => g,
+                Err(_) => return self.render_for_prompt(message, max_chars),
+            };
+
+            let mut result = QueryResult::default();
+            let mut existing = std::collections::HashSet::new();
+            for (label, _score) in &similar {
+                let about = graph.query_about(label, 1);
+                for (idx, node, score) in about.nodes {
+                    if existing.insert(idx.index()) {
+                        result.nodes.push((idx, node, score));
+                    }
+                }
+                result.edges.extend(about.edges);
+            }
+
+            if !result.nodes.is_empty() {
+                let mut r = graph.render_query_result(&result, max_chars);
+                r.push_str("\n(Semantic search via embeddings.)\n");
+                return r;
+            }
+        }
+
+        // Fallback to keyword-based.
+        self.render_for_prompt(message, max_chars)
+    }
+
     /// Node count (for logging).
     #[allow(dead_code)]
     pub fn node_count(&self) -> usize {

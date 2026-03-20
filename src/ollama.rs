@@ -1,0 +1,263 @@
+//! Ollama integration — embeddings and chat via local REST API.
+//!
+//! Two capabilities:
+//! 1. Embeddings: encode text as vectors for semantic knowledge graph search
+//! 2. Chat: use Ollama models as an AI backend (alternative to Claude/Codex)
+//!
+//! Ollama runs locally on the same machine (or network) at http://localhost:11434.
+//! No API key needed.
+
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+/// Default Ollama API base URL.
+const DEFAULT_BASE_URL: &str = "http://localhost:11434";
+
+/// Default embedding model.
+const DEFAULT_EMBED_MODEL: &str = "nomic-embed-text";
+
+/// Ollama client for embeddings and chat.
+#[derive(Clone)]
+pub struct OllamaClient {
+    base_url: String,
+    embed_model: String,
+    client: reqwest::Client,
+    /// Cache: label → embedding vector. Avoids re-embedding unchanged nodes.
+    embed_cache: Arc<Mutex<std::collections::HashMap<String, Vec<f32>>>>,
+}
+
+impl OllamaClient {
+    /// Create a new Ollama client.
+    pub fn new(base_url: Option<&str>, embed_model: Option<&str>) -> Self {
+        Self {
+            base_url: base_url.unwrap_or(DEFAULT_BASE_URL).trim_end_matches('/').into(),
+            embed_model: embed_model.unwrap_or(DEFAULT_EMBED_MODEL).into(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
+            embed_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// Check if Ollama is available.
+    pub async fn is_available(&self) -> bool {
+        self.client.get(&self.base_url)
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+
+    // --- Embeddings ---
+
+    /// Generate embeddings for one or more texts.
+    pub async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
+        let input: Vec<String> = texts.iter().map(|t| t.to_string()).collect();
+
+        let body = EmbedRequest {
+            model: self.embed_model.clone(),
+            input,
+        };
+
+        let resp = self.client
+            .post(format!("{}/api/embed", self.base_url))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Ollama embed request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Ollama embed {} — {}", status, text));
+        }
+
+        let result: EmbedResponse = resp.json().await
+            .map_err(|e| format!("Ollama embed parse error: {}", e))?;
+
+        Ok(result.embeddings)
+    }
+
+    /// Embed a single text (with caching).
+    pub async fn embed_cached(&self, key: &str, text: &str) -> Result<Vec<f32>, String> {
+        {
+            let cache = self.embed_cache.lock().await;
+            if let Some(vec) = cache.get(key) {
+                return Ok(vec.clone());
+            }
+        }
+
+        let results = self.embed(&[text]).await?;
+        let vec = results.into_iter().next()
+            .ok_or_else(|| "No embedding returned".to_string())?;
+
+        {
+            let mut cache = self.embed_cache.lock().await;
+            cache.insert(key.to_string(), vec.clone());
+        }
+
+        Ok(vec)
+    }
+
+    /// Cosine similarity between two vectors.
+    pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() || a.is_empty() { return 0.0; }
+        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm_a == 0.0 || norm_b == 0.0 { return 0.0; }
+        dot / (norm_a * norm_b)
+    }
+
+    /// Find the top-N most similar texts from a set of embeddings.
+    pub fn top_similar(
+        query_embedding: &[f32],
+        candidates: &[(String, Vec<f32>)],
+        top_n: usize,
+    ) -> Vec<(String, f32)> {
+        let mut scored: Vec<(String, f32)> = candidates.iter()
+            .map(|(label, vec)| (label.clone(), Self::cosine_similarity(query_embedding, vec)))
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(top_n);
+        scored
+    }
+
+    // --- Chat (AI backend) ---
+
+    /// Generate a response using Ollama's /api/generate endpoint.
+    /// Returns the full response text (non-streaming).
+    pub async fn generate(&self, model: &str, prompt: &str, system: Option<&str>) -> Result<String, String> {
+        let body = GenerateRequest {
+            model: model.into(),
+            prompt: prompt.into(),
+            system: system.map(|s| s.into()),
+            stream: false,
+        };
+
+        let resp = self.client
+            .post(format!("{}/api/generate", self.base_url))
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(300))
+            .send()
+            .await
+            .map_err(|e| format!("Ollama generate failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Ollama generate {} — {}", status, text));
+        }
+
+        let result: GenerateResponse = resp.json().await
+            .map_err(|e| format!("Ollama generate parse error: {}", e))?;
+
+        Ok(result.response)
+    }
+
+    /// List available models.
+    #[allow(dead_code)]
+    pub async fn list_models(&self) -> Result<Vec<String>, String> {
+        let resp = self.client
+            .get(format!("{}/api/tags", self.base_url))
+            .send()
+            .await
+            .map_err(|e| format!("Ollama list models failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err("Ollama not available".into());
+        }
+
+        let result: TagsResponse = resp.json().await
+            .map_err(|e| format!("Ollama tags parse error: {}", e))?;
+
+        Ok(result.models.into_iter().map(|m| m.name).collect())
+    }
+}
+
+// --- Request/Response types ---
+
+#[derive(Serialize)]
+struct EmbedRequest {
+    model: String,
+    input: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct EmbedResponse {
+    embeddings: Vec<Vec<f32>>,
+}
+
+#[derive(Serialize)]
+struct GenerateRequest {
+    model: String,
+    prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct GenerateResponse {
+    response: String,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct TagsResponse {
+    models: Vec<ModelInfo>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct ModelInfo {
+    name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cosine_similarity_identical() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert!((OllamaClient::cosine_similarity(&a, &b) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        assert!(OllamaClient::cosine_similarity(&a, &b).abs() < 0.001);
+    }
+
+    #[test]
+    fn cosine_similarity_opposite() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        assert!((OllamaClient::cosine_similarity(&a, &b) + 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn top_similar_ranking() {
+        let query = vec![1.0, 0.0, 0.0];
+        let candidates = vec![
+            ("close".into(), vec![0.9, 0.1, 0.0]),
+            ("far".into(), vec![0.0, 0.0, 1.0]),
+            ("medium".into(), vec![0.5, 0.5, 0.0]),
+        ];
+        let top = OllamaClient::top_similar(&query, &candidates, 2);
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0].0, "close");
+        assert_eq!(top[1].0, "medium");
+    }
+
+    #[test]
+    fn empty_vectors() {
+        assert_eq!(OllamaClient::cosine_similarity(&[], &[]), 0.0);
+        assert_eq!(OllamaClient::cosine_similarity(&[0.0], &[0.0]), 0.0);
+    }
+}

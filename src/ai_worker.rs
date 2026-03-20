@@ -410,6 +410,9 @@ pub async fn ai_worker_loop(
     let knowledge_file = config.memory_dir.join("knowledge.json");
     let knowledge_cache = crate::knowledge::CachedGraph::new(&knowledge_file);
 
+    // Ollama client for embeddings and as an AI backend.
+    let ollama_client = crate::ollama::OllamaClient::new(None, None);
+
     // Episodic memory file.
     let episodes_file = config.memory_dir.join("episodes.json");
 
@@ -466,7 +469,12 @@ pub async fn ai_worker_loop(
 
         // Build the command for the selected backend.
         // Knowledge graph + episodes + user memory pre-loaded into the prompt.
-        let kg_rendered = knowledge_cache.render_for_prompt(&actual_message, 4096);
+        // Try semantic search (Ollama embeddings) first, fall back to keyword-based.
+        let kg_rendered = if ollama_client.is_available().await {
+            knowledge_cache.render_for_prompt_semantic(&ollama_client, &actual_message, 4096).await
+        } else {
+            knowledge_cache.render_for_prompt(&actual_message, 4096)
+        };
 
         // Load relevant episodes.
         let episodes_mem = crate::knowledge::EpisodicMemory::load(&episodes_file);
@@ -571,6 +579,65 @@ pub async fn ai_worker_loop(
             for (idx, backend) in backend_list.iter().enumerate() {
                 // Track which backend is active.
                 if let Ok(mut b) = task_live_backend.lock() { *b = backend.clone(); }
+
+                // Ollama backend — HTTP API, not a CLI process.
+                if backend.starts_with("ollama") {
+                    // Format: "ollama" or "ollama:model-name"
+                    let model = backend.strip_prefix("ollama:")
+                        .unwrap_or("llama3.2")
+                        .to_string();
+                    if let Ok(mut p) = task_live_progress.lock() {
+                        *p = Some(format!("Calling Ollama ({})...", model));
+                    }
+                    let ollama = crate::ollama::OllamaClient::new(None, None);
+                    let result = ollama.generate(
+                        &model,
+                        &message_for_backends,
+                        Some(&system_prompt_for_backends),
+                    ).await;
+                    match result {
+                        Ok(text) if !text.is_empty() => {
+                            response_text = text;
+                            _used_backend = backend.clone();
+                            break;
+                        }
+                        Ok(_) => {
+                            log::warn!("[{}] Ollama '{}': empty response", bname, model);
+                            if idx + 1 < backend_list.len() {
+                                if let Some(ref tx) = etx {
+                                    let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                        bot: bname.clone(), task_id,
+                                        kind: "fallback".into(),
+                                        detail: format!("ollama:{} empty, trying {}...", model, backend_list[idx + 1]),
+                                    });
+                                }
+                            } else {
+                                response_text = format!("Ollama ({}) returned empty response", model);
+                            }
+                        }
+                        Err(err) => {
+                            log::warn!("[{}] Ollama '{}' failed: {}", bname, model, err);
+                            if idx + 1 < backend_list.len() {
+                                if let Some(ref tx) = etx {
+                                    let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                        bot: bname.clone(), task_id,
+                                        kind: "fallback".into(),
+                                        detail: format!("ollama failed, trying {}...", backend_list[idx + 1]),
+                                    });
+                                }
+                            } else {
+                                response_text = format!("⚠️ All backends failed. Last error: {}", err);
+                                if let Some(ref tx) = etx {
+                                    let _ = tx.send(crate::registry::WsEvent::TaskError {
+                                        bot: bname.clone(), task_id, error: err,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 let (cmd_name, args) = build_backend_command(
                     backend,
                     &message_for_backends,

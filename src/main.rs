@@ -12,6 +12,7 @@ mod events;
 mod history;
 mod knowledge;
 mod thematic;
+mod ollama;
 mod specgen;
 mod plugins;
 mod registry;
