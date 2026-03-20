@@ -84,6 +84,8 @@ pub async fn run_web_server(
         .route("/icon-192.png", get(icon_192))
         .route("/icon-512.png", get(icon_512))
         .route("/logo.svg", get(logo))
+        .route("/vendor/3d-force-graph.min.js", get(vendor_force_graph))
+        .route("/vendor/three-spritetext.min.js", get(vendor_spritetext))
         .route("/api/auth/verify", post(auth_verify))
         .route("/api/auth/join", post(auth_join))
         .route("/api/auth/status", get(auth_status))
@@ -118,6 +120,19 @@ async fn logo() -> impl IntoResponse {
         [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
         LOGO_SVG,
     )
+}
+
+// --- Vendor libraries (embedded) ---
+
+const VENDOR_FORCE_GRAPH: &str = include_str!("vendor/3d-force-graph.min.js");
+const VENDOR_SPRITETEXT: &str = include_str!("vendor/three-spritetext.min.js");
+
+async fn vendor_force_graph() -> impl IntoResponse {
+    ([(axum::http::header::CONTENT_TYPE, "application/javascript")], VENDOR_FORCE_GRAPH)
+}
+
+async fn vendor_spritetext() -> impl IntoResponse {
+    ([(axum::http::header::CONTENT_TYPE, "application/javascript")], VENDOR_SPRITETEXT)
 }
 
 /// GET /manifest.json — PWA manifest.

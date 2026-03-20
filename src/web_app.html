@@ -12,9 +12,8 @@
 <link rel="apple-touch-icon" href="/icon-192.svg">
 <title>Anthill</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://unpkg.com/three@0.170.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three-spritetext@1.9.0/dist/three-spritetext.min.js"></script>
-<script src="https://unpkg.com/3d-force-graph@1.77.7/dist/3d-force-graph.min.js"></script>
+<script src="/vendor/3d-force-graph.min.js"></script>
+<script src="/vendor/three-spritetext.min.js"></script>
 <style>
   :root {
     --bg: #1a1a2e;
@@ -912,35 +911,38 @@ async function loadGraph(graphName) {
         <b>${n.label}</b> (${n.kind})<br>${n.summary || ''}</div>`)
       .nodeColor(n => NODE_COLORS[n.kind] || '#888')
       .nodeVal(n => 3)
-      .nodeResolution(12)
-      .nodeThreeObjectExtend(true)
-      .nodeThreeObject(n => {
-        const sprite = new SpriteText(n.label);
-        sprite.color = NODE_COLORS[n.kind] || '#ccc';
-        sprite.textHeight = 2.5;
-        sprite.position.set(0, 5, 0);
-        return sprite;
-      })
-      .linkLabel(l => `<div style="background:rgba(0,0,0,0.8);padding:4px 8px;border-radius:4px;font-size:12px">
-        ${l.relation} [${Math.round(l.confidence * 100)}%]</div>`)
-      .linkWidth(l => Math.max(0.5, l.confidence * 3))
-      .linkOpacity(0.6)
-      .linkThreeObjectExtend(true)
-      .linkThreeObject(l => {
-        const sprite = new SpriteText(l.relation);
-        sprite.color = '#999';
-        sprite.textHeight = 1.5;
-        return sprite;
-      })
-      .linkPositionUpdate((sprite, { start, end }) => {
-        if (sprite && sprite.position && start && end) {
-          Object.assign(sprite.position, {
-            x: start.x + (end.x - start.x) / 2,
-            y: start.y + (end.y - start.y) / 2,
-            z: start.z + (end.z - start.z) / 2,
-          });
-        }
-      })
+      .nodeResolution(12);
+
+    // Add text labels if SpriteText loaded successfully.
+    if (typeof SpriteText !== 'undefined') {
+      graphInstance
+        .nodeThreeObjectExtend(true)
+        .nodeThreeObject(n => {
+          const sprite = new SpriteText(n.label);
+          sprite.color = NODE_COLORS[n.kind] || '#ccc';
+          sprite.textHeight = 2.5;
+          sprite.position.set(0, 5, 0);
+          return sprite;
+        })
+        .linkThreeObjectExtend(true)
+        .linkThreeObject(l => {
+          const sprite = new SpriteText(l.relation);
+          sprite.color = '#999';
+          sprite.textHeight = 1.5;
+          return sprite;
+        })
+        .linkPositionUpdate((sprite, { start, end }) => {
+          if (sprite && sprite.position && start && end) {
+            Object.assign(sprite.position, {
+              x: start.x + (end.x - start.x) / 2,
+              y: start.y + (end.y - start.y) / 2,
+              z: start.z + (end.z - start.z) / 2,
+            });
+          }
+        });
+    }
+
+    graphInstance
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
         if (l.confidence >= 0.5) return '#fbbf24';
