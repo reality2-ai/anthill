@@ -87,6 +87,10 @@ struct Args {
     /// Hostname override for QR join URL (default: auto-detect).
     #[arg(long)]
     hostname: Option<String>,
+
+    /// Run diagnostics — check all prerequisites, config, and services.
+    #[arg(long)]
+    doctor: bool,
 }
 
 #[tokio::main]
@@ -226,6 +230,12 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Doctor — diagnostic check.
+    if args.doctor {
+        run_doctor().await;
+        return Ok(());
+    }
+
     // Supervisor mode (default if no utility command).
     let config_dir = args.supervise.unwrap_or_else(|| {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
@@ -279,4 +289,252 @@ fn print_qr(data: &str) {
         }
         println!();
     }
+}
+
+/// Run diagnostic checks and report status.
+/// Output is structured so it can be reused by the web API.
+pub fn run_doctor_checks() -> Vec<DoctorCheck> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let config_dir = format!("{}/.config/anthill", home);
+
+    let mut checks = Vec::new();
+
+    // --- Required ---
+
+    // Rust toolchain (already running if we got here, but check for cargo for rebuilds).
+    checks.push(check_command("cargo", &["--version"],
+        "Rust toolchain", "required",
+        "https://rustup.rs/",
+    ));
+
+    // AI Backends.
+    checks.push(check_command("claude", &["--version"],
+        "Claude Code (AI backend)", "recommended",
+        "https://docs.anthropic.com/en/docs/claude-code",
+    ));
+    checks.push(check_command("codex", &["--version"],
+        "OpenAI Codex (AI backend)", "optional",
+        "https://github.com/openai/codex",
+    ));
+
+    // Ollama.
+    let ollama_check = check_command("ollama", &["--version"],
+        "Ollama (local AI + embeddings)", "recommended",
+        "https://ollama.com/download",
+    );
+    checks.push(ollama_check.clone());
+
+    // If Ollama is installed, check for models.
+    if ollama_check.status == "ok" {
+        checks.push(check_ollama_model("nomic-embed-text",
+            "Embedding model (semantic search)", "recommended",
+            "Run: ollama pull nomic-embed-text",
+        ));
+        checks.push(check_ollama_model("llama3.2",
+            "Chat model (local AI backend)", "optional",
+            "Run: ollama pull llama3.2",
+        ));
+    }
+
+    // Git (for backups).
+    checks.push(check_command("git", &["--version"],
+        "Git (workspace backups)", "required",
+        "https://git-scm.com/downloads",
+    ));
+
+    // Tailscale.
+    checks.push(check_command("tailscale", &["version"],
+        "Tailscale (secure network access)", "recommended",
+        "https://tailscale.com/download",
+    ));
+
+    // --- Config ---
+
+    // Config directory.
+    let config_exists = std::path::Path::new(&config_dir).exists();
+    checks.push(DoctorCheck {
+        name: "Config directory".into(),
+        status: if config_exists { "ok" } else { "missing" }.into(),
+        detail: config_dir.clone(),
+        severity: "required".into(),
+        help: format!("Run: mkdir -p {}/ants", config_dir),
+    });
+
+    // Colony key.
+    let key_path = format!("{}/colony.key", config_dir);
+    let key_exists = std::path::Path::new(&key_path).exists();
+    checks.push(DoctorCheck {
+        name: "Colony key".into(),
+        status: if key_exists { "ok" } else { "missing" }.into(),
+        detail: if key_exists { "colony.key exists".into() } else { "Will be generated on first run".into() },
+        severity: "info".into(),
+        help: "Auto-generated on first anthill --supervise".into(),
+    });
+
+    // ANTs.
+    let ants_dir = format!("{}/ants", config_dir);
+    let ant_count = if std::path::Path::new(&ants_dir).exists() {
+        std::fs::read_dir(&ants_dir)
+            .map(|entries| entries.flatten()
+                .filter(|e| e.path().join("ant.toml").exists())
+                .count())
+            .unwrap_or(0)
+    } else { 0 };
+    checks.push(DoctorCheck {
+        name: "ANTS configured".into(),
+        status: if ant_count > 0 { "ok" } else { "none" }.into(),
+        detail: format!("{} ANT(s) found", ant_count),
+        severity: "info".into(),
+        help: "Create from the web dashboard or: mkdir -p ~/.config/anthill/ants/my-ant && cp config-example/ants/dev-assistant/ant.toml ~/.config/anthill/ants/my-ant/".into(),
+    });
+
+    // Devices.
+    let devices_path = format!("{}/devices.toml", config_dir);
+    let device_count = if std::path::Path::new(&devices_path).exists() {
+        std::fs::read_to_string(&devices_path)
+            .map(|c| c.matches("[devices.").count())
+            .unwrap_or(0)
+    } else { 0 };
+    checks.push(DoctorCheck {
+        name: "Devices provisioned".into(),
+        status: if device_count > 0 { "ok" } else { "none" }.into(),
+        detail: format!("{} device(s)", device_count),
+        severity: "info".into(),
+        help: "Run: anthill --qr-join".into(),
+    });
+
+    // --- Service ---
+
+    // systemd service (Linux only).
+    #[cfg(target_os = "linux")]
+    {
+        let service_active = std::process::Command::new("systemctl")
+            .args(["is-active", "--quiet", "anthill"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        checks.push(DoctorCheck {
+            name: "systemd service".into(),
+            status: if service_active { "ok" } else { "inactive" }.into(),
+            detail: if service_active { "anthill.service running".into() } else { "Not running".into() },
+            severity: "info".into(),
+            help: "Run: sudo systemctl enable --now anthill".into(),
+        });
+    }
+
+    checks
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DoctorCheck {
+    pub name: String,
+    pub status: String,   // "ok", "missing", "none", "inactive", "error"
+    pub detail: String,
+    pub severity: String, // "required", "recommended", "optional", "info"
+    pub help: String,
+}
+
+fn check_command(cmd: &str, args: &[&str], name: &str, severity: &str, help_url: &str) -> DoctorCheck {
+    let result = std::process::Command::new(cmd)
+        .args(args)
+        .output();
+    match result {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout)
+                .lines().next().unwrap_or("").trim().to_string();
+            DoctorCheck {
+                name: name.into(),
+                status: "ok".into(),
+                detail: if version.is_empty() { "installed".into() } else { version },
+                severity: severity.into(),
+                help: help_url.into(),
+            }
+        }
+        _ => DoctorCheck {
+            name: name.into(),
+            status: "missing".into(),
+            detail: format!("{} not found", cmd),
+            severity: severity.into(),
+            help: help_url.into(),
+        },
+    }
+}
+
+fn check_ollama_model(model: &str, name: &str, severity: &str, help: &str) -> DoctorCheck {
+    let result = std::process::Command::new("ollama")
+        .args(["list"])
+        .output();
+    match result {
+        Ok(output) if output.status.success() => {
+            let list = String::from_utf8_lossy(&output.stdout);
+            if list.contains(model) {
+                DoctorCheck {
+                    name: name.into(),
+                    status: "ok".into(),
+                    detail: format!("{} available", model),
+                    severity: severity.into(),
+                    help: help.into(),
+                }
+            } else {
+                DoctorCheck {
+                    name: name.into(),
+                    status: "missing".into(),
+                    detail: format!("{} not pulled", model),
+                    severity: severity.into(),
+                    help: help.into(),
+                }
+            }
+        }
+        _ => DoctorCheck {
+            name: name.into(),
+            status: "error".into(),
+            detail: "Could not list Ollama models".into(),
+            severity: severity.into(),
+            help: help.into(),
+        },
+    }
+}
+
+async fn run_doctor() {
+    let checks = run_doctor_checks();
+
+    println!();
+    println!("  Anthill Doctor");
+    println!("  ══════════════");
+    println!();
+
+    let mut issues = 0;
+    for check in &checks {
+        let icon = match check.status.as_str() {
+            "ok" => "✓",
+            "missing" => "✗",
+            "none" => "○",
+            "inactive" => "○",
+            _ => "?",
+        };
+        let color_status = match check.status.as_str() {
+            "ok" => format!("\x1b[32m{}\x1b[0m", icon),         // green
+            "missing" if check.severity == "required" => {
+                issues += 1;
+                format!("\x1b[31m{}\x1b[0m", icon)              // red
+            }
+            "missing" => {
+                format!("\x1b[33m{}\x1b[0m", icon)              // yellow
+            }
+            _ => format!("{}", icon),
+        };
+
+        println!("  {} {} — {}", color_status, check.name, check.detail);
+        if check.status != "ok" && !check.help.is_empty() {
+            println!("    → {}", check.help);
+        }
+    }
+
+    println!();
+    if issues > 0 {
+        println!("  \x1b[31m{} required item(s) missing.\x1b[0m", issues);
+    } else {
+        println!("  \x1b[32mAll required items present.\x1b[0m");
+    }
+    println!();
 }

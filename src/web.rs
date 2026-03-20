@@ -61,6 +61,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/ants/reload", post(reload_ants))
         .route("/api/backends", get(list_backends))
+        .route("/api/doctor", get(doctor_check))
         .route("/api/auth/devices", get(auth_list_devices))
         .route("/api/auth/devices/{id}", axum::routing::delete(auth_revoke_device))
         .route("/api/auth/qr-join", get(auth_qr_join))
@@ -407,6 +408,12 @@ async fn list_backends() -> impl IntoResponse {
     Json(backends.iter().map(|(name, installed)| {
         serde_json::json!({ "name": name, "installed": installed })
     }).collect::<Vec<_>>())
+}
+
+/// GET /api/doctor — run diagnostic checks.
+async fn doctor_check() -> impl IntoResponse {
+    let checks = crate::run_doctor_checks();
+    Json(checks)
 }
 
 /// POST /api/ants/reload — tell the supervisor to scan for new ants.
