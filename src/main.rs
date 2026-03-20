@@ -342,6 +342,16 @@ pub fn run_doctor_checks() -> Vec<DoctorCheck> {
         "https://git-scm.com/downloads",
     ));
 
+    // Document analysis tools.
+    checks.push(check_command("pdftotext", &["-v"],
+        "pdftotext (PDF analysis)", "optional",
+        "Install: sudo apt install poppler-utils (or brew install poppler)",
+    ));
+    checks.push(check_command("pandoc", &["--version"],
+        "pandoc (Word doc analysis)", "optional",
+        "https://pandoc.org/installing.html",
+    ));
+
     // Tailscale.
     checks.push(check_command("tailscale", &["version"],
         "Tailscale (secure network access)", "recommended",

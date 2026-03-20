@@ -219,7 +219,7 @@ fn build_backend_command(
     backend: &str,
     message: &str,
     system_prompt: &str,
-    working_dir: &str,
+    _working_dir: &str,
     skip_permissions: bool,
     continue_session: bool,
 ) -> (String, Vec<String>) {
@@ -254,10 +254,6 @@ fn build_backend_command(
             }
             if continue_session {
                 args.push("-c".to_string());
-            }
-            if !working_dir.is_empty() {
-                args.push("--cwd".to_string());
-                args.push(working_dir.to_string());
             }
             args.push("--append-system-prompt".to_string());
             args.push(system_prompt.to_string());
@@ -1114,6 +1110,51 @@ fn build_system_prompt(
     prompt
 }
 
+/// Read a document, handling PDFs by extracting text via pdftotext.
+fn read_document(path: &Path) -> Result<String, String> {
+    let ext = path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    match ext.as_str() {
+        "pdf" => {
+            // Use pdftotext (poppler-utils) to extract text from PDF.
+            let output = std::process::Command::new("pdftotext")
+                .arg("-layout")
+                .arg(path)
+                .arg("-")  // stdout
+                .output()
+                .map_err(|e| format!("pdftotext not found (install poppler-utils): {}", e))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("pdftotext failed: {}", stderr));
+            }
+            let text = String::from_utf8_lossy(&output.stdout).to_string();
+            if text.trim().is_empty() {
+                return Err("PDF appears to be image-only (no extractable text). Try OCR first.".into());
+            }
+            Ok(text)
+        }
+        "docx" | "doc" => {
+            // Try pandoc for Word documents.
+            let output = std::process::Command::new("pandoc")
+                .args(["-t", "plain"])
+                .arg(path)
+                .output()
+                .map_err(|e| format!("pandoc not found (install pandoc for .docx support): {}", e))?;
+            if !output.status.success() {
+                return Err("pandoc conversion failed".into());
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+        _ => {
+            // Plain text, markdown, source code, etc.
+            std::fs::read_to_string(path)
+                .map_err(|e| format!("Could not read file: {}", e))
+        }
+    }
+}
+
 /// Build the message for /analyse <file> — thematic analysis of a document.
 fn build_analyse_message(file_path: &str, working_dir: &str, _knowledge_file: &Path) -> String {
     use crate::thematic;
@@ -1125,7 +1166,7 @@ fn build_analyse_message(file_path: &str, working_dir: &str, _knowledge_file: &P
         std::path::PathBuf::from(working_dir).join(file_path)
     };
 
-    let content = match std::fs::read_to_string(&full_path) {
+    let content = match read_document(&full_path) {
         Ok(c) => c,
         Err(e) => return format!("Could not read '{}': {}", file_path, e),
     };
@@ -1137,23 +1178,59 @@ fn build_analyse_message(file_path: &str, working_dir: &str, _knowledge_file: &P
     let chunks = thematic::chunk_document(&content);
 
     if chunks.len() <= 2 {
-        // Short document — single combined analysis prompt.
+        // Short document — single combined analysis prompt with explicit step-by-step.
         format!(
-            r#"Perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on this document: "{source_name}"
+            r#"You MUST perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on this document.
+Document: "{source_name}"
 
-Follow these phases:
+Follow these phases IN ORDER. Complete each phase before starting the next.
+Show your work for each phase.
 
-PHASE 2 — CODING: Extract all significant entities, concepts, decisions, tools, and facts.
-PHASE 3 — THEMES: Group codes into broader themes with support levels.
-PHASE 5 — RELATIONSHIPS: Identify relationships between entities with basis (observed/inferred/assumed).
-PHASE 6 — INTEGRATION: Read memory/knowledge.json and integrate the results:
-  - Add/update nodes for each code
-  - Add concept nodes for each theme, linked to member codes
-  - Add edges for each relationship (observed→0.7, inferred→0.4, assumed→0.3 confidence)
-  - Add "{source_name}" as an event node with today's date
-  - Don't duplicate existing nodes — update if better info available
+PHASE 1 — FAMILIARISATION:
+Read the entire document. Note what it's about, its structure, and key topics.
+Write a 2-3 sentence overview.
 
-Write the updated knowledge.json. Then give a brief summary of what you found.
+PHASE 2 — CODING:
+Extract every significant entity, concept, decision, tool, person, and fact.
+For each code, state:
+  - Label (short name)
+  - Kind (person/project/server/tool/concept/decision/event/fact)
+  - One-line summary
+  - Evidence (quote or paraphrase from the document)
+
+PHASE 3 — THEME GENERATION:
+Group your codes into 3-8 themes. Each theme is a pattern of shared meaning.
+For each theme, state:
+  - Theme name
+  - Central concept
+  - Which codes belong to it
+  - Support level (how well-evidenced: 0.0-1.0)
+
+PHASE 4 — REVIEW:
+Re-read the document. Check each theme against the source:
+  - Does the evidence support the theme?
+  - Did you miss any codes?
+  - Are any themes too broad or too narrow?
+Revise themes and codes as needed.
+
+PHASE 5 — RELATIONSHIPS:
+Identify relationships between entities. For each relationship:
+  - From → To (must match code labels)
+  - Relation type (uses, deployed_on, depends_on, part_of, decided, etc.)
+  - View: semantic, temporal, causal, or entity
+  - Basis: observed (explicit in text, confidence 0.7), inferred (implied, 0.4), or assumed (interpretation, 0.3)
+  - Source: "{source_name}"
+
+PHASE 6 — INTEGRATION:
+Now read memory/knowledge.json and UPDATE it:
+  1. For each code → add or update a node (don't duplicate existing ones)
+  2. For each theme → add a concept node, link member codes to it with "part_of" edges
+  3. For each relationship → add an edge with the confidence, basis, view, and source fields
+  4. Add "{source_name}" as an event node with today's date
+  5. Set valid_from on all new edges to today's date
+  6. Write the updated knowledge.json
+
+Finally, write a brief summary of what you found and added to the graph.
 
 DOCUMENT:
 {content}"#,
@@ -1161,27 +1238,35 @@ DOCUMENT:
             content = content
         )
     } else {
-        // Long document — provide the first chunk with instructions for iterative analysis.
-        let first_chunk = &chunks[0];
+        // Long document — instruct the AI to read the file in full and perform all phases.
         format!(
-            r#"Perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on a large document: "{source_name}"
-The document has {n} chunks. This is chunk 1.
+            r#"You MUST perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on a large document.
+Document: "{source_name}" ({n} chunks, located at: {path})
 
-PHASE 2 — CODING: Extract entities, concepts, decisions from this chunk.
-After coding this chunk, read the next chunk from the file and continue coding.
-When all chunks are coded, proceed to:
-PHASE 3 — THEMES: Group codes into themes.
-PHASE 5 — RELATIONSHIPS: Identify relationships with basis.
-PHASE 6 — INTEGRATION: Update memory/knowledge.json with results.
+This is a large document. Follow this process:
 
-The full document is at: {path}
+STEP 1: Read the ENTIRE file at {path} — all of it, not just the first part.
 
-START WITH CHUNK 1:
-{chunk}"#,
+STEP 2 — CODING: As you read, extract every significant entity, concept, decision,
+tool, person, and fact. For each, note: label, kind, summary, evidence quote.
+
+STEP 3 — THEMES: After reading everything, group codes into 3-8 themes.
+Each theme: name, central concept, member codes, support level (0.0-1.0).
+
+STEP 4 — REVIEW: Go back and verify your themes against the source.
+Did you miss anything? Are themes well-supported?
+
+STEP 5 — RELATIONSHIPS: Identify relationships between entities.
+Each: from, to, relation, view (semantic/temporal/causal/entity),
+basis (observed→0.7, inferred→0.4, assumed→0.3), source: "{source_name}".
+
+STEP 6 — INTEGRATION: Read memory/knowledge.json, add all nodes and edges,
+set valid_from to today, write back. Add "{source_name}" as an event node.
+
+Show your work for each step. Write the updated graph. Summarise findings."#,
             source_name = source_name,
             n = chunks.len(),
             path = full_path.display(),
-            chunk = first_chunk
         )
     }
 }
@@ -1237,7 +1322,7 @@ fn build_specify_message(file_path: &str, working_dir: &str) -> String {
         std::path::PathBuf::from(working_dir).join(file_path)
     };
 
-    let content = match std::fs::read_to_string(&full_path) {
+    let content = match read_document(&full_path) {
         Ok(c) => c,
         Err(e) => return format!("Could not read '{}': {}", file_path, e),
     };
@@ -1278,7 +1363,7 @@ fn build_test_vectors_message(file_path: &str, working_dir: &str) -> String {
         std::path::PathBuf::from(working_dir).join(file_path)
     };
 
-    let content = match std::fs::read_to_string(&full_path) {
+    let content = match read_document(&full_path) {
         Ok(c) => c,
         Err(e) => return format!("Could not read '{}': {}", file_path, e),
     };
