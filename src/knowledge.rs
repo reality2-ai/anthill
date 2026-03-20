@@ -629,6 +629,12 @@ impl KnowledgeGraph {
 
         let nodes: Vec<serde_json::Value> = self.graph.node_indices().map(|idx| {
             let node = &self.graph[idx];
+            // Derive node confidence from average of connected edge confidences.
+            let edge_confs: Vec<f64> = self.graph.edges(idx)
+                .map(|e| e.weight().confidence)
+                .collect();
+            let confidence = if edge_confs.is_empty() { 0.5 }
+                else { edge_confs.iter().sum::<f64>() / edge_confs.len() as f64 };
             serde_json::json!({
                 "id": idx.index(),
                 "label": node.label,
@@ -637,6 +643,7 @@ impl KnowledgeGraph {
                 "tags": node.tags,
                 "created": node.created,
                 "updated": node.updated,
+                "confidence": confidence,
             })
         }).collect();
 

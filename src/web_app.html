@@ -912,7 +912,18 @@ async function loadGraph(graphName) {
       .graphData(data)
       .nodeLabel(n => `<div style="background:rgba(0,0,0,0.8);padding:6px 10px;border-radius:6px;font-size:13px">
         <b>${n.label}</b> (${n.kind})<br>${n.summary || ''}</div>`)
-      .nodeColor(n => NODE_COLORS[n.kind] || '#888')
+      .nodeColor(n => {
+        // Map confidence to opacity: 1.0 = fully opaque, 0.0 = almost transparent.
+        const c = n.confidence !== undefined ? n.confidence : 0.5;
+        const alpha = Math.max(0.15, c); // never fully invisible
+        const hex = NODE_COLORS[n.kind] || '#888888';
+        // Convert hex to rgba.
+        const r = parseInt(hex.slice(1,3), 16) || 136;
+        const g = parseInt(hex.slice(3,5), 16) || 136;
+        const b = parseInt(hex.slice(5,7), 16) || 136;
+        return `rgba(${r},${g},${b},${alpha})`;
+      })
+      .nodeOpacity(1.0)
       .nodeVal(n => 3)
       .nodeResolution(12);
 
@@ -947,7 +958,7 @@ async function loadGraph(graphName) {
 
     graphInstance
       .linkWidth(l => Math.max(1, l.confidence * 3))
-      .linkOpacity(0.5)
+      .linkOpacity(0.6)
       .linkColor(l => {
         if (l.confidence >= 0.8) return '#4ade80';
         if (l.confidence >= 0.5) return '#fbbf24';
