@@ -1,6 +1,6 @@
 # ANTHILL-WORKER: AI Worker Lifecycle
 
-**Version:** 0.1 Draft
+**Version:** 0.2.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, ANTHILL-COLONY, ANTHILL-MEMORY
@@ -60,7 +60,7 @@ Multiple tasks MAY run concurrently for the same ANT. Each task is an independen
 
 ### 3.1 Backend Detection
 
-Implementations SHOULD detect installed backends at startup by checking for their CLI executables: `claude`, `codex`, `gemini`, `ollama`.
+Implementations SHOULD detect installed backends at startup by checking for their CLI executables: `claude`, `codex`, `gemini`, `ollama`. The `anthill --doctor` command reports which backends are detected.
 
 ### 3.2 Backend Priority and Fallback
 
@@ -83,8 +83,8 @@ Each backend has a specific CLI invocation:
 |---------|---------|-----------|
 | `claude` | `claude -p --verbose --output-format stream-json` | `--dangerously-skip-permissions`, `-c` (continue), `--append-system-prompt` |
 | `codex` | `codex exec --json` | — |
+| `ollama:<model>` | `ollama run <model>` | `--nowordwrap`, model specified via `ollama:` prefix in backends config |
 | `gemini` | Reserved | Not yet implemented |
-| `ollama` | Reserved | Not yet implemented |
 
 ### 3.5 Progress Parsing
 
@@ -99,6 +99,10 @@ Each backend's JSON output is parsed for progress events:
 **Codex (`json`):**
 - `type: "item.started"` / `type: "item.completed"` with `command_execution` → tool progress
 - `type: "item.completed"` with `agent_message` → result text
+
+**Ollama (plain text):**
+- Output is plain text (not JSON). Lines are accumulated as the result text.
+- No structured progress events — progress is inferred from stdout activity (watchdog).
 
 ---
 
@@ -222,7 +226,31 @@ All string slicing (message truncation, preview extraction, chunk boundaries) MU
 
 ---
 
-## 8. System Prompt Architecture
+## 8. Sensitive Operation Restriction
+
+### 8.1 Restricted Commands
+
+The following commands MUST be blocked when received from Telegram or Slack:
+
+| Command | Reason |
+|---------|--------|
+| `/analyse <file>` | Reads and analyses workspace files |
+| `/specify <file>` | Reads source code, generates specifications |
+| `/test-vectors <file>` | Reads source code or specs, generates test cases |
+
+These commands operate on workspace files and produce structured output best reviewed in the web UI. Telegram and Slack lack the trust group authentication that the web dashboard provides.
+
+### 8.2 Behaviour
+
+When a restricted command is received from Telegram or Slack, the conductor MUST:
+
+1. NOT dispatch the command to the AI backend.
+2. Reply with a message explaining that this command is only available from the web dashboard.
+3. Include the web dashboard URL in the reply if known.
+
+---
+
+## 9. System Prompt Architecture
 
 The system prompt sent to the AI backend is composed of:
 

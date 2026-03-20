@@ -73,6 +73,16 @@ The knowledge graph (`knowledge.json`) and per-user memory files accumulate cont
 
 Always use `gh repo create --private` when creating backup repos.
 
+## Sensitive operation restriction
+
+The following commands are restricted to the web dashboard and blocked from Telegram and Slack:
+
+- `/analyse <file>` — thematic analysis
+- `/specify <file>` — specification generation
+- `/test-vectors <file>` — test vector generation
+
+These commands operate on files in the workspace and produce structured output that is best reviewed in the web UI. Telegram and Slack lack the trust group authentication that the web dashboard provides, so sensitive operations that read and analyse workspace files are restricted to the more secure channel.
+
 ## Recommendations
 
 1. **Use Tailscale** for the web dashboard — don't expose port 3000 to the public internet

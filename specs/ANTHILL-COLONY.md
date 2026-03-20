@@ -1,6 +1,6 @@
 # ANTHILL-COLONY: Colony Architecture
 
-**Version:** 0.1 Draft
+**Version:** 0.2.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, R2-TRUST, R2-SENTANT, R2-PLUGIN
@@ -142,13 +142,30 @@ Three provisioning methods:
 2. **QR scan** (CLI): `anthill --qr-join` generates a QR code in the terminal.
 3. **Manual code**: `anthill --join-code` generates a text code. User enters it in the web app's join screen.
 
+### 4.3 Diagnostics
+
+The `anthill --doctor` command performs a comprehensive diagnostic check:
+
+1. **Rust** — toolchain installed and accessible.
+2. **AI backends** — Claude, Codex, Ollama CLI detection.
+3. **Ollama models** — required models pulled (llama3.2, nomic-embed-text).
+4. **Git** — installed and accessible.
+5. **Tailscale** — installed and connected.
+6. **Config** — supervisor.toml and ant.toml files valid.
+7. **Colony key** — colony.key exists.
+8. **ANTs** — configured ANTs found.
+9. **Devices** — provisioned devices listed.
+10. **Service** — systemd/launchd/rc.d service status.
+
+The same diagnostics are available via the web API at `GET /api/doctor`.
+
 Join codes:
 - MUST be 48 bits of entropy (displayed as `xxxx-xxxx-xxxx` hex).
 - MUST expire after 300 seconds (5 minutes).
 - MUST be single-use (consumed on successful join).
 - MUST be persisted to disk so CLI-generated codes are visible to the running server.
 
-### 4.3 Authentication
+### 4.4 Authentication
 
 All protected API endpoints require an `X-Credential` header containing the device's hex-encoded Ed25519 private key seed.
 
@@ -158,7 +175,7 @@ WebSocket messages are signed with HMAC-SHA256 (using the credential as the HMAC
 - **Device identity**: Ed25519 via R2-TRUST (certificates, join protocol).
 - **Transport signing**: HMAC-SHA256 (browser `crypto.subtle` compatibility).
 
-### 4.4 First Device Bootstrap
+### 4.5 First Device Bootstrap
 
 The first device cannot join via the web UI (the UI requires authentication). The first device MUST be provisioned via the CLI:
 

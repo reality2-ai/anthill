@@ -1,6 +1,6 @@
 # ANTHILL-WEB: Web Dashboard and API
 
-**Version:** 0.1 Draft
+**Version:** 0.2.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, ANTHILL-COLONY
@@ -171,6 +171,7 @@ File paths are validated against the working directory via `canonicalize()` to p
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/backends` | Yes | List AI backends (installed/not) |
+| GET | `/api/doctor` | Yes | Run diagnostic checks — returns status of all prerequisites (Rust, AI backends, Ollama models, Git, Tailscale, config, colony key, ANTs, devices, service). Same checks as `anthill --doctor` CLI |
 
 ---
 

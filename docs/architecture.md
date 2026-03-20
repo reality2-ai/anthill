@@ -52,7 +52,7 @@ Each AI request spawns a **worker** — a tokio task running an AI backend proce
 - **Stderr capture**: read concurrently with stdout to prevent pipe deadlock, included in error messages
 - **Process groups**: `process_group(0)` + `kill_on_drop` ensures cancel kills the entire process tree
 - **Follow-up queue**: messages queued for running tasks, dispatched with session continuity when the task completes
-- **Multi-backend fallback**: try each configured backend in order; fall back on failure/rate limits
+- **Multi-backend fallback**: try each configured backend in order (Claude, Codex, Ollama); fall back on failure/rate limits
 
 ## Memory architecture
 
@@ -64,8 +64,15 @@ A directed graph of entities and conjectural relationships, following **Popperia
 
 - **Cached in memory** — loaded once, reloaded when the AI modifies the file
 - **Graph query API** — traversal (BFS), path-finding (shortest paths with cumulative confidence), kind filtering, uncertainty queries
-- **Context-aware prompt** — for small graphs, full render; for large graphs, entity extraction from user message + graph traversal
-- **Consolidation** — periodic deduplication, parallel edge merging, chain collapsing, contradiction detection
+- **Semantic retrieval** — Ollama embeddings (nomic-embed-text) enable semantic search over graph nodes; falls back to keyword extraction when Ollama is unavailable
+- **MAGMA-inspired edge views** — edges carry semantic, temporal, causal, and entity classification metadata for multi-perspective graph queries
+- **Temporal validity** — edges have `valid_from`/`valid_until` fields (Zep-inspired) for time-scoped knowledge
+- **Provenance tracking** — edges carry a `source` field for "why do I believe this?" tracing
+- **Community detection** — GraphRAG-inspired connected component analysis during consolidation identifies knowledge clusters
+- **Episode entity linking** — episodes link to graph nodes via an `entities[]` field for cross-referencing narrative and structured knowledge
+- **Context-aware prompt** — for small graphs, full render; for large graphs, entity extraction from user message + graph traversal (or semantic nearest-neighbour when embeddings available)
+- **Consolidation** — periodic deduplication, parallel edge merging, chain collapsing, contradiction detection, community detection
+- **Confidence decay** — time-based (24h idle trigger), not just request-count-based
 - **Archiving** — low-confidence edges moved to `knowledge-archive.json`
 
 ### Episodic memory (`memory/episodes.json`)

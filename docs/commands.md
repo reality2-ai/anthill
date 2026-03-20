@@ -66,6 +66,7 @@ Run from the server terminal:
 | `anthill --export-key` | Show colony key (for password manager) |
 | `anthill --export-key --qr` | Show colony key as QR code |
 | `anthill --import-key <key>` | Restore colony key from backup |
+| `anthill --doctor` | Diagnostic check — verifies Rust, Claude, Codex, Ollama, models, Git, Tailscale, config, colony key, ANTs, devices, service status |
 
 ## Special prefixes
 

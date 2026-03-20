@@ -20,6 +20,7 @@ Each ANT has its own personality, workspace, persistent memory, and can run mult
 git clone https://github.com/reality2-ai/anthill.git
 cd anthill
 ./install.sh                     # builds, installs binary, sets up service
+anthill --doctor                 # check prerequisites (Rust, AI backends, Ollama, etc.)
 anthill --qr-join                # show QR code — scan with phone to join
 # Or: anthill --join-code        # text code for manual entry
 # Open http://localhost:3000 (or your Tailscale hostname)
@@ -101,7 +102,8 @@ These all follow the same thematic analysis pattern: **familiarise → code → 
 - **Graph reflection** — the AI reviews and refines its own knowledge
 
 **AI and workers:**
-- **Multi-backend AI** — Claude Code, OpenAI Codex (Ollama, Gemini coming). Automatic fallback on failure/rate limits
+- **Multi-backend AI** — Claude Code, OpenAI Codex, Ollama (local). Automatic fallback on failure/rate limits
+- **Ollama embeddings** — semantic knowledge graph search via nomic-embed-text, with keyword fallback
 - **Worker supervision** — watchdog per task, stall detection, timeout killing, stderr capture
 - **Follow-up queue** — inject context into running tasks; answers routed to the right worker
 - **Concurrent tasks** — multiple workers per ANT; `/status` shows live progress per worker
@@ -116,6 +118,7 @@ These all follow the same thematic analysis pattern: **familiarise → code → 
 - **Trust group security** — R2-TRUST Ed25519 identity, HMAC-signed WebSocket, join codes
 - **Git-backed workspace** — auto-committed on schedule, optionally encrypted and pushed
 - **Auto-restart** — supervisor with exponential backoff, hot-add of new ANTS
+- **Diagnostics** — `anthill --doctor` checks all prerequisites (Rust, AI backends, Ollama models, Git, Tailscale, colony key)
 - **Cross-platform** — Linux (systemd), macOS (launchd), FreeBSD (rc.d)
 
 ## Documentation

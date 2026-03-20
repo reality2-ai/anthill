@@ -1,6 +1,6 @@
 # ANTHILL-MEMORY: Knowledge Graph and Memory Architecture
 
-**Version:** 0.1 Draft
+**Version:** 0.2.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-INTRO, ANTHILL-COLONY
@@ -84,6 +84,10 @@ Edge schema:
 | `last_tested` | date string | "" | When last tested or reinforced |
 | `importance` | f64 | 0.5 | How central this is (0.0–1.0) |
 | `references` | u32 | 0 | How many times referenced in conversation |
+| `valid_from` | date string | "" | When this relationship became true (Zep-inspired temporal validity) |
+| `valid_until` | date string | "" | When this relationship ceased to be true (empty = still valid) |
+| `source` | string | "" | Provenance: how this conjecture was formed ("conversation", "analysis", "inference", etc.) |
+| `views` | EdgeViews | {} | MAGMA-inspired multi-perspective metadata (see §2.4) |
 
 ### 2.3 Basis and Initial Confidence
 
@@ -95,6 +99,39 @@ The **basis** determines starting confidence when a conjecture is first formed:
 | `told` | 0.6 | A user stated this as fact |
 | `inferred` | 0.4 | Derived from other knowledge |
 | `assumed` | 0.3 | Guessed without evidence |
+
+### 2.4 Edge Views (MAGMA-inspired)
+
+Edges carry multi-perspective metadata for richer graph queries. Each view is OPTIONAL and may be populated by the AI or analysis pipelines.
+
+| View | Type | Description |
+|------|------|-------------|
+| `semantic` | string | Semantic category of the relationship (e.g. "ownership", "dependency", "preference") |
+| `temporal` | string | Temporal nature (e.g. "ongoing", "completed", "planned", "historical") |
+| `causal` | string | Causal role (e.g. "cause", "effect", "correlation", "prerequisite") |
+| `entity_class` | string | Classification of the relationship endpoints (e.g. "person-project", "tool-concept") |
+
+Edge views enable queries such as "show all causal relationships" or "show all historical relationships" without requiring the AI to re-classify edges at query time.
+
+### 2.5 Temporal Validity (Zep-inspired)
+
+Edges with `valid_from` and `valid_until` fields support time-scoped knowledge:
+
+- **Current knowledge**: edges where `valid_until` is empty or in the future.
+- **Historical knowledge**: edges where `valid_until` is in the past.
+- **Scheduled knowledge**: edges where `valid_from` is in the future.
+
+The prompt renderer SHOULD prefer current knowledge over historical knowledge. Historical edges MAY be included when the user asks about past states.
+
+### 2.6 Provenance Tracking
+
+The `source` field on edges records how a conjecture was formed, enabling "why do I believe this?" tracing:
+
+- `"conversation"` — directly stated or observed in a conversation
+- `"analysis"` — produced by `/analyse` or `/reflect`
+- `"inference"` — derived from other graph relationships
+- `"import"` — imported from external data
+- `"consolidation"` — created by the consolidation process (e.g. merged edges)
 
 ---
 
@@ -147,6 +184,8 @@ confidence *= factor
 ```
 
 Approximately 5% loss per month of inactivity.
+
+**Decay trigger:** Confidence decay is evaluated on a **time-based trigger** (24 hours idle), not just on a request-count basis. If the ANT has been idle for 24 hours or more, decay is applied to all conjectures on the next interaction.
 
 ### 3.5 Confidence Bounds
 
@@ -238,9 +277,20 @@ The knowledge graph captures structured facts. Episodic memory captures **narrat
 | `participants` | string[] | OPTIONAL | Who was involved |
 | `summary` | string | REQUIRED | 2-3 sentence narrative |
 | `outcomes` | string[] | OPTIONAL | Key decisions or results |
+| `entities` | string[] | OPTIONAL | Labels of knowledge graph nodes referenced in this episode |
 | `tags` | string[] | OPTIONAL | Searchable keywords |
 
-### 5.3 When to Write Episodes
+### 5.3 Entity Linking
+
+The `entities` field links episodes to knowledge graph nodes by label. This enables:
+
+- Retrieving all episodes that mention a given entity (bidirectional cross-reference).
+- Providing narrative context when an entity is queried from the graph.
+- Identifying entities that frequently co-occur in episodes (relationship discovery).
+
+The AI SHOULD populate `entities` with the labels of all knowledge graph nodes mentioned or relevant to the episode.
+
+### 5.4 When to Write Episodes
 
 The AI SHOULD write an episode after:
 - A significant conversation (not trivial questions)
@@ -248,7 +298,7 @@ The AI SHOULD write an episode after:
 - A problem is solved
 - A deployment or event occurs
 
-### 5.4 Retrieval
+### 5.5 Retrieval
 
 Episodes are retrieved by keyword search against summary, outcomes, and tags. The most recent 5 episodes plus keyword matches are included in the prompt.
 
@@ -268,6 +318,7 @@ Over time, the graph accumulates duplicate nodes, redundant edges, and low-value
 | **Edge merge** | Same source, target, and relation | Combine: confidence = 1-(1-c1)(1-c2), cap 0.95. Sum tests/survived/references. |
 | **Chain collapse** | A→B→C where B is a Fact with degree 2 and low importance | Collapse to A→C: confidence = min(c1, c2), combined relation |
 | **Contradiction detect** | Same node pair with high/low confidence divergence | Flag as warning for AI review |
+| **Community detection** | During consolidation | GraphRAG-inspired connected component analysis identifies knowledge clusters. Communities are labelled and can seed focused graph queries |
 
 ### 6.3 Confidence Merging
 
@@ -326,15 +377,29 @@ This approach works for English, French, German, Spanish, and other Latin-alphab
 
 ---
 
-## 9. Future: Embedding-Based Retrieval
+## 9. Embedding-Based Retrieval
 
-The query API is designed to support embedding-based semantic search as an additional retrieval strategy. When available (via Ollama or similar):
+Embedding-based semantic search is available as an additional retrieval strategy via Ollama's `nomic-embed-text` model.
 
-1. Each node's label+summary is encoded as a vector.
+### 9.1 How It Works
+
+1. Each node's label+summary is encoded as a vector via `POST /api/embed` to the local Ollama instance.
 2. The user's message is encoded as a vector.
 3. Nearest nodes by cosine similarity seed the graph traversal.
 
 This enables queries like "the project Roy is working on" to find "Anthill" even when the word doesn't appear in the message.
+
+### 9.2 Fallback
+
+If Ollama is not installed or `nomic-embed-text` is not available, retrieval falls back to keyword-based subgraph extraction (inverted index + 1-hop expansion) as described in §4.4. The system operates fully without embeddings; they are an enhancement, not a requirement.
+
+### 9.3 Setup
+
+```bash
+ollama pull nomic-embed-text
+```
+
+No configuration is required in `ant.toml` — the system auto-detects the embedding model at startup.
 
 ---
 

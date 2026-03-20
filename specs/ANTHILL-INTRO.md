@@ -1,6 +1,6 @@
 # ANTHILL-INTRO: Introduction to Anthill
 
-**Version:** 0.1 Draft
+**Version:** 0.2.0
 **Date:** 2026-03-20
 **Status:** Informative (not normative)
 
@@ -40,6 +40,8 @@ Knowledge is not binary (known/unknown). All relationships in an ANT's knowledge
 ### 3.4 Multi-backend, not multi-model
 
 Anthill abstracts AI backends (Claude Code, OpenAI Codex, Ollama, Gemini) behind a unified worker interface. An ANT can be configured to use one or more backends with fallback. The ANT's personality and memory are independent of which backend processes a given request.
+
+Ollama also provides **embeddings** (via nomic-embed-text) for semantic knowledge graph search, enabling queries like "the project Roy is working on" to find relevant graph nodes even when exact labels don't appear in the message. When Ollama embeddings are unavailable, retrieval falls back to keyword extraction.
 
 ### 3.5 Devices are viewers
 
@@ -86,7 +88,7 @@ Client devices do not run AI. They are windows into the colony. A phone scanning
 | **Conductor** | Pure FSM sentant. Routes commands (dispatch, cancel, status, help) to plugin calls |
 | **AI Plugin** | Holds all I/O state. Dispatches messages to the worker, manages task tracking, sends responses |
 | **AI Worker** | Background async loop. Spawns AI backend processes, streams progress, handles fallback |
-| **Knowledge Graph** | Per-ANT Popperian knowledge store. Persisted to JSON, cached in memory |
+| **Knowledge Graph** | Per-ANT Popperian knowledge store. Persisted to JSON, cached in memory. Semantic retrieval via Ollama embeddings |
 | **Web Server** | Axum HTTP/WebSocket server. Serves the dashboard SPA, proxies to ANTs |
 | **Trust Group** | R2-TRUST colony. Manages device provisioning, authentication, message signing |
 

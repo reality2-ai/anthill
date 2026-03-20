@@ -10,7 +10,22 @@ cd anthill
 
 This builds the binary, installs it, creates `~/.config/anthill/`, and starts the service.
 
-## 2. Generate a join code
+## 2. Check prerequisites
+
+```bash
+anthill --doctor
+```
+
+This verifies that all prerequisites are installed and configured: Rust, AI backends (Claude, Codex, Ollama), required Ollama models, Git, Tailscale, config files, colony key, and service status. Fix any issues it reports before continuing.
+
+If you want to use Ollama for local AI or semantic search, install the models now:
+
+```bash
+ollama pull llama3.2            # chat model
+ollama pull nomic-embed-text    # embedding model (enables semantic graph search)
+```
+
+## 3. Generate a join code
 
 ```bash
 anthill --join-code
@@ -18,15 +33,15 @@ anthill --join-code
 
 This prints a code that expires in 5 minutes. You'll need it to connect from your browser.
 
-## 3. Open the dashboard
+## 4. Open the dashboard
 
 Open `http://localhost:3000` (or your Tailscale hostname) in a browser. Enter the join code and a device name. You're in.
 
-## 4. Create your first ANT
+## 5. Create your first ANT
 
 Click the **+** button in the sidebar. Enter an ID (e.g. `dev`) — everything else is optional and has sensible defaults. The ANT starts immediately.
 
-## 5. Send a message
+## 6. Send a message
 
 Select your ANT in the sidebar and type a message. You should see:
 
@@ -36,7 +51,7 @@ Select your ANT in the sidebar and type a message. You should see:
 
 Try: "What's 2+2?" or "Write a Python hello world"
 
-## 6. Useful commands
+## 7. Useful commands
 
 | Command | What it does |
 |---|---|
@@ -45,11 +60,11 @@ Try: "What's 2+2?" or "Write a Python hello world"
 | `/cancel` | Stop the current task |
 | `/new` | Start a fresh conversation |
 
-## 7. Optional: add Telegram or Slack
+## 8. Optional: add Telegram or Slack
 
 Click the ⚙ gear on your ANT → add a Telegram bot token or Slack tokens. Save and restart to activate.
 
-## 8. Optional: set up HTTPS
+## 9. Optional: set up HTTPS
 
 ```bash
 sudo tailscale serve --bg http://localhost:3000

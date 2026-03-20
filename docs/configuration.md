@@ -93,8 +93,13 @@ The `[claude]` section configures the AI backend and workspace (named for histor
 ```toml
 [claude]
 # AI backends in priority order. Fallback on failure/rate limits.
-# Supported: "claude", "codex". Coming: "ollama", "gemini".
+# Supported: "claude", "codex", "ollama:<model>". Coming: "gemini".
+# Ollama models use the "ollama:" prefix followed by the model name.
 backends = ["claude"]
+# Examples:
+#   backends = ["ollama:llama3.2"]                      # Ollama only (local)
+#   backends = ["claude", "ollama:llama3.2"]             # Claude with Ollama fallback
+#   backends = ["ollama:llama3.2", "codex"]              # Ollama with Codex fallback
 
 # Working directory — where the ANT operates
 # Auto-created if missing. Auto-initialised as a git repo.

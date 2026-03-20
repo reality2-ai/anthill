@@ -1,6 +1,6 @@
 # ANTHILL-THEMATIC: Thematic Analysis Pipeline
 
-**Version:** 0.1 Draft
+**Version:** 0.2.0
 **Date:** 2026-03-20
 **Status:** Draft
 **Depends on:** ANTHILL-MEMORY, ANTHILL-WORKER

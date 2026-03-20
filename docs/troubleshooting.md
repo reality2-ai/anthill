@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## First step: run the doctor
+
+```bash
+anthill --doctor
+```
+
+This checks all prerequisites and configuration in one pass: Rust, Claude, Codex, Ollama (and required models), Git, Tailscale, config files, colony key, ANTs, devices, and service status. It also available as a web API at `GET /api/doctor`. Start here before investigating specific issues.
+
 ## ANT doesn't respond to Telegram messages
 
 1. Check the service: `sudo systemctl status anthill`
@@ -61,6 +69,16 @@ Telegram has a 4096-character limit. Anthill splits long messages automatically.
 ## Crash on messages with macrons or special characters (UTF-8)
 
 **Fixed.** Earlier versions could panic when slicing strings at byte offsets that landed inside multi-byte UTF-8 characters (e.g. Māori macrons like ā, ē, ī, ō, ū, or emoji). All string slicing now uses character or word boundaries. If you see a panic mentioning "byte index is not a char boundary", update to the latest build.
+
+## Ollama not working
+
+1. Check Ollama is running: `ollama list`
+2. Verify the chat model is installed: `ollama pull llama3.2`
+3. Verify the embedding model is installed: `ollama pull nomic-embed-text`
+4. Test directly: `ollama run llama3.2 "hello"`
+5. Check your `ant.toml` backend config uses the `ollama:` prefix: `backends = ["ollama:llama3.2"]`
+6. If semantic search is not working but chat is, the embedding model (`nomic-embed-text`) may be missing — knowledge graph retrieval will fall back to keyword search automatically
+7. Run `anthill --doctor` for a full diagnostic
 
 ## ANT doesn't respond (web UI) — no error, no spinner
 

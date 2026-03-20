@@ -27,14 +27,30 @@ cd anthill
 
 This builds a release binary, copies it to `/usr/local/bin/anthill`, creates `~/.config/anthill/ants/`, and sets up the appropriate auto-start service for your platform (systemd on Linux, launchd on macOS, rc.d on BSD).
 
-### 2. Create your first ANT
+### 2. Install Ollama (optional — for local AI and semantic search)
+
+```bash
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# macOS
+brew install ollama
+
+# Pull models
+ollama pull llama3.2            # chat model
+ollama pull nomic-embed-text    # embedding model (enables semantic graph search)
+```
+
+Run `anthill --doctor` to verify all prerequisites are installed and configured.
+
+### 3. Create your first ANT
 
 ```bash
 mkdir -p ~/.config/anthill/ants/my-ant
 cp config-example/ants/dev-assistant/ant.toml ~/.config/anthill/ants/my-ant/ant.toml
 ```
 
-### 3. Configure it
+### 4. Configure it
 
 Edit `~/.config/anthill/ants/my-ant/ant.toml`:
 
@@ -70,7 +86,7 @@ working_dir = "/home/youruser/Development/anthill-my-ant"
 
 See [Configuration](configuration.md) for all options.
 
-### 4. Add more ANTS (optional)
+### 5. Add more ANTS (optional)
 
 Each ANT needs its own directory and `ant.toml`. Telegram is optional per ANT:
 
@@ -80,7 +96,7 @@ cp config-example/ants/dev-assistant/ant.toml ~/.config/anthill/ants/another-ant
 # Edit with a different token, working_dir, and personality
 ```
 
-### 5. Start
+### 6. Start
 
 ```bash
 sudo systemctl enable --now anthill
@@ -92,11 +108,11 @@ Or run manually:
 anthill --supervise ~/.config/anthill
 ```
 
-### 6. Set up HTTPS (recommended)
+### 7. Set up HTTPS (recommended)
 
 See [Web Dashboard](web-dashboard.md) for Tailscale HTTPS setup.
 
-### 7. Auto-start on boot
+### 8. Auto-start on boot
 
 Both Anthill and the HTTPS proxy survive reboots:
 
@@ -116,20 +132,20 @@ sudo systemctl status anthill
 tailscale serve status
 ```
 
-### 8. Check logs
+### 9. Check logs
 
 ```bash
 journalctl -u anthill -f                    # live logs
 journalctl -u anthill --since "10 min ago"  # recent
 ```
 
-### 9. Restart after config changes
+### 10. Restart after config changes
 
 ```bash
 sudo systemctl restart anthill
 ```
 
-### 10. Update to a new version
+### 11. Update to a new version
 
 ```bash
 cd ~/path/to/anthill

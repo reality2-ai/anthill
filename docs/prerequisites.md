@@ -54,7 +54,9 @@ codex
 codex exec "Say hello"
 ```
 
-### [Ollama](https://ollama.com/) (local, coming soon)
+### [Ollama](https://ollama.com/) (local)
+
+Run AI models locally — no API key needed. Also provides embeddings for semantic knowledge graph search.
 
 ```bash
 # Linux
@@ -63,9 +65,24 @@ curl -fsSL https://ollama.com/install.sh | sh
 # macOS
 brew install ollama
 
-# Pull a model
-ollama pull llama3
+# Pull a chat model
+ollama pull llama3.2
+
+# Pull the embedding model (recommended — enables semantic search)
+ollama pull nomic-embed-text
 ```
+
+Without `nomic-embed-text`, knowledge graph retrieval falls back to keyword search.
+
+### Verify prerequisites
+
+After installing, run the built-in diagnostic check:
+
+```bash
+anthill --doctor
+```
+
+This checks Rust, Claude, Codex, Ollama (and required models), Git, Tailscale, config files, colony key, ANTs, devices, and service status. It is also available as a web API at `GET /api/doctor`.
 
 **Important:** Authenticate each backend as the same user that will run Anthill.
 

@@ -39,7 +39,8 @@ How well-tested and stable is each area? Confidence grows through implementation
 | ANTHILL-MEMORY | Episodic memory | ●○○○○ | Load/save/search | Implemented, AI not yet writing episodes |
 | ANTHILL-MEMORY | Consolidation | ●●○○○ | Dedup, merge, collapse, contradiction | Implemented, not yet run at scale |
 | ANTHILL-MEMORY | Keyword extraction (i18n) | ●●●○○ | English, French, German tested | No CJK support |
-| ANTHILL-WORKER | Multi-backend fallback | ●●●○○ | Claude + Codex tested | Gemini/Ollama detection only |
+| ANTHILL-WORKER | Multi-backend fallback | ●●●○○ | Claude + Codex + Ollama tested | Ollama integrated, Gemini detection only |
+| ANTHILL-WORKER | Ollama embeddings | ●●○○○ | nomic-embed-text integration | Semantic search with keyword fallback |
 | ANTHILL-WORKER | Worker supervision | ●●●○○ | Timeout, stderr capture, stall detect | Running in production |
 | ANTHILL-WORKER | Follow-up queue | ●●●○○ | Auto-followup, ! interrupt | Auto-queue on message-while-running |
 | ANTHILL-WORKER | Web command routing | ●●●○○ | /help /status /usage /ants /cancel via web | Previously Telegram/Slack only |
@@ -58,6 +59,15 @@ How well-tested and stable is each area? Confidence grows through implementation
 | ANTHILL-WEB | ANT not-running feedback | ●●●○○ | Error on send to stopped ANT | Prevents silent message loss |
 | ANTHILL-WORKER | UTF-8 safety | ●●●●○ | Char/word-boundary slicing | Māori macrons, emoji safe |
 | ANTHILL-COLONY | Supervisor crash broadcasts | ●●●○○ | Crash/restart events to web UI | Real-time status updates |
+| ANTHILL-COLONY | Doctor diagnostics | ●●●○○ | CLI + web API | Checks all prerequisites and config |
+| ANTHILL-MEMORY | Edge views (MAGMA) | ●●○○○ | Semantic, temporal, causal, entity | Multi-perspective graph queries |
+| ANTHILL-MEMORY | Temporal validity (Zep) | ●●○○○ | valid_from/valid_until on edges | Time-scoped knowledge |
+| ANTHILL-MEMORY | Provenance tracking | ●●○○○ | Source field on edges | "Why do I believe this?" tracing |
+| ANTHILL-MEMORY | Community detection | ●○○○○ | Connected component analysis | GraphRAG-inspired, during consolidation |
+| ANTHILL-MEMORY | Episode entity linking | ●●○○○ | episodes.entities[] → graph nodes | Cross-reference narrative and structure |
+| ANTHILL-MEMORY | Embedding retrieval | ●●○○○ | Ollama nomic-embed-text | Semantic search with keyword fallback |
+| ANTHILL-MEMORY | Confidence decay (time) | ●●●○○ | 24h idle trigger | Time-based, not just request-count |
+| ANTHILL-WORKER | Sensitive op restriction | ●●●○○ | /analyse /specify /test-vectors | Blocked from Telegram/Slack |
 
 **Legend:** ●○○○○ = implemented but untested in production, ●●●●● = battle-tested and stable.
 
