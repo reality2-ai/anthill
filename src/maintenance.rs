@@ -91,11 +91,13 @@ fn run_consolidation(config: &MaintenanceConfig) {
                     if kg.node_count() == 0 { continue; }
 
                     let report = kg.consolidate();
+                    // Link orphan nodes to the graph's hub.
+                    kg.link_orphans(&topic);
                     if report.nodes_merged > 0 || report.edges_merged > 0 {
-                        kg.save();
                         log::info!("[{}] Topic '{}' consolidated: {} merged, {} edges merged",
                             config.ant_name, topic, report.nodes_merged, report.edges_merged);
                     }
+                    kg.save();
                     for warning in &report.contradictions {
                         log::warn!("[{}] Topic '{}' contradiction: {}", config.ant_name, topic, warning);
                     }

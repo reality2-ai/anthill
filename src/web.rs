@@ -1311,6 +1311,46 @@ async fn handle_web_command(
             }
             Some(msg)
         },
+        "/reprocess-graphs" => {
+            // Reprocess all graphs: link orphans, consolidate.
+            let memory_dir = handle.working_dir.join("memory");
+            drop(bots);
+            let graphs_dir = memory_dir.join("graphs");
+            let mut processed = 0;
+            if graphs_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "json").unwrap_or(false)
+                            && !path.to_string_lossy().contains("-archive")
+                        {
+                            let topic = path.file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
+                            if kg.node_count() > 0 {
+                                kg.consolidate();
+                                kg.link_orphans(&topic);
+                                kg.save();
+                                processed += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            // Also do the meta-graph.
+            let meta_path = memory_dir.join("knowledge.json");
+            if meta_path.exists() {
+                let mut meta = crate::knowledge::KnowledgeGraph::load(&meta_path);
+                if meta.node_count() > 0 {
+                    meta.consolidate();
+                    meta.link_orphans("meta");
+                    meta.save();
+                    processed += 1;
+                }
+            }
+            Some(format!("Reprocessed {} graph(s): consolidated + orphans linked.", processed))
+        },
         "/new" => {
             drop(bots);
             // Send a new-session request to the worker.

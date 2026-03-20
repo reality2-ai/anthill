@@ -625,16 +625,71 @@ impl KnowledgeGraph {
 
     /// Export the graph in a format suitable for 3D force-directed visualization.
     /// Returns { nodes: [...], links: [...] } compatible with 3d-force-graph.
+    /// Link orphan nodes to a central hub. Call this to reprocess an existing graph.
+    /// The hub node is named after the graph. Orphan edges use relation "?" with
+    /// very low confidence (0.05) and are flagged as provisional.
+    pub fn link_orphans(&mut self, graph_name: &str) {
+        // Find or create the hub node.
+        let hub_idx = self.find_by_label(graph_name).unwrap_or_else(|| {
+            self.graph.add_node(KnowledgeNode {
+                label: graph_name.into(),
+                kind: NodeKind::Concept,
+                summary: format!("Central hub for {} graph", graph_name),
+                created: String::new(),
+                updated: String::new(),
+                tags: vec!["hub".into(), "graph".into()],
+                _extra: serde_json::Map::new(),
+            })
+        });
+
+        // Find orphans (no edges at all).
+        let orphans: Vec<NodeIndex> = self.graph.node_indices()
+            .filter(|&idx| idx != hub_idx)
+            .filter(|&idx| {
+                self.graph.edges(idx).next().is_none()
+                    && self.graph.neighbors_undirected(idx).next().is_none()
+            })
+            .collect();
+
+        for orphan in orphans {
+            // Don't create duplicate "?" edges.
+            if !self.has_edge_between(hub_idx, orphan, "?") {
+                self.graph.add_edge(hub_idx, orphan, KnowledgeEdge {
+                    relation: "?".into(),
+                    context: "Unlinked — connection not yet determined".into(),
+                    since: String::new(),
+                    confidence: 0.05,
+                    tests: 0,
+                    survived: 0,
+                    basis: Basis::Assumed,
+                    last_tested: String::new(),
+                    importance: 0.1,
+                    references: 0,
+                    valid_from: String::new(),
+                    valid_until: String::new(),
+                    view: EdgeView::Entity,
+                    source: "auto: orphan linking".into(),
+                });
+            }
+        }
+    }
+
+    /// Export the graph in a format suitable for 3D force-directed visualization.
     pub fn to_visualization(&self) -> serde_json::Value {
 
         let nodes: Vec<serde_json::Value> = self.graph.node_indices().map(|idx| {
             let node = &self.graph[idx];
+            let is_hub = node.tags.iter().any(|t| t == "hub");
             // Derive node confidence from average of connected edge confidences.
             let edge_confs: Vec<f64> = self.graph.edges(idx)
                 .map(|e| e.weight().confidence)
+                .filter(|&c| c > 0.05)  // Exclude "?" orphan links from the average.
                 .collect();
-            let confidence = if edge_confs.is_empty() { 0.5 }
-                else { edge_confs.iter().sum::<f64>() / edge_confs.len() as f64 };
+            let confidence = if edge_confs.is_empty() {
+                if is_hub { 1.0 } else { 0.2 }  // Orphans are faint.
+            } else {
+                edge_confs.iter().sum::<f64>() / edge_confs.len() as f64
+            };
             serde_json::json!({
                 "id": idx.index(),
                 "label": node.label,
@@ -644,12 +699,14 @@ impl KnowledgeGraph {
                 "created": node.created,
                 "updated": node.updated,
                 "confidence": confidence,
+                "is_hub": is_hub,
             })
         }).collect();
 
         let links: Vec<serde_json::Value> = self.graph.edge_indices().filter_map(|e| {
             let (src, tgt) = self.graph.edge_endpoints(e)?;
             let edge = &self.graph[e];
+            let is_orphan_link = edge.relation == "?";
             Some(serde_json::json!({
                 "source": src.index(),
                 "target": tgt.index(),
@@ -663,6 +720,7 @@ impl KnowledgeGraph {
                 "valid_from": edge.valid_from,
                 "valid_until": edge.valid_until,
                 "source_doc": edge.source,
+                "is_orphan_link": is_orphan_link,
             }))
         }).collect();
 
