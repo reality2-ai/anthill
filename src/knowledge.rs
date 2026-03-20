@@ -471,6 +471,48 @@ impl KnowledgeGraph {
         self.graph.node_count()
     }
 
+    /// Export the graph in a format suitable for 3D force-directed visualization.
+    /// Returns { nodes: [...], links: [...] } compatible with 3d-force-graph.
+    pub fn to_visualization(&self) -> serde_json::Value {
+
+        let nodes: Vec<serde_json::Value> = self.graph.node_indices().map(|idx| {
+            let node = &self.graph[idx];
+            serde_json::json!({
+                "id": idx.index(),
+                "label": node.label,
+                "kind": node.kind.to_string(),
+                "summary": node.summary,
+                "tags": node.tags,
+                "created": node.created,
+                "updated": node.updated,
+            })
+        }).collect();
+
+        let links: Vec<serde_json::Value> = self.graph.edge_indices().filter_map(|e| {
+            let (src, tgt) = self.graph.edge_endpoints(e)?;
+            let edge = &self.graph[e];
+            Some(serde_json::json!({
+                "source": src.index(),
+                "target": tgt.index(),
+                "relation": edge.relation,
+                "confidence": edge.confidence,
+                "importance": edge.importance,
+                "basis": format!("{:?}", edge.basis).to_lowercase(),
+                "view": format!("{:?}", edge.view).to_lowercase(),
+                "tests": edge.tests,
+                "survived": edge.survived,
+                "valid_from": edge.valid_from,
+                "valid_until": edge.valid_until,
+                "source_doc": edge.source,
+            }))
+        }).collect();
+
+        serde_json::json!({
+            "nodes": nodes,
+            "links": links,
+        })
+    }
+
     // --- Query API ---
 
     /// Query: "What do I know about X?"

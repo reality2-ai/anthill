@@ -61,6 +61,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/ants/reload", post(reload_ants))
         .route("/api/ants/{id}/restart", post(restart_ant))
+        .route("/api/ants/{id}/graph", get(get_graph))
         .route("/api/backends", get(list_backends))
         .route("/api/doctor", get(doctor_check))
         .route("/api/auth/devices", get(auth_list_devices))
@@ -425,6 +426,58 @@ async fn reload_ants(
         Ok(()) => (StatusCode::OK, "Reload triggered").into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Reload channel closed").into_response(),
     }
+}
+
+/// GET /api/ants/:id/graph?name=<topic> — return a knowledge graph in 3D visualization format.
+/// If name is empty or "meta", returns the meta-graph. Otherwise loads memory/graphs/<name>.json.
+async fn get_graph(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let bots = state.registry.bots.read().await;
+    let handle = match bots.get(&id) {
+        Some(h) => h,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let memory_dir = handle.working_dir.join("memory");
+    drop(bots);
+
+    let graph_name = params.get("name").map(|s| s.as_str()).unwrap_or("");
+    let kg_path = if graph_name.is_empty() || graph_name == "meta" {
+        memory_dir.join("knowledge.json")
+    } else {
+        memory_dir.join("graphs").join(format!("{}.json", graph_name))
+    };
+
+    // List available graphs for the selector.
+    let mut available = vec!["meta".to_string()];
+    let graphs_dir = memory_dir.join("graphs");
+    if graphs_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    if let Some(stem) = path.file_stem() {
+                        available.push(stem.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    available.sort();
+
+    let kg = crate::knowledge::KnowledgeGraph::load(&kg_path);
+    let mut viz = kg.to_visualization();
+    // Attach the list of available graphs and the current selection.
+    if let Some(obj) = viz.as_object_mut() {
+        obj.insert("available_graphs".into(), serde_json::json!(available));
+        obj.insert("current_graph".into(), serde_json::json!(
+            if graph_name.is_empty() { "meta" } else { graph_name }
+        ));
+    }
+    Json(viz).into_response()
 }
 
 /// POST /api/ants/:id/restart — stop an ANT and trigger reload to restart with new config.
