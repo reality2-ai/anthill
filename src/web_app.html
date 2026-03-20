@@ -694,6 +694,7 @@
       <textarea id="input" placeholder="Send a message..." rows="1"
         onkeydown="handleInputKey(event)" oninput="handleSlashMenu()"></textarea>
       <button id="send-btn" onclick="sendMessage()">Send</button>
+      <button onclick="compactChat()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;padding:8px;cursor:pointer;font-size:12px;white-space:nowrap" title="Analyse conversation → knowledge graph, then trim chat history">Compact</button>
     </div>
   </div>
 </div>
@@ -1162,6 +1163,26 @@ function clearQuote() {
 }
 
 // --- Sending ---
+function compactChat() {
+  if (!state.activeBot || !state.ws) return;
+  const msgs = state.messages[state.activeBot] || [];
+  if (msgs.length < 6) {
+    alert('Chat is too short to compact (need at least 6 messages).');
+    return;
+  }
+  // Send the compact command — the worker will analyse the chat and trim it.
+  wsSendSigned({
+    type: 'chat',
+    bot: state.activeBot,
+    message: '/compact-chat',
+  });
+  // Show immediate feedback.
+  if (!state.messages[state.activeBot]) state.messages[state.activeBot] = [];
+  state.messages[state.activeBot].push({ role: 'user', text: '/compact-chat' });
+  showTyping(state.activeBot);
+  renderChat();
+}
+
 function sendMessage() {
   const input = document.getElementById('input');
   const text = input.value.trim();

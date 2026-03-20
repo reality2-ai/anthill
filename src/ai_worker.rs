@@ -516,6 +516,7 @@ pub async fn ai_worker_loop(
         // --- Special commands ---
         let is_analytical = req.message.starts_with("/analyse ")
             || req.message == "/reflect"
+            || req.message == "/compact-chat"
             || req.message.starts_with("/specify ")
             || req.message.starts_with("/test-vectors ");
 
@@ -523,6 +524,8 @@ pub async fn ai_worker_loop(
             build_analyse_message(path.trim(), &config.working_dir, &knowledge_file)
         } else if req.message == "/reflect" {
             build_reflect_message(&knowledge_file)
+        } else if req.message == "/compact-chat" {
+            build_compact_chat_message(&config.memory_dir, &episodes_file, req.chat_id)
         } else if let Some(path) = req.message.strip_prefix("/specify ") {
             build_specify_message(path.trim(), &config.working_dir)
         } else if let Some(path) = req.message.strip_prefix("/test-vectors ") {
@@ -1443,5 +1446,54 @@ CONTENT:
         source_type = source_type,
         file_name = file_name,
         content = if content.len() > 30000 { slice_safe(&content, 30000) } else { &content }
+    )
+}
+
+/// Build the message for /compact-chat — analyse conversation, extract to graph, trim history.
+fn build_compact_chat_message(memory_dir: &Path, episodes_file: &Path, chat_id: i64) -> String {
+    let user_mem_path = memory_dir.join(format!("{}.md", chat_id));
+    let user_memory = std::fs::read_to_string(&user_mem_path).unwrap_or_default();
+    let episodes = std::fs::read_to_string(episodes_file).unwrap_or_default();
+
+    format!(
+        r#"COMPACT CONVERSATION — analyse this chat and consolidate to knowledge graph.
+
+You are performing THEMATIC ANALYSIS on the conversation so far.
+
+STEP 1: Review the conversation history (your context from this session).
+Identify all significant entities, decisions, facts, and relationships discussed.
+
+STEP 2: Run mkdir -p memory/graphs/ then read or create the appropriate topic graph(s)
+in memory/graphs/. Add:
+  - Nodes for each entity, concept, decision, tool, or fact discussed
+  - Edges for relationships (with confidence: told→0.6, observed→0.7, inferred→0.4)
+  - Set source: "conversation {chat_id}" and valid_from: today's date
+  - Update the meta-graph (knowledge.json) with topic nodes if new topics created
+
+STEP 3: Write an episode to {episodes_path} summarising this conversation:
+  - date: today
+  - participants: ["user:{chat_id}"]
+  - summary: 2-3 sentences covering what was discussed and decided
+  - outcomes: key decisions or results
+  - tags: searchable keywords
+  - entities: labels of entities mentioned
+
+STEP 4: Update the user memory file at {user_mem_path}:
+  - Keep only the last 3-4 key points as context for next time
+  - Add a note: "Earlier conversation compacted to knowledge graph on [today's date]"
+  - Remove any redundant entries that are now captured in the graph
+
+STEP 5: Summarise what you extracted and where it went.
+
+CURRENT USER MEMORY:
+{user_memory}
+
+RECENT EPISODES:
+{episodes}"#,
+        chat_id = chat_id,
+        episodes_path = episodes_file.display(),
+        user_mem_path = user_mem_path.display(),
+        user_memory = slice_safe(&user_memory, 4000),
+        episodes = slice_safe(&episodes, 2000),
     )
 }
