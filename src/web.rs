@@ -953,10 +953,29 @@ async fn handle_ws(
                             WsCommand::Cancel { bot, task_id } => {
                                 let bots = registry.bots.read().await;
                                 if let Some(handle) = bots.get(&bot) {
-                                    if let Ok(mut tasks) = handle.tasks.lock() {
+                                    let cancelled = if let Ok(mut tasks) = handle.tasks.lock() {
                                         if let Some(task) = tasks.remove(&task_id) {
                                             task.handle.abort();
-                                        }
+                                            true
+                                        } else { false }
+                                    } else { false };
+                                    if cancelled {
+                                        // Broadcast so the web UI removes the task card.
+                                        let _ = registry.global_tx.send(
+                                            crate::registry::WsEvent::TaskCompleted {
+                                                bot: bot.clone(),
+                                                task_id,
+                                                duration_secs: 0,
+                                            }
+                                        );
+                                        let _ = registry.global_tx.send(
+                                            crate::registry::WsEvent::Message {
+                                                bot: bot.clone(),
+                                                chat_id: 0,
+                                                text: format!("Cancelled task #{}.", task_id),
+                                                task_id,
+                                            }
+                                        );
                                     }
                                 }
                             }
@@ -1066,26 +1085,40 @@ async fn handle_web_command(
                 Ok(m) => m,
                 Err(_) => return true,
             };
-            if trimmed == "/cancel all" {
+            let mut cancelled_ids = Vec::new();
+            let msg = if trimmed == "/cancel all" {
                 let count = tasks.len();
-                for task in tasks.values() { task.handle.abort(); }
+                for task in tasks.values() {
+                    task.handle.abort();
+                    cancelled_ids.push(task.task_id);
+                }
                 tasks.clear();
-                Some(format!("Cancelled {} task(s).", count))
+                format!("Cancelled {} task(s).", count)
             } else if trimmed == "/cancel" {
                 let latest = tasks.values().max_by_key(|t| t.task_id).map(|t| t.task_id);
                 if let Some(id) = latest {
                     if let Some(task) = tasks.remove(&id) {
                         task.handle.abort();
-                        Some(format!("Cancelled task #{}.", id))
-                    } else { Some("No running tasks.".into()) }
-                } else { Some("No running tasks.".into()) }
+                        cancelled_ids.push(id);
+                        format!("Cancelled task #{}.", id)
+                    } else { "No running tasks.".into() }
+                } else { "No running tasks.".into() }
             } else {
                 let id: u32 = trimmed.strip_prefix("/cancel ").and_then(|s| s.trim().parse().ok()).unwrap_or(0);
                 if let Some(task) = tasks.remove(&id) {
                     task.handle.abort();
-                    Some(format!("Cancelled task #{}.", id))
-                } else { Some(format!("No task with ID {}.", id)) }
+                    cancelled_ids.push(id);
+                    format!("Cancelled task #{}.", id)
+                } else { format!("No task with ID {}.", id) }
+            };
+            drop(tasks);
+            // Broadcast TaskCompleted for each cancelled task so the web UI removes them.
+            for id in cancelled_ids {
+                let _ = registry.global_tx.send(crate::registry::WsEvent::TaskCompleted {
+                    bot: bot_name.into(), task_id: id, duration_secs: 0,
+                });
             }
+            Some(msg)
         },
         "/new" => {
             drop(bots);
