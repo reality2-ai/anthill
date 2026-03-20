@@ -1027,7 +1027,14 @@ async function loadGraph(graphName) {
     });
 
     // Keep the simulation warm so gentle nudges propagate.
-    graphInstance.d3AlphaDecay(0.005).d3VelocityDecay(0.4);
+    graphInstance
+      .d3AlphaDecay(0.005)
+      .d3VelocityDecay(0.4);
+    // Weaker repulsion between unconnected nodes, keep connected nodes close.
+    const charge = graphInstance.d3Force('charge');
+    if (charge) charge.strength(-20);  // gentler push-apart (default is ~-30)
+    const link = graphInstance.d3Force('link');
+    if (link) link.distance(60).strength(0.8);  // shorter, stronger springs for connections
 
     graphInstance.onEngineTick(() => {
       const t = Date.now() * 0.001;
