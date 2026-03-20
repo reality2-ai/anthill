@@ -738,7 +738,8 @@ function handleEvent(msg) {
             id: t.task_id,
             preview: t.preview,
             startTime: Date.now() - (t.elapsed_secs * 1000),
-            progress: [],
+            lastProgress: t.progress || '',
+            progress: t.progress ? [{ kind: 'tool_use', detail: t.progress, time: Date.now() }] : [],
           }));
         }
       }
@@ -832,6 +833,7 @@ const SLASH_COMMANDS = [
   { cmd: '/reflect', desc: 'Review and consolidate knowledge graph' },
   { cmd: '/specify', desc: 'Generate specification from code' },
   { cmd: '/test-vectors', desc: 'Generate test vectors from code' },
+  { cmd: '/doctor', desc: 'Check system prerequisites and health' },
 ];
 
 function handleInputKey(event) {

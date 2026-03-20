@@ -866,10 +866,40 @@ async fn handle_ws(
         }).to_string()
     };
 
+    // Collect active tasks per bot.
+    let mut active_tasks: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+    {
+        let bots_map = registry.bots.read().await;
+        for (name, handle) in bots_map.iter() {
+            if let Ok(tasks) = handle.tasks.lock() {
+                let task_list: Vec<serde_json::Value> = tasks.values().map(|t| {
+                    let elapsed = t.started.elapsed().as_secs();
+                    let progress = t.last_progress.lock().ok()
+                        .and_then(|p| p.clone())
+                        .unwrap_or_default();
+                    let backend = t.backend.lock()
+                        .map(|b| b.clone())
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "task_id": t.task_id,
+                        "preview": t.message_preview,
+                        "elapsed_secs": elapsed,
+                        "progress": progress,
+                        "backend": backend,
+                    })
+                }).collect();
+                if !task_list.is_empty() {
+                    active_tasks.insert(name.clone(), task_list);
+                }
+            }
+        }
+    }
+
     let snapshot = serde_json::json!({
         "type": "snapshot",
         "bots": bots,
         "history": history,
+        "tasks": active_tasks,
     });
     let snapshot_str = snapshot.to_string();
     let envelope = send_signed(&snapshot_str, &credential);
@@ -1152,6 +1182,31 @@ async fn handle_web_command(
                 }
                 None => Some("Stats unavailable.".into()),
             }
+        },
+        "/doctor" => {
+            drop(bots);
+            let checks = crate::run_doctor_checks();
+            let mut out = String::from("**Anthill Doctor**\n\n");
+            let mut issues = 0;
+            for check in &checks {
+                let icon = match check.status.as_str() {
+                    "ok" => "✓",
+                    "missing" if check.severity == "required" => { issues += 1; "✗" }
+                    "missing" => "⚠",
+                    _ => "○",
+                };
+                out.push_str(&format!("{} **{}** — {}\n", icon, check.name, check.detail));
+                if check.status != "ok" && !check.help.is_empty() {
+                    out.push_str(&format!("  → {}\n", check.help));
+                }
+            }
+            out.push('\n');
+            if issues > 0 {
+                out.push_str(&format!("**{} required item(s) missing.**", issues));
+            } else {
+                out.push_str("**All required items present.**");
+            }
+            Some(out)
         },
         _ => None,
     };
