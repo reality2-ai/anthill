@@ -1491,6 +1491,29 @@ impl CachedGraph {
         report
     }
 
+    /// Apply time-based confidence decay to all edges.
+    /// Called when the ANT has been idle — decays untested conjectures.
+    pub fn apply_decay(&self, days: u32) {
+        self.maybe_reload();
+        let mut graph = match self.graph.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let edge_indices: Vec<_> = graph.graph.edge_indices().collect();
+        let mut decayed = 0u32;
+        for edge_idx in edge_indices {
+            let before = graph.graph[edge_idx].confidence;
+            graph.graph[edge_idx].decay(days);
+            if (before - graph.graph[edge_idx].confidence).abs() > 0.001 {
+                decayed += 1;
+            }
+        }
+        if decayed > 0 {
+            graph.save();
+            log::info!("Decayed {} edges by {} days of inactivity", decayed, days);
+        }
+    }
+
     /// Node count (for logging).
     #[allow(dead_code)]
     pub fn node_count(&self) -> usize {

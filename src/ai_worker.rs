@@ -415,6 +415,7 @@ pub async fn ai_worker_loop(
 
     // Periodic archiving of low-confidence edges (every 100 requests).
     let mut request_count: u32 = 0;
+    let mut last_decay = Instant::now();
 
     while let Some(req) = rx.recv().await {
         // Remember chat IDs per source for cross-channel forwarding.
@@ -438,6 +439,13 @@ pub async fn ai_worker_loop(
         if request_count % 100 == 0 {
             // Archive low-confidence edges to separate file.
             knowledge_cache.archive_stale();
+        }
+        // Time-based confidence decay — runs on first request after 24h idle.
+        let since_decay = last_decay.elapsed().as_secs();
+        if since_decay > 86400 { // 24 hours
+            let days = (since_decay / 86400) as u32;
+            knowledge_cache.apply_decay(days);
+            last_decay = Instant::now();
         }
 
         // --- Special commands ---

@@ -132,6 +132,12 @@ impl AiPlugin {
         decode_uint_key(data, 1).unwrap_or(0) as i64
     }
 
+    /// Check if a source is allowed for sensitive operations (file access, graph modification).
+    /// Telegram and Slack can see responses but shouldn't trigger file reads.
+    fn is_sensitive_allowed(source: &str) -> bool {
+        matches!(source, "web" | "system")
+    }
+
     fn decode_task_id(data: &[u8]) -> u32 {
         decode_uint_key(data, 0).unwrap_or(0) as u32
     }
@@ -531,6 +537,11 @@ impl AiPlugin {
             return;
         }
 
+        if !Self::is_sensitive_allowed(&source) {
+            self.send_telegram(chat_id, "⚠️ /analyse reads files — use the web dashboard for security.");
+            return;
+        }
+
         self.send_telegram(chat_id, &format!("📊 Starting thematic analysis of '{}'...", file_path));
 
         // Read the file content and build the analysis prompt.
@@ -582,6 +593,11 @@ impl AiPlugin {
             return;
         }
 
+        if !Self::is_sensitive_allowed(&source) {
+            self.send_telegram(chat_id, "⚠️ /specify reads files — use the web dashboard for security.");
+            return;
+        }
+
         self.send_telegram(chat_id, &format!("📝 Generating specification from '{}'...", file_path));
 
         let task_id = self.next_task_id;
@@ -610,6 +626,11 @@ impl AiPlugin {
         let file_path = text.trim().to_string();
         if file_path.is_empty() {
             self.send_telegram(chat_id, "Usage: /test-vectors <file path>");
+            return;
+        }
+
+        if !Self::is_sensitive_allowed(&source) {
+            self.send_telegram(chat_id, "⚠️ /test-vectors reads files — use the web dashboard for security.");
             return;
         }
 
