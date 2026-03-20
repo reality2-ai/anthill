@@ -1616,42 +1616,70 @@ impl CachedGraph {
     }
 
     /// Enhanced render_for_prompt that uses embeddings when Ollama is available.
+    /// Hybrid semantic + keyword search for maximum retrieval quality.
+    /// Uses embeddings to find semantically similar nodes, then supplements
+    /// with keyword matches to catch entities that embeddings miss.
     pub async fn render_for_prompt_semantic(
         &self,
         ollama: &crate::ollama::OllamaClient,
         message: &str,
         max_chars: usize,
     ) -> String {
-        // Try embedding-based search first.
+        // Phase 1: Semantic search (async, no graph lock held).
         let similar = self.semantic_search(ollama, message, 10).await;
-        if !similar.is_empty() {
-            self.maybe_reload();
-            let graph = match self.graph.lock() {
-                Ok(g) => g,
-                Err(_) => return self.render_for_prompt(message, max_chars),
-            };
 
-            let mut result = QueryResult::default();
-            let mut existing = std::collections::HashSet::new();
-            for (label, _score) in &similar {
-                let about = graph.query_about(label, 1);
-                for (idx, node, score) in about.nodes {
-                    if existing.insert(idx.index()) {
-                        result.nodes.push((idx, node, score));
-                    }
-                }
-                result.edges.extend(about.edges);
-            }
+        self.maybe_reload();
+        let graph = match self.graph.lock() {
+            Ok(g) => g,
+            Err(_) => return self.render_for_prompt(message, max_chars),
+        };
 
-            if !result.nodes.is_empty() {
-                let mut r = graph.render_query_result(&result, max_chars);
-                r.push_str("\n(Semantic search via embeddings.)\n");
-                return r;
-            }
+        if graph.node_count() == 0 {
+            return String::new();
         }
 
-        // Fallback to keyword-based.
-        self.render_for_prompt(message, max_chars)
+        let depth = if graph.node_count() < 100 { 2 } else { 1 };
+        let mut result = QueryResult::default();
+        let mut existing = std::collections::HashSet::new();
+
+        // Add semantic matches first (higher quality).
+        for (label, _score) in &similar {
+            let about = graph.query_about(label, depth);
+            for (idx, node, score) in about.nodes {
+                if existing.insert(idx.index()) {
+                    result.nodes.push((idx, node, score));
+                }
+            }
+            result.edges.extend(about.edges);
+        }
+
+        // Phase 2: Keyword search to fill gaps.
+        let keywords = extract_keywords(message);
+        for kw in &keywords {
+            let about = graph.query_about(kw, depth);
+            for (idx, node, score) in about.nodes {
+                if existing.insert(idx.index()) {
+                    result.nodes.push((idx, node, score));
+                }
+            }
+            result.edges.extend(about.edges);
+        }
+
+        if result.nodes.is_empty() {
+            // Final fallback: relevance-scored keyword subgraph.
+            let relevant = graph.relevant_subgraph(message, 50);
+            let mut r = graph.render_subgraph(&relevant, max_chars);
+            r.push_str("\n(Keyword-based context. Read knowledge.json for full graph.)\n");
+            return r;
+        }
+
+        // Sort by relevance so most useful context comes first.
+        result.nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        let method = if !similar.is_empty() { "Hybrid (semantic + keyword)" } else { "Keyword" };
+        let mut r = graph.render_query_result(&result, max_chars);
+        r.push_str(&format!("\n({} search. Read knowledge.json for full graph.)\n", method));
+        r
     }
 
     /// Node count (for logging).

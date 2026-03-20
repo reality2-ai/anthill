@@ -986,6 +986,11 @@ pub async fn ai_worker_loop(
     }
 }
 
+/// Maximum system prompt size in bytes. Beyond this, dynamic context is truncated.
+/// The preamble (~4KB) is always included; the remaining budget is split among
+/// knowledge graph, episodes, and user memory by priority.
+const MAX_SYSTEM_PROMPT: usize = 16_384;
+
 fn build_system_prompt(
     custom: Option<&str>,
     knowledge_file: &Path,
@@ -997,6 +1002,7 @@ fn build_system_prompt(
 ) -> String {
     let mut prompt = String::new();
 
+    // Fixed sections always included.
     if let Some(custom) = custom {
         prompt.push_str(custom);
         prompt.push_str("\n\n");
@@ -1016,31 +1022,55 @@ fn build_system_prompt(
         user_memory_file.display()
     ));
 
-    // Include pre-rendered knowledge graph context.
+    // Dynamic sections — fit within remaining budget.
+    let remaining = MAX_SYSTEM_PROMPT.saturating_sub(prompt.len());
+    // Split budget: 50% knowledge graph, 25% episodes, 25% user memory.
+    let kg_budget = remaining / 2;
+    let ep_budget = remaining / 4;
+    let um_budget = remaining / 4;
+
+    // Knowledge graph context (highest priority).
     if !kg_rendered.is_empty() {
         prompt.push_str("\n[KNOWLEDGE GRAPH]\n");
-        prompt.push_str(kg_rendered);
+        if kg_rendered.len() > kg_budget {
+            prompt.push_str(slice_safe(kg_rendered, kg_budget));
+            prompt.push_str("\n(Semantic search via embeddings.)\n");
+        } else {
+            prompt.push_str(kg_rendered);
+        }
         prompt.push_str("[/KNOWLEDGE GRAPH]\n");
     }
 
-    // Include relevant episodes.
+    // Episodes.
     if !episodes_rendered.is_empty() {
         prompt.push_str("\n[EPISODES]\n");
-        prompt.push_str(episodes_rendered);
+        if episodes_rendered.len() > ep_budget {
+            prompt.push_str(slice_safe(episodes_rendered, ep_budget));
+            prompt.push_str("\n... (more episodes in episodes.json)\n");
+        } else {
+            prompt.push_str(episodes_rendered);
+        }
         prompt.push_str("[/EPISODES]\n");
     }
 
-    // Pre-load user memory.
+    // User memory.
     let user_memory = std::fs::read_to_string(user_memory_file).unwrap_or_default();
     if !user_memory.trim().is_empty() {
         prompt.push_str("\n[USER MEMORY]\n");
-        if user_memory.len() > 4096 {
-            prompt.push_str(slice_safe(&user_memory, 4096));
+        if user_memory.len() > um_budget {
+            prompt.push_str(slice_safe(&user_memory, um_budget));
             prompt.push_str("\n... (truncated — read the full file for more)\n");
         } else {
             prompt.push_str(&user_memory);
         }
         prompt.push_str("\n[/USER MEMORY]\n");
+    }
+
+    if prompt.len() > MAX_SYSTEM_PROMPT {
+        log::warn!(
+            "System prompt exceeds budget: {} bytes (limit {})",
+            prompt.len(), MAX_SYSTEM_PROMPT
+        );
     }
 
     prompt

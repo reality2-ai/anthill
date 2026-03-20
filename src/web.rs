@@ -925,14 +925,30 @@ async fn handle_ws(
     loop {
         tokio::select! {
             // Broadcast event → sign and send to client.
-            Ok(event) = rx.recv() => {
-                let json = match serde_json::to_string(&event) {
-                    Ok(j) => j,
-                    Err(_) => continue,
-                };
-                let envelope = send_signed(&json, &credential);
-                if socket.send(Message::Text(envelope.into())).await.is_err() {
-                    break;
+            result = rx.recv() => {
+                match result {
+                    Ok(event) => {
+                        let json = match serde_json::to_string(&event) {
+                            Ok(j) => j,
+                            Err(_) => continue,
+                        };
+                        let envelope = send_signed(&json, &credential);
+                        if socket.send(Message::Text(envelope.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("WebSocket client lagged — dropped {} events", n);
+                        // Notify the client that events were missed.
+                        let warning = serde_json::json!({
+                            "type": "lag_warning",
+                            "dropped": n,
+                            "message": format!("Connection fell behind — {} events dropped. Refresh for current state.", n),
+                        });
+                        let envelope = send_signed(&warning.to_string(), &credential);
+                        let _ = socket.send(Message::Text(envelope.into())).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
 
