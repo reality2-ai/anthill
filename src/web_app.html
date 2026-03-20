@@ -471,7 +471,10 @@
 <div id="sidebar">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid #333">
     <img src="/logo.svg" alt="Anthill" style="height:36px">
-    <button onclick="showCreateModal()" style="background:var(--accent);color:white;border:none;border-radius:6px;width:32px;height:32px;font-size:18px;cursor:pointer;line-height:1" title="New ANT">+</button>
+    <div style="display:flex;gap:6px">
+      <button onclick="refreshBots()" style="background:none;color:var(--text-dim);border:1px solid #444;border-radius:6px;width:32px;height:32px;font-size:14px;cursor:pointer;line-height:1" title="Refresh">↻</button>
+      <button onclick="showCreateModal()" style="background:var(--accent);color:white;border:none;border-radius:6px;width:32px;height:32px;font-size:18px;cursor:pointer;line-height:1" title="New ANT">+</button>
+    </div>
   </div>
   <div id="bot-list"></div>
   <div style="padding:8px 12px;border-top:1px solid #333">
@@ -1727,6 +1730,30 @@ function hideModal() {
   document.getElementById('create-modal').style.display = 'none';
 }
 
+async function refreshBots() {
+  try {
+    const resp = await authFetch('/api/ants');
+    if (resp.ok) {
+      const bots = await resp.json();
+      // Update state with fresh bot list.
+      const oldIds = new Set(Object.keys(state.bots));
+      bots.forEach(b => {
+        state.bots[b.id] = b;
+        if (!state.messages[b.id]) state.messages[b.id] = [];
+        if (!state.tasks[b.id]) state.tasks[b.id] = [];
+        oldIds.delete(b.id);
+      });
+      // Remove bots no longer on the server.
+      oldIds.forEach(id => {
+        delete state.bots[id];
+      });
+      renderBotList();
+    }
+  } catch (e) {
+    console.warn('refreshBots failed:', e);
+  }
+}
+
 async function submitCreate() {
   const id = document.getElementById('f-id').value.trim();
   const name = document.getElementById('f-name').value.trim();
@@ -1754,9 +1781,10 @@ async function submitCreate() {
       body: JSON.stringify(body),
     });
     if (resp.ok) {
-      // Trigger reload to spawn the new ANT.
+      // Trigger reload to spawn the new ANT, then refresh the bot list.
       await authFetch('/api/ants/reload', { method: 'POST' });
       hideModal();
+      await refreshBots();
     } else {
       errEl.textContent = await resp.text();
       errEl.style.display = 'block';
