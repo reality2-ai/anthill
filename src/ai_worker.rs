@@ -1456,34 +1456,61 @@ fn build_compact_chat_message(memory_dir: &Path, episodes_file: &Path, chat_id: 
     let episodes = std::fs::read_to_string(episodes_file).unwrap_or_default();
 
     format!(
-        r#"COMPACT CONVERSATION — analyse this chat and consolidate to knowledge graph.
+        r#"You MUST perform THEMATIC ANALYSIS (Braun & Clarke, 2022) on this conversation.
+Compact it into the knowledge graph. Follow these phases IN ORDER. Show your work.
 
-You are performing THEMATIC ANALYSIS on the conversation so far.
+PHASE 1 — FAMILIARISATION:
+Review the entire conversation history (your session context).
+Write a 2-3 sentence overview of what was discussed.
 
-STEP 1: Review the conversation history (your context from this session).
-Identify all significant entities, decisions, facts, and relationships discussed.
+PHASE 2 — CODING:
+Extract every significant entity, concept, decision, tool, person, and fact.
+For each code, state:
+  - Label (short name)
+  - Kind (person/project/server/tool/concept/decision/event/fact)
+  - One-line summary
+  - Evidence (quote or paraphrase from the conversation)
 
-STEP 2: Run mkdir -p memory/graphs/ then read or create the appropriate topic graph(s)
-in memory/graphs/. Add:
-  - Nodes for each entity, concept, decision, tool, or fact discussed
-  - Edges for relationships (with confidence: told→0.6, observed→0.7, inferred→0.4)
-  - Set source: "conversation {chat_id}" and valid_from: today's date
-  - Update the meta-graph (knowledge.json) with topic nodes if new topics created
+PHASE 3 — THEME GENERATION:
+Group your codes into 3-8 themes. Each theme is a pattern of shared meaning.
+For each theme: name, central concept, which codes belong, support level (0.0-1.0).
 
-STEP 3: Write an episode to {episodes_path} summarising this conversation:
+PHASE 4 — REVIEW:
+Check each theme against the conversation. Did you miss anything?
+Are any themes too broad or too narrow? Revise as needed.
+
+PHASE 5 — RELATIONSHIPS:
+Identify relationships between entities. For each:
+  - From → To (must match code labels)
+  - Relation type (uses, deployed_on, depends_on, decided, etc.)
+  - View: semantic, temporal, causal, or entity
+  - Basis: told (user stated it, confidence 0.6), observed (you saw evidence, 0.7),
+    inferred (implied, 0.4), or assumed (interpretation, 0.3)
+  - Source: "conversation {chat_id}"
+
+PHASE 6 — INTEGRATION:
+Run: mkdir -p memory/graphs/
+Determine topic name(s) for this conversation (lowercase-hyphenated).
+Read or create memory/graphs/<topic>.json and add all nodes and edges.
+Set valid_from to today's date on all new edges.
+Update the meta-graph (knowledge.json) with topic nodes if new.
+
+PHASE 7 — EPISODE:
+Write an episode to {episodes_path}:
   - date: today
   - participants: ["user:{chat_id}"]
-  - summary: 2-3 sentences covering what was discussed and decided
+  - summary: 2-3 sentences about what was discussed and decided
   - outcomes: key decisions or results
   - tags: searchable keywords
-  - entities: labels of entities mentioned
+  - entities: labels of entities mentioned (linking to graph nodes)
 
-STEP 4: Update the user memory file at {user_mem_path}:
+PHASE 8 — TRIM MEMORY:
+Update {user_mem_path}:
   - Keep only the last 3-4 key points as context for next time
-  - Add a note: "Earlier conversation compacted to knowledge graph on [today's date]"
-  - Remove any redundant entries that are now captured in the graph
+  - Add: "Earlier conversation compacted to knowledge graph on [today's date]"
+  - Remove entries now captured in the graph
 
-STEP 5: Summarise what you extracted and where it went.
+Finally, summarise: what themes you found, how many nodes/edges added, which graph(s).
 
 CURRENT USER MEMORY:
 {user_memory}
