@@ -212,6 +212,32 @@ pub struct KnowledgeEdge {
     /// Enables "why do I believe this?" tracing.
     #[serde(default)]
     pub source: String,
+
+    // --- Refutation log ---
+
+    /// Audit trail of the conjecture-and-refutation process.
+    /// Each entry records what was tested, what evidence was considered,
+    /// and whether the conjecture survived. This IS the Popperian process.
+    #[serde(default)]
+    pub refutation_log: Vec<RefutationEntry>,
+}
+
+/// A single entry in the refutation audit trail.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefutationEntry {
+    /// When this test occurred.
+    pub date: String,
+    /// What was tested: "Does this relationship still hold given X?"
+    pub test: String,
+    /// What evidence was considered.
+    pub evidence: String,
+    /// Outcome: "survived", "weakened", "contradicted".
+    pub outcome: String,
+    /// Confidence before and after this test.
+    #[serde(default)]
+    pub confidence_before: f64,
+    #[serde(default)]
+    pub confidence_after: f64,
 }
 
 fn default_confidence() -> f64 { 0.5 }
@@ -222,6 +248,7 @@ impl KnowledgeEdge {
     /// Create a new conjecture.
     pub fn new(relation: &str, context: &str, since: &str, basis: Basis) -> Self {
         let confidence = basis.initial_confidence();
+        let basis_name = format!("{:?}", basis).to_lowercase();
         Self {
             relation: relation.into(),
             context: context.into(),
@@ -237,6 +264,14 @@ impl KnowledgeEdge {
             valid_until: String::new(),
             view: EdgeView::Entity,
             source: String::new(),
+            refutation_log: vec![RefutationEntry {
+                date: since.into(),
+                test: "Initial conjecture".into(),
+                evidence: context.into(),
+                outcome: format!("conjectured (basis: {})", basis_name),
+                confidence_before: 0.0,
+                confidence_after: confidence,
+            }],
         }
     }
 
@@ -256,26 +291,67 @@ impl KnowledgeEdge {
 
     /// The conjecture survived a refutation attempt — strengthen it.
     pub fn strengthen(&mut self, date: &str) {
+        self.strengthen_with(date, "", "");
+    }
+
+    /// Strengthen with a record of the test and evidence.
+    pub fn strengthen_with(&mut self, date: &str, test: &str, evidence: &str) {
+        let before = self.confidence;
         self.tests += 1;
         self.survived += 1;
         self.last_tested = date.into();
         self.recalculate();
+        self.refutation_log.push(RefutationEntry {
+            date: date.into(),
+            test: if test.is_empty() { "Encountered in context — no contradiction found".into() } else { test.into() },
+            evidence: evidence.into(),
+            outcome: "survived".into(),
+            confidence_before: before,
+            confidence_after: self.confidence,
+        });
     }
 
     /// The conjecture was tested and evidence weakened it (but didn't refute it).
     pub fn weaken(&mut self, date: &str) {
+        self.weaken_with(date, "", "");
+    }
+
+    /// Weaken with a record of the test and evidence.
+    pub fn weaken_with(&mut self, date: &str, test: &str, evidence: &str) {
+        let before = self.confidence;
         self.tests += 1;
-        // survived stays the same
         self.last_tested = date.into();
         self.recalculate();
+        self.refutation_log.push(RefutationEntry {
+            date: date.into(),
+            test: if test.is_empty() { "Encountered counter-evidence".into() } else { test.into() },
+            evidence: evidence.into(),
+            outcome: "weakened".into(),
+            confidence_before: before,
+            confidence_after: self.confidence,
+        });
     }
 
     /// Direct contradiction — sharp confidence penalty.
     pub fn contradict(&mut self, date: &str) {
+        self.contradict_with(date, "", "");
+    }
+
+    /// Contradict with a record of the evidence.
+    pub fn contradict_with(&mut self, date: &str, test: &str, evidence: &str) {
+        let before = self.confidence;
         self.tests += 1;
         self.last_tested = date.into();
         self.confidence *= 0.3;
         if self.confidence < 0.01 { self.confidence = 0.01; }
+        self.refutation_log.push(RefutationEntry {
+            date: date.into(),
+            test: if test.is_empty() { "Direct contradiction encountered".into() } else { test.into() },
+            evidence: evidence.into(),
+            outcome: "contradicted".into(),
+            confidence_before: before,
+            confidence_after: self.confidence,
+        });
     }
 
     /// Recalculate confidence from test history.
@@ -619,6 +695,7 @@ impl KnowledgeGraph {
             valid_until: String::new(),
             view: EdgeView::Semantic,
             source: "maintenance: cross-link".into(),
+                    refutation_log: Vec::new(),
         };
         self.graph.add_edge(from, to, edge);
     }
@@ -699,6 +776,7 @@ impl KnowledgeGraph {
                     valid_until: String::new(),
                     view: EdgeView::Entity,
                     source: "auto: orphan linking".into(),
+                    refutation_log: Vec::new(),
                 });
             }
         }
@@ -1465,6 +1543,11 @@ impl KnowledgeGraph {
                 valid_until: out_w.valid_until.clone(),
                 view: in_w.view.clone(),
                 source: in_w.source.clone(),
+                refutation_log: {
+                    let mut log = in_w.refutation_log.clone();
+                    log.extend(out_w.refutation_log.iter().cloned());
+                    log
+                },
             };
 
             self.graph.add_edge(src, tgt, combined);

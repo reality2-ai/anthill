@@ -130,11 +130,14 @@ THE KNOWLEDGE GRAPH IS POPPERIAN — all edges are conjectures with confidence w
 Edges gain strength by surviving refutation, not by confirmation.\n\n\
 AFTER EVERY RESPONSE, silently review and update the knowledge graph:\n\
   1. New entity? → add a node\n\
-  2. New relationship? → add an edge as a CONJECTURE with appropriate basis and confidence\n\
-  3. Does this conversation CONFIRM an existing edge? → increment 'survived' and 'tests'\n\
-  4. Does this conversation CONTRADICT an existing edge? → increment 'tests' only (weakens it)\n\
-  5. Direct contradiction with strong evidence? → set confidence *= 0.3\n\
-  6. User-specific fact? → append to user memory file\n\
+  2. New relationship? → add an edge as a CONJECTURE with basis, confidence, and source\n\
+  3. Does this conversation CONFIRM an existing edge? → strengthen it\n\
+  4. Does this conversation CONTRADICT an existing edge? → weaken or contradict it\n\
+  5. User-specific fact? → append to user memory file\n\
+EVERY change to an edge MUST include a refutation_log entry:\n\
+  {\"date\": \"YYYY-MM-DD\", \"test\": \"what was tested\", \"evidence\": \"what was found\",\n\
+   \"outcome\": \"survived|weakened|contradicted\", \"confidence_before\": N, \"confidence_after\": N}\n\
+This log IS the Popperian process — it records WHY confidence changed.\n\
 Do this WITHOUT telling the user — just quietly read, modify, and write the files.\n\n\
 Knowledge graph JSON format:\n\
   nodes: [{\"label\": \"...\", \"kind\": \"person|project|server|tool|concept|decision|event|fact\",\n\

@@ -152,44 +152,50 @@ fn tool_definitions() -> Vec<serde_json::Value> {
         }),
         serde_json::json!({
             "name": "graph_strengthen",
-            "description": "A conjecture survived refutation — increase its confidence. Increments tests and survived.",
+            "description": "A conjecture survived refutation. You MUST describe what test was performed and what evidence was considered.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "from": { "type": "string" },
                     "to": { "type": "string" },
                     "relation": { "type": "string" },
+                    "test": { "type": "string", "description": "What refutation was attempted? e.g. 'Checked if Anthill still deploys to Alfred'" },
+                    "evidence": { "type": "string", "description": "What evidence was considered? e.g. 'Deploy logs show successful push today'" },
                     "graph": { "type": "string", "default": "meta" }
                 },
-                "required": ["from", "to", "relation"]
+                "required": ["from", "to", "relation", "test", "evidence"]
             }
         }),
         serde_json::json!({
             "name": "graph_weaken",
-            "description": "A conjecture was tested and evidence weakened it. Increments tests only (not survived).",
+            "description": "Evidence weakened a conjecture but didn't refute it. You MUST describe the test and counter-evidence.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "from": { "type": "string" },
                     "to": { "type": "string" },
                     "relation": { "type": "string" },
+                    "test": { "type": "string", "description": "What was tested?" },
+                    "evidence": { "type": "string", "description": "What counter-evidence was found?" },
                     "graph": { "type": "string", "default": "meta" }
                 },
-                "required": ["from", "to", "relation"]
+                "required": ["from", "to", "relation", "test", "evidence"]
             }
         }),
         serde_json::json!({
             "name": "graph_contradict",
-            "description": "Strong evidence directly contradicts a conjecture — sharp confidence penalty (×0.3).",
+            "description": "Strong evidence directly contradicts a conjecture. You MUST describe the contradicting evidence.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "from": { "type": "string" },
                     "to": { "type": "string" },
                     "relation": { "type": "string" },
+                    "test": { "type": "string", "description": "What was tested?" },
+                    "evidence": { "type": "string", "description": "What contradicting evidence was found?" },
                     "graph": { "type": "string", "default": "meta" }
                 },
-                "required": ["from", "to", "relation"]
+                "required": ["from", "to", "relation", "test", "evidence"]
             }
         }),
         serde_json::json!({
@@ -364,10 +370,11 @@ fn handle_tool_call(
                 last_tested: String::new(),
                 importance: 0.5,
                 references: 0,
-                valid_from: today,
+                valid_from: today.clone(),
                 valid_until: String::new(),
                 view,
                 source: "mcp".into(),
+                refutation_log: vec![RefutationEntry { date: today, test: "Initial conjecture via MCP".into(), evidence: context.into(), outcome: format!("conjectured (basis: {})", basis_str), confidence_before: 0.0, confidence_after: confidence }],
             });
             kg.save();
             format!("Added edge: '{}' → {} → '{}' [confidence: {:.0}%]", from, relation, to, confidence * 100.0)
@@ -395,11 +402,13 @@ fn handle_tool_call(
             match edge_idx {
                 Some(eid) => {
                     let today = chrono_today();
+                    let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
+                    let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
                     let before = kg.graph[eid].confidence;
                     match tool {
-                        "graph_strengthen" => kg.graph[eid].strengthen(&today),
-                        "graph_weaken" => kg.graph[eid].weaken(&today),
-                        "graph_contradict" => kg.graph[eid].contradict(&today),
+                        "graph_strengthen" => kg.graph[eid].strengthen_with(&today, test, evidence),
+                        "graph_weaken" => kg.graph[eid].weaken_with(&today, test, evidence),
+                        "graph_contradict" => kg.graph[eid].contradict_with(&today, test, evidence),
                         _ => {}
                     }
                     let after = kg.graph[eid].confidence;
