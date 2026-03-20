@@ -1523,7 +1523,18 @@ async function showFilePreview(path, contentType, resp) {
 
   if (contentType.startsWith('image/')) {
     html += `<img src="/api/ants/${state.activeBot}/files/${path}" style="max-width:100%;border-radius:6px">`;
-  } else if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/javascript') {
+  } else if (contentType === 'application/json' || fileName.endsWith('.json')) {
+    const text = await resp.text();
+    try {
+      const formatted = JSON.stringify(JSON.parse(text), null, 2);
+      html += `<pre style="background:#0a0a1a;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap;color:#4ade80">${escapeHtml(formatted)}</pre>`;
+    } catch {
+      html += `<pre style="background:#0a0a1a;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap">${escapeHtml(text)}</pre>`;
+    }
+  } else if (fileName.endsWith('.md') || contentType === 'text/markdown') {
+    const text = await resp.text();
+    html += `<div class="msg bot" style="max-width:100%;background:var(--bg);padding:16px;border-radius:8px">${formatMarkdown(text)}</div>`;
+  } else if (contentType.startsWith('text/') || contentType === 'application/javascript') {
     const text = await resp.text();
     html += `<pre style="background:#0a0a1a;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap">${escapeHtml(text)}</pre>`;
   } else if (contentType === 'application/pdf') {
