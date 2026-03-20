@@ -48,8 +48,8 @@
     --border: #d1d5db;
     --border-light: #c0c4cc;
     --code-bg: #eef0f4;
-    --overlay: rgba(0, 0, 0, 0.3);
-    --overlay-strong: rgba(0, 0, 0, 0.5);
+    --overlay: rgba(255, 255, 255, 0.85);
+    --overlay-strong: rgba(255, 255, 255, 0.95);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -977,10 +977,16 @@ async function loadGraph(graphName) {
     }
     container.innerHTML = '';
 
+    const cs = () => getComputedStyle(document.documentElement);
     graphInstance = ForceGraph3D()(container)
       .graphData(data)
-      .nodeLabel(n => `<div style="background:var(--overlay-strong);padding:6px 10px;border-radius:6px;font-size:13px;color:var(--text)">
-        <b>${n.label}</b> (${n.kind})<br>${n.summary || ''}</div>`)
+      .nodeLabel(n => {
+        const s = cs();
+        const bg = s.getPropertyValue('--overlay-strong').trim();
+        const fg = s.getPropertyValue('--text').trim();
+        return `<div style="background:${bg};padding:6px 10px;border-radius:6px;font-size:13px;color:${fg}">
+          <b>${n.label}</b> (${n.kind})<br>${n.summary || ''}</div>`;
+      })
       .nodeColor(n => {
         // Map confidence to opacity: 1.0 = fully opaque, 0.0 = almost transparent.
         const c = n.confidence !== undefined ? n.confidence : 0.5;
@@ -998,11 +1004,12 @@ async function loadGraph(graphName) {
 
     // Add text labels if SpriteText loaded successfully.
     if (typeof SpriteText !== 'undefined') {
+      const isLight = () => document.documentElement.getAttribute('data-theme') === 'light';
       graphInstance
         .nodeThreeObjectExtend(true)
         .nodeThreeObject(n => {
           const sprite = new SpriteText(n.label);
-          sprite.color = NODE_COLORS[n.kind] || '#ccc';
+          sprite.color = NODE_COLORS[n.kind] || (isLight() ? '#333' : '#ccc');
           sprite.textHeight = 2.5;
           sprite.position.set(0, 5, 0);
           return sprite;
@@ -1010,7 +1017,7 @@ async function loadGraph(graphName) {
         .linkThreeObjectExtend(true)
         .linkThreeObject(l => {
           const sprite = new SpriteText(l.relation);
-          sprite.color = '#999';
+          sprite.color = isLight() ? '#555' : '#999';
           sprite.textHeight = 1.5;
           return sprite;
         })
