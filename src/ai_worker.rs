@@ -366,19 +366,47 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
     }
 }
 
+/// Classify an error to determine whether fallback to another backend makes sense.
+///
+/// Returns `Some(reason)` if retriable (try next backend), `None` if the error
+/// is permanent and retrying would be pointless.
+fn classify_error(text: &str) -> Option<&'static str> {
+    let lower = text.to_lowercase();
+
+    // Non-retriable: these won't succeed on a different backend either.
+    if lower.contains("context length exceeded") || lower.contains("too many tokens") {
+        return None; // Input too long — need to shorten, not retry.
+    }
+    if lower.contains("invalid request") || lower.contains("invalid api") {
+        return None; // Bad request format.
+    }
+    if lower.contains("authentication") || lower.contains("unauthorized") || lower.contains("forbidden") {
+        return None; // Credential issue — won't be fixed by retrying.
+    }
+
+    // Retriable: transient issues where another backend might succeed.
+    if lower.contains("rate limit") || lower.contains("quota") {
+        return Some("rate limited");
+    }
+    if lower.contains("overloaded") || lower.contains("capacity") || lower.contains("503") {
+        return Some("backend overloaded");
+    }
+    if lower.contains("timeout") || lower.contains("timed out") {
+        return Some("timeout");
+    }
+    if lower.contains("insufficient") || lower.contains("billing") || lower.contains("credits") {
+        return Some("billing/credits");
+    }
+    if lower.contains("api error") || lower.contains("exceeded") {
+        return Some("api error");
+    }
+
+    None // Unknown error — don't retry by default.
+}
+
 /// Check if an error response indicates we should try a different backend.
 fn is_retriable_error(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("rate limit")
-        || lower.contains("quota")
-        || lower.contains("insufficient")
-        || lower.contains("billing")
-        || lower.contains("credits")
-        || lower.contains("exceeded")
-        || lower.contains("overloaded")
-        || lower.contains("capacity")
-        || lower.contains("timeout")
-        || lower.contains("api error")
+    classify_error(text).is_some()
 }
 
 /// Run the AI worker loop.

@@ -326,6 +326,8 @@ pub struct KnowledgeGraph {
 
 impl KnowledgeGraph {
     /// Load from JSON file, or create empty.
+    /// On parse failure, tries the archive as fallback and preserves the
+    /// corrupted file for manual recovery.
     pub fn load(path: &Path) -> Self {
         let mut kg = Self {
             graph: StableGraph::new(),
@@ -335,32 +337,63 @@ impl KnowledgeGraph {
 
         if path.exists() {
             if let Ok(contents) = std::fs::read_to_string(path) {
-                if let Ok(data) = serde_json::from_str::<GraphData>(&contents) {
-                    // Reconstruct graph from serialized data.
-                    let mut index_map: Vec<Option<NodeIndex>> = Vec::new();
-                    for node_opt in &data.nodes {
-                        if let Some(node) = node_opt {
-                            let idx = kg.graph.add_node(node.clone());
-                            index_map.push(Some(idx));
-                        } else {
-                            index_map.push(None);
+                match serde_json::from_str::<GraphData>(&contents) {
+                    Ok(data) => {
+                        kg.load_graph_data(&data);
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "Knowledge graph corrupted at {}: {}",
+                            path.display(), e
+                        );
+                        // Preserve corrupted file for manual recovery.
+                        let corrupted = path.with_extension("json.corrupted");
+                        let _ = std::fs::copy(path, &corrupted);
+                        log::warn!("Corrupted graph saved to {}", corrupted.display());
+
+                        // Try loading the archive as fallback.
+                        let archive = path.with_file_name("knowledge-archive.json");
+                        if archive.exists() {
+                            if let Ok(arc_contents) = std::fs::read_to_string(&archive) {
+                                if let Ok(data) = serde_json::from_str::<GraphData>(&arc_contents) {
+                                    kg.load_graph_data(&data);
+                                    log::warn!(
+                                        "Recovered {} nodes from archive {}",
+                                        kg.graph.node_count(), archive.display()
+                                    );
+                                }
+                            }
+                        }
+                        if kg.graph.node_count() == 0 {
+                            log::error!("No recovery possible — starting with empty graph");
                         }
                     }
-                    for (from, to, edge) in &data.edges {
-                        if let (Some(Some(from_idx)), Some(Some(to_idx))) =
-                            (index_map.get(*from), index_map.get(*to))
-                        {
-                            kg.graph.add_edge(*from_idx, *to_idx, edge.clone());
-                        }
-                    }
-                } else {
-                    log::warn!("Failed to parse knowledge graph at {}, starting empty", path.display());
                 }
             }
         }
 
         kg.rebuild_index();
         kg
+    }
+
+    /// Load nodes and edges from serialized graph data.
+    fn load_graph_data(&mut self, data: &GraphData) {
+        let mut index_map: Vec<Option<NodeIndex>> = Vec::new();
+        for node_opt in &data.nodes {
+            if let Some(node) = node_opt {
+                let idx = self.graph.add_node(node.clone());
+                index_map.push(Some(idx));
+            } else {
+                index_map.push(None);
+            }
+        }
+        for (from, to, edge) in &data.edges {
+            if let (Some(Some(from_idx)), Some(Some(to_idx))) =
+                (index_map.get(*from), index_map.get(*to))
+            {
+                self.graph.add_edge(*from_idx, *to_idx, edge.clone());
+            }
+        }
     }
 
     /// Save to JSON file (atomic write).
@@ -1218,10 +1251,18 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 /// A cached knowledge graph that reloads from disk only when the file changes.
+/// Cached topic graph with modification tracking.
+struct CachedTopicGraph {
+    graph: KnowledgeGraph,
+    mtime: Option<SystemTime>,
+}
+
 pub struct CachedGraph {
     graph: Mutex<KnowledgeGraph>,
     file_path: PathBuf,
     last_mtime: Mutex<Option<SystemTime>>,
+    /// Cached topic graphs from memory/graphs/, keyed by filename.
+    topic_cache: Mutex<HashMap<PathBuf, CachedTopicGraph>>,
 }
 
 impl CachedGraph {
@@ -1233,6 +1274,7 @@ impl CachedGraph {
             graph: Mutex::new(graph),
             file_path: path.to_path_buf(),
             last_mtime: Mutex::new(mtime),
+            topic_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1253,23 +1295,25 @@ impl CachedGraph {
 
         // For larger graphs: try structured query first (extract entity names
         // from the message and do graph traversal), fall back to keyword subgraph.
+        // Adaptive depth: small graphs get deeper traversal, large graphs stay shallow.
         let keywords = extract_keywords(message);
+        let depth = if graph.node_count() < 100 { 2 } else { 1 };
         let mut result = QueryResult::default();
+        let mut existing: HashSet<usize> = HashSet::new();
 
         // Try each keyword as a potential entity label.
         for kw in &keywords {
-            let about = graph.query_about(kw, 1);
-            if !about.nodes.is_empty() {
-                // Merge into result (dedup by node index).
-                let existing: HashSet<usize> = result.nodes.iter().map(|(idx, _, _)| idx.index()).collect();
-                for (idx, node, score) in about.nodes {
-                    if !existing.contains(&idx.index()) {
-                        result.nodes.push((idx, node, score));
-                    }
+            let about = graph.query_about(kw, depth);
+            for (idx, node, score) in about.nodes {
+                if existing.insert(idx.index()) {
+                    result.nodes.push((idx, node, score));
                 }
-                result.edges.extend(about.edges);
             }
+            result.edges.extend(about.edges);
         }
+
+        // Sort nodes by relevance (confidence × importance) so most useful context comes first.
+        result.nodes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut meta_result = if !result.nodes.is_empty() {
             let mut r = graph.render_query_result(&result, max_chars);
@@ -1284,6 +1328,7 @@ impl CachedGraph {
         };
 
         // Also scan topic graphs in memory/graphs/ for relevant context.
+        // Uses a cache to avoid re-parsing unchanged JSON files on every request.
         let graphs_dir = self.file_path.parent()
             .map(|p| p.join("graphs"));
         if let Some(dir) = graphs_dir {
@@ -1292,20 +1337,40 @@ impl CachedGraph {
                     let remaining = max_chars.saturating_sub(meta_result.len());
                     if remaining > 200 {
                         let mut topic_context = String::new();
+                        let mut cache = self.topic_cache.lock().unwrap_or_else(|e| e.into_inner());
                         for entry in entries.flatten() {
                             let path = entry.path();
                             if path.extension().map(|e| e == "json").unwrap_or(false) {
-                                let topic_graph = KnowledgeGraph::load(&path);
-                                if topic_graph.node_count() == 0 { continue; }
+                                let current_mtime = std::fs::metadata(&path)
+                                    .ok().and_then(|m| m.modified().ok());
+
+                                // Load from cache or disk (reload if mtime changed).
+                                let needs_load = match cache.get(&path) {
+                                    Some(cached) => cached.mtime != current_mtime,
+                                    None => true,
+                                };
+                                if needs_load {
+                                    let tg = KnowledgeGraph::load(&path);
+                                    cache.insert(path.clone(), CachedTopicGraph {
+                                        graph: tg,
+                                        mtime: current_mtime,
+                                    });
+                                }
+
+                                let topic = match cache.get(&path) {
+                                    Some(c) => &c.graph,
+                                    None => continue,
+                                };
+                                if topic.node_count() == 0 { continue; }
                                 let topic_name = path.file_stem()
                                     .map(|s| s.to_string_lossy().to_string())
                                     .unwrap_or_default();
                                 // Check if this topic is relevant to the message.
-                                let relevant = topic_graph.relevant_subgraph(message, 10);
+                                let relevant = topic.relevant_subgraph(message, 10);
                                 if !relevant.is_empty() {
                                     topic_context.push_str(&format!("\n### {} ({})\n",
                                         topic_name, path.display()));
-                                    topic_context.push_str(&topic_graph.render_subgraph(
+                                    topic_context.push_str(&topic.render_subgraph(
                                         &relevant,
                                         remaining.saturating_sub(topic_context.len()) / 2,
                                     ));
@@ -1657,25 +1722,33 @@ impl EpisodicMemory {
     }
 
     /// Search episodes by keywords in summary, outcomes, and tags.
+    /// Results are weighted by both keyword relevance and recency (exponential decay).
     pub fn search(&self, message: &str, max_results: usize) -> Vec<&Episode> {
         let keywords = extract_keywords(message);
         if keywords.is_empty() {
             return self.recent(max_results).iter().collect();
         }
 
-        let mut scored: Vec<(&Episode, u32)> = self.episodes.iter().map(|ep| {
+        let today = today_date();
+
+        let mut scored: Vec<(&Episode, f64)> = self.episodes.iter().map(|ep| {
             let text = format!("{} {} {}",
                 ep.summary,
                 ep.outcomes.join(" "),
                 ep.tags.join(" "));
             let tokens = extract_keywords(&text);
-            let score: u32 = keywords.iter()
+            let keyword_score: f64 = keywords.iter()
                 .filter(|kw| tokens.contains(kw))
-                .count() as u32;
-            (ep, score)
-        }).filter(|(_, s)| *s > 0).collect();
+                .count() as f64;
 
-        scored.sort_by(|a, b| b.1.cmp(&a.1));
+            // Recency boost: episodes from today score 1.0, decaying with half-life of 30 days.
+            let days_ago = days_between(&ep.date, &today).unwrap_or(90) as f64;
+            let recency = (-days_ago / 30.0_f64).exp();
+
+            (ep, keyword_score * (1.0 + recency))
+        }).filter(|(_, s)| *s > 0.0).collect();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored.into_iter().take(max_results).map(|(ep, _)| ep).collect()
     }
 
@@ -1701,6 +1774,50 @@ impl EpisodicMemory {
 // --- Keyword extraction (Layer 2) ---
 // Language-agnostic: uses word length filtering instead of language-specific
 // stop words. Works for English, French, German, Māori, etc.
+
+/// Return today's date as "YYYY-MM-DD".
+fn today_date() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Simple UTC date calculation (no timezone library needed).
+    let days = now / 86400;
+    let (y, m, d) = days_to_ymd(days);
+    format!("{:04}-{:02}-{:02}", y, m, d)
+}
+
+/// Convert days-since-epoch to (year, month, day).
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from Howard Hinnant's date library.
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// Approximate days between two "YYYY-MM-DD" dates. Returns None on parse failure.
+fn days_between(a: &str, b: &str) -> Option<u64> {
+    let parse = |s: &str| -> Option<u64> {
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() != 3 { return None; }
+        let y: u64 = parts[0].parse().ok()?;
+        let m: u64 = parts[1].parse().ok()?;
+        let d: u64 = parts[2].parse().ok()?;
+        // Approximate: 365.25 * y + 30.44 * m + d
+        Some((365.25 * y as f64 + 30.44 * m as f64 + d as f64) as u64)
+    };
+    let da = parse(a)?;
+    let db = parse(b)?;
+    Some(db.saturating_sub(da))
+}
 
 /// Extract meaningful keywords from a message.
 /// Language-agnostic: filters by length and produces both the original
