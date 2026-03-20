@@ -60,6 +60,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/upload/{*path}", post(upload_file))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/ants/reload", post(reload_ants))
+        .route("/api/ants/{id}/restart", post(restart_ant))
         .route("/api/backends", get(list_backends))
         .route("/api/doctor", get(doctor_check))
         .route("/api/auth/devices", get(auth_list_devices))
@@ -422,6 +423,39 @@ async fn reload_ants(
 ) -> impl IntoResponse {
     match state.reload_tx.send(()).await {
         Ok(()) => (StatusCode::OK, "Reload triggered").into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Reload channel closed").into_response(),
+    }
+}
+
+/// POST /api/ants/:id/restart — stop an ANT and trigger reload to restart with new config.
+async fn restart_ant(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    // Stop the ANT: abort all tasks, remove from registry.
+    {
+        let mut bots = state.registry.bots.write().await;
+        if let Some(handle) = bots.remove(&id) {
+            if let Ok(tasks) = handle.tasks.lock() {
+                for task in tasks.values() {
+                    task.handle.abort();
+                }
+            }
+            log::info!("ANT '{}' stopped for restart", id);
+        }
+    }
+
+    // Signal the supervisor to reload — it will re-discover and re-spawn the ANT.
+    match state.reload_tx.send(()).await {
+        Ok(()) => {
+            let _ = state.registry.global_tx.send(
+                crate::registry::WsEvent::BotStatus {
+                    bot: id.clone(),
+                    status: "restarting".into(),
+                }
+            );
+            (StatusCode::OK, format!("ANT '{}' restarting with new config", id)).into_response()
+        }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Reload channel closed").into_response(),
     }
 }
