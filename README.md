@@ -135,6 +135,7 @@ These all follow the same thematic analysis pattern: **familiarise → code → 
 | [Architecture](docs/architecture.md) | R2 sentant engine, events, plugins |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Security](docs/security.md) | Trust groups, device provisioning, access control |
+| [Comparison](docs/comparison.md) | How Anthill compares to OpenClaw, Goose, Aider, n8n |
 
 ## Specifications
 
