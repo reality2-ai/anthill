@@ -1543,10 +1543,8 @@ async function saveConfig() {
           document.getElementById('bot-title').textContent = body.name;
         }
       }
-      // Offer to restart so the new config takes effect.
-      if (confirm('Settings saved. Restart this ANT to apply changes?')) {
-        await authFetch(`/api/ants/${editingAntId}/restart`, { method: 'POST' });
-      }
+      // Auto-restart so the new config takes effect immediately.
+      await authFetch(`/api/ants/${editingAntId}/restart`, { method: 'POST' });
     } else {
       errEl.textContent = await resp.text();
       errEl.style.display = 'block';
