@@ -1521,8 +1521,10 @@ async function showFilePreview(path, contentType, resp) {
     </div>
   </div>`;
 
-  if (contentType.startsWith('image/')) {
-    html += `<img src="/api/ants/${state.activeBot}/files/${path}" style="max-width:100%;border-radius:6px">`;
+  if (contentType.startsWith('image/') || /\.(png|jpg|jpeg|gif|svg|webp|bmp)$/i.test(fileName)) {
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    html += `<img src="${url}" style="max-width:100%;border-radius:6px" onload="URL.revokeObjectURL('${url}')">`;
   } else if (contentType === 'application/json' || fileName.endsWith('.json')) {
     const text = await resp.text();
     try {
@@ -1537,8 +1539,10 @@ async function showFilePreview(path, contentType, resp) {
   } else if (contentType.startsWith('text/') || contentType === 'application/javascript') {
     const text = await resp.text();
     html += `<pre style="background:#0a0a1a;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;white-space:pre-wrap">${escapeHtml(text)}</pre>`;
-  } else if (contentType === 'application/pdf') {
-    html += `<iframe src="/api/ants/${state.activeBot}/files/${path}" style="width:100%;height:80vh;border:none;border-radius:6px"></iframe>`;
+  } else if (contentType === 'application/pdf' || fileName.endsWith('.pdf')) {
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    html += `<iframe src="${url}" style="width:100%;height:80vh;border:none;border-radius:6px"></iframe>`;
   } else {
     html += `<div style="color:var(--text-dim)">Binary file — <a href="/api/ants/${state.activeBot}/files/${path}" download="${fileName}" style="color:var(--accent)">download</a></div>`;
   }
