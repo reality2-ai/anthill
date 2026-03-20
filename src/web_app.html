@@ -1030,11 +1030,22 @@ async function loadGraph(graphName) {
     graphInstance
       .d3AlphaDecay(0.005)
       .d3VelocityDecay(0.4);
-    // Weaker repulsion between unconnected nodes, keep connected nodes close.
+    // Connected nodes repel more (need space for labels and edges).
+    // Unconnected nodes repel less (can cluster in background).
+    const edgeCount = {};
+    data.links.forEach(l => {
+      const s = l.source.id !== undefined ? l.source.id : l.source;
+      const t = l.target.id !== undefined ? l.target.id : l.target;
+      edgeCount[s] = (edgeCount[s] || 0) + 1;
+      edgeCount[t] = (edgeCount[t] || 0) + 1;
+    });
     const charge = graphInstance.d3Force('charge');
-    if (charge) charge.strength(-5);   // unconnected nodes barely push apart
+    if (charge) charge.strength(n => {
+      const edges = edgeCount[n.id] || 0;
+      return edges > 0 ? -40 - edges * 10 : -5;  // connected: strong repulsion, isolated: gentle
+    });
     const link = graphInstance.d3Force('link');
-    if (link) link.distance(50).strength(1.5);  // connected nodes: visible gap between them
+    if (link) link.distance(60).strength(0.8);
 
     graphInstance.onEngineTick(() => {
       const t = Date.now() * 0.001;
