@@ -102,6 +102,8 @@ pub type StatsMap = Arc<Mutex<HashMap<i64, UserStats>>>;
 /// All running tasks.
 pub type TaskMap = Arc<Mutex<HashMap<u32, RunningTask>>>;
 
+/// Core memory preamble — always included. Covers knowledge graph format,
+/// update procedure, episodic memory, and graph organisation. ~2KB.
 const MEMORY_PREAMBLE: &str = "\
 You have a knowledge graph and a per-user memory file:\n\
 - Knowledge graph (shared, structured): memory/knowledge.json — shown below as [KNOWLEDGE GRAPH]\n\
@@ -130,26 +132,22 @@ Knowledge graph JSON format:\n\
 Initial confidence by basis: observed=0.7, told=0.6, inferred=0.4, assumed=0.3\n\
 Confidence formula: blend(basis_prior, survived/tests) weighted by test count.\n\
 Edges below 0.15 confidence are hidden from this prompt but kept in the graph.\n\
-Importance: edges have an 'importance' field (0-1) and 'references' count.\n\
-Set importance higher for knowledge central to the project. It grows with references.\n\n\
-EDGE VIEWS (classify each edge):\n\
-  - semantic: what things mean, conceptual relationships (is_a, part_of, means)\n\
-  - temporal: when things happened, ordering, lifecycles (preceded, followed, during)\n\
-  - causal: why things happened, cause-and-effect (caused, enabled, prevented)\n\
-  - entity: structural connections (works_on, deployed_on, uses, owns)\n\n\
-TEMPORAL VALIDITY:\n\
-  - Set valid_from when a relationship starts.\n\
-  - When a relationship is superseded, set valid_until (don't delete — it becomes history).\n\
-  - Example: Anthill uses AES-256-GCM (valid_until: 2026-03-20) → Anthill uses XChaCha20 (valid_from: 2026-03-20)\n\n\
-Keep nodes concise. Use tags for searchability. Date everything.\n\n\
+Importance: edges have an 'importance' field (0-1) and 'references' count.\n\n\
+EDGE VIEWS: semantic (conceptual), temporal (ordering), causal (why), entity (structural).\n\
+TEMPORAL VALIDITY: Set valid_from when a relationship starts. When superseded, set valid_until.\n\n\
 EPISODIC MEMORY — memory/episodes.json:\n\
-After significant conversations (not trivial questions), append an episode:\n\
-{\"date\": \"YYYY-MM-DD\", \"participants\": [...], \"summary\": \"2-3 sentences\",\n\
- \"outcomes\": [\"key decisions or results\"], \"tags\": [\"searchable\", \"keywords\"],\n\
- \"entities\": [\"entity labels mentioned in this episode\"]}\n\
-Episodes capture WHAT HAPPENED — the narrative, not just facts.\n\
-Entity links enable 'what conversations involved this entity?' queries.\n\
+After significant conversations, append: {\"date\": \"YYYY-MM-DD\", \"participants\": [...],\n\
+ \"summary\": \"2-3 sentences\", \"outcomes\": [...], \"tags\": [...], \"entities\": [...]}\n\
 Recent episodes are shown below as [EPISODES].\n\n\
+KNOWLEDGE GRAPH ORGANISATION:\n\
+- memory/knowledge.json is the META-GRAPH — an index of all knowledge graphs.\n\
+- memory/graphs/<topic>.json — per-topic graphs for major subjects.\n\
+- When analysing something new, decide: existing topic graph, new graph, or meta-graph.\n\
+- Ensure mkdir -p memory/graphs/ before creating the first topic graph.";
+
+/// Extended methodology preamble — included only for analytical commands
+/// (/analyse, /reflect, /specify, /test-vectors). Saves ~1KB per regular request.
+const METHODOLOGY_PREAMBLE: &str = "\n\n\
 DEFAULT METHODOLOGY — when asked to analyse, review, assess, or study ANYTHING:\n\
 Use THEMATIC ANALYSIS (Braun & Clarke, 2022) and record findings in the knowledge graph:\n\
   1. Familiarise — read the material thoroughly\n\
@@ -162,24 +160,7 @@ All findings are CONJECTURES. Confidence reflects how well-evidenced they are:\n
   - Explicit in the material → observed (0.7)\n\
   - Implied by multiple sources → inferred (0.4)\n\
   - Your interpretation → assumed (0.3)\n\
-This applies to ALL analytical work — code review, document analysis, research,\n\
-architecture assessment, debugging, planning. Always structure your findings as\n\
-a knowledge graph update, not just prose.\n\n\
-KNOWLEDGE GRAPH ORGANISATION:\n\
-- memory/knowledge.json is the META-GRAPH — an index of all knowledge graphs.\n\
-  Its nodes represent topics/projects/domains. Its edges show how they relate.\n\
-- memory/graphs/<topic>.json — per-topic graphs for major subjects.\n\
-  Create a new graph when a subject is substantial enough to warrant its own namespace.\n\
-- The meta-graph should contain:\n\
-  - A node for each topic graph (kind: 'concept', tags: ['graph'])\n\
-  - Edges showing relationships between topics (depends_on, related_to, part_of)\n\
-  - A summary of what each topic graph contains\n\
-- When analysing something new, decide:\n\
-  - Does this fit an existing topic graph? → add to it\n\
-  - Is this a new major subject? → create memory/graphs/<topic>.json\n\
-    and add a node for it in the meta-graph\n\
-  - Is this a cross-cutting concern? → add to the meta-graph directly\n\
-- Ensure mkdir -p memory/graphs/ before creating the first topic graph.";
+Always structure analytical findings as a knowledge graph update, not just prose.";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
@@ -485,6 +466,11 @@ pub async fn ai_worker_loop(
         }
 
         // --- Special commands ---
+        let is_analytical = req.message.starts_with("/analyse ")
+            || req.message == "/reflect"
+            || req.message.starts_with("/specify ")
+            || req.message.starts_with("/test-vectors ");
+
         let actual_message = if let Some(path) = req.message.strip_prefix("/analyse ") {
             build_analyse_message(path.trim(), &config.working_dir, &knowledge_file)
         } else if req.message == "/reflect" {
@@ -519,6 +505,7 @@ pub async fn ai_worker_loop(
             &user_memory_file,
             &config.working_dir,
             &config.repos_dir,
+            is_analytical,
         );
         let cfg = Arc::clone(&config);
         let message_for_backends = actual_message.clone();
@@ -991,6 +978,7 @@ pub async fn ai_worker_loop(
 /// knowledge graph, episodes, and user memory by priority.
 const MAX_SYSTEM_PROMPT: usize = 16_384;
 
+#[allow(clippy::too_many_arguments)]
 fn build_system_prompt(
     custom: Option<&str>,
     knowledge_file: &Path,
@@ -999,6 +987,7 @@ fn build_system_prompt(
     user_memory_file: &Path,
     working_dir: &str,
     repos_dir: &Path,
+    is_analytical: bool,
 ) -> String {
     let mut prompt = String::new();
 
@@ -1016,6 +1005,10 @@ fn build_system_prompt(
     ));
 
     prompt.push_str(MEMORY_PREAMBLE);
+    // Include methodology only for analytical commands — saves ~1KB per regular request.
+    if is_analytical {
+        prompt.push_str(METHODOLOGY_PREAMBLE);
+    }
     prompt.push_str(&format!(
         "\nKnowledge graph: {}\nUser memory file: {}\n",
         knowledge_file.display(),

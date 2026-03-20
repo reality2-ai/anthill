@@ -816,6 +816,19 @@ function handleEvent(msg) {
       if (state.bots[msg.bot]) state.bots[msg.bot].status = msg.status;
       renderBotList();
       break;
+
+    case 'lag_warning':
+      // Server detected that this client fell behind — some events were dropped.
+      console.warn('WebSocket lag: ' + msg.dropped + ' events dropped');
+      if (state.activeBot) {
+        if (!state.messages[state.activeBot]) state.messages[state.activeBot] = [];
+        state.messages[state.activeBot].push({
+          role: 'system',
+          text: '⚠️ Connection fell behind — ' + msg.dropped + ' events dropped. Refresh if display seems stale.'
+        });
+        renderChat();
+      }
+      break;
   }
 }
 

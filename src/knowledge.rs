@@ -822,11 +822,19 @@ impl KnowledgeGraph {
         let direct_limit = max_nodes / 2;
         let direct: Vec<NodeIndex> = scored.iter().take(direct_limit).map(|(idx, _)| *idx).collect();
 
-        // Expand 1 hop.
+        // Expand 1 hop, but only through edges with meaningful confidence.
         let mut result: HashSet<NodeIndex> = direct.iter().copied().collect();
         for &idx in &direct {
-            for neighbor in self.graph.neighbors_undirected(idx) {
-                result.insert(neighbor);
+            for edge in self.graph.edges(idx) {
+                if edge.weight().confidence >= 0.3 {
+                    result.insert(edge.target());
+                }
+            }
+            // Also check incoming edges.
+            for edge in self.graph.edges_directed(idx, petgraph::Direction::Incoming) {
+                if edge.weight().confidence >= 0.3 {
+                    result.insert(edge.source());
+                }
             }
         }
 
@@ -948,7 +956,7 @@ impl KnowledgeGraph {
         let chains_collapsed = self.collapse_chains();
         // 4. Detect contradictions.
         let contradictions = self.detect_contradictions();
-        // 5. Community detection (GraphRAP-inspired) — find disconnected clusters.
+        // 5. Community detection (GraphRAG-inspired) — find disconnected clusters.
         let clusters = self.detect_communities();
 
         self.rebuild_index();
@@ -1044,15 +1052,20 @@ impl KnowledgeGraph {
         for (idx, src, tgt, rel, edge) in edge_info {
             let key = (src, tgt, rel);
             if let Some((kept_idx, kept_edge)) = seen.get_mut(&key) {
-                // Merge: combined confidence, summed counts.
-                kept_edge.confidence = (1.0 - (1.0 - kept_edge.confidence) * (1.0 - edge.confidence))
-                    .min(0.95);
+                // Merge: take maximum confidence (same-source edges shouldn't
+                // compound like independent observations).
+                kept_edge.confidence = kept_edge.confidence.max(edge.confidence).min(0.95);
                 kept_edge.tests += edge.tests;
                 kept_edge.survived += edge.survived;
                 kept_edge.references += edge.references;
                 kept_edge.importance = kept_edge.importance.max(edge.importance);
-                if edge.context.len() > kept_edge.context.len() {
-                    kept_edge.context = edge.context;
+                // Combine context from both sources.
+                if !edge.context.is_empty() && edge.context != kept_edge.context {
+                    if kept_edge.context.is_empty() {
+                        kept_edge.context = edge.context;
+                    } else {
+                        kept_edge.context = format!("{}; {}", kept_edge.context, edge.context);
+                    }
                 }
                 to_update.push((*kept_idx, kept_edge.clone()));
                 to_remove.push(idx);
@@ -1242,7 +1255,36 @@ fn labels_match(a: &str, b: &str) -> bool {
     // One is a substring of the other (e.g. "Anthill" matches "Anthill project").
     if la.len() >= 3 && lb.contains(&la) { return true; }
     if lb.len() >= 3 && la.contains(&lb) { return true; }
+    // Fuzzy match for longer labels: Levenshtein distance within 15% of length.
+    if la.len() >= 6 && lb.len() >= 6 {
+        let dist = levenshtein(&la, &lb);
+        let max_len = la.len().max(lb.len());
+        let threshold = (max_len as f64 * 0.15).ceil() as usize;
+        if dist <= threshold.max(1) { return true; }
+    }
     false
+}
+
+/// Levenshtein edit distance between two strings.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    // Use single-row optimization: O(min(m,n)) space.
+    let mut prev = vec![0usize; n + 1];
+    let mut curr = vec![0usize; n + 1];
+    for (j, slot) in prev.iter_mut().enumerate() { *slot = j; }
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
 }
 
 // --- Cached graph (avoids re-parsing JSON on every request) ---
@@ -2266,13 +2308,15 @@ mod tests {
         let report = kg.consolidate();
         assert_eq!(report.edges_merged, 1);
 
-        // Remaining edge should have combined confidence > either individual.
+        // Remaining edge should have max confidence of the two.
         let remaining = kg.graph.edges(a).next().unwrap();
         let edge = remaining.weight();
-        assert!(edge.confidence > 0.6); // combined > max individual
+        assert!((edge.confidence - 0.6).abs() < 0.01, "Expected ~0.6 (max), got {}", edge.confidence);
         assert_eq!(edge.tests, 8); // 3 + 5
         assert_eq!(edge.survived, 6); // 2 + 4
-        assert!(edge.context.contains("detailed")); // kept longer context
+        // Context should combine both sources.
+        assert!(edge.context.contains("context 1"));
+        assert!(edge.context.contains("context 2"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2521,6 +2565,152 @@ mod tests {
         assert!(rendered.contains("Roy"));
         assert!(rendered.contains("works_on"));
         assert!(rendered.contains("%"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn levenshtein_distance() {
+        assert_eq!(super::levenshtein("kitten", "sitting"), 3);
+        assert_eq!(super::levenshtein("", "abc"), 3);
+        assert_eq!(super::levenshtein("abc", "abc"), 0);
+        assert_eq!(super::levenshtein("abc", "abd"), 1);
+    }
+
+    #[test]
+    fn labels_match_fuzzy() {
+        // Exact (case-insensitive)
+        assert!(super::labels_match("Anthill", "anthill"));
+        // Substring
+        assert!(super::labels_match("Anthill", "Anthill project"));
+        assert!(super::labels_match("Redis", "Redistribution")); // substring match
+        // Levenshtein: "anthill" vs "anthil_" (1 edit, ~14% of 7 chars)
+        assert!(super::labels_match("anthill", "anthil_"));
+        // Too different for Levenshtein
+        assert!(!super::labels_match("anthill", "beehive"));
+        // Short labels skip fuzzy (< 6 chars)
+        assert!(!super::labels_match("abc", "abd"));
+    }
+
+    #[test]
+    fn days_between_dates() {
+        // Same date
+        assert_eq!(super::days_between("2026-03-20", "2026-03-20"), Some(0));
+        // One day apart (approximate)
+        let d = super::days_between("2026-03-19", "2026-03-20").unwrap();
+        assert!(d <= 2, "Expected ~1, got {}", d);
+        // Invalid
+        assert!(super::days_between("bad", "date").is_none());
+    }
+
+    #[test]
+    fn corruption_recovery_loads_archive() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-corrupt");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Create a valid archive with one node.
+        let archive_path = dir.join("knowledge-archive.json");
+        let mut archive = KnowledgeGraph::load(&archive_path);
+        archive.graph.add_node(KnowledgeNode {
+            label: "Recovered".into(), kind: NodeKind::Fact,
+            summary: "From archive".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        archive.save();
+
+        // Write corrupted main file.
+        let main_path = dir.join("knowledge.json");
+        std::fs::write(&main_path, "{ invalid json !!!").unwrap();
+
+        // Load should recover from archive.
+        let kg = KnowledgeGraph::load(&main_path);
+        assert_eq!(kg.node_count(), 1);
+        assert!(kg.find_by_label("Recovered").is_some());
+
+        // Corrupted file should be preserved.
+        assert!(dir.join("knowledge.json.corrupted").exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn edge_merge_uses_max_confidence() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-merge-max");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        let a = kg.graph.add_node(KnowledgeNode {
+            label: "A".into(), kind: NodeKind::Concept, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let b = kg.graph.add_node(KnowledgeNode {
+            label: "B".into(), kind: NodeKind::Concept, summary: "".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+
+        let mut e1 = KnowledgeEdge::new("uses", "ctx1", "2026-01-01", Basis::Observed);
+        e1.confidence = 0.5;
+        let mut e2 = KnowledgeEdge::new("uses", "ctx2", "2026-01-01", Basis::Told);
+        e2.confidence = 0.8;
+
+        kg.graph.add_edge(a, b, e1);
+        kg.graph.add_edge(a, b, e2);
+
+        let merged = kg.merge_parallel_edges();
+        assert_eq!(merged, 1);
+
+        // Merged edge should use MAX confidence (0.8), not OR (0.9).
+        let edge = kg.graph.edges(a).next().unwrap();
+        assert!((edge.weight().confidence - 0.8).abs() < 0.01,
+            "Expected 0.8, got {}", edge.weight().confidence);
+        // Context should combine both.
+        assert!(edge.weight().context.contains("ctx1"));
+        assert!(edge.weight().context.contains("ctx2"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn relevant_subgraph_filters_low_confidence() {
+        let dir = std::env::temp_dir().join("anthill-test-kg-subgraph-conf");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("knowledge.json");
+
+        let mut kg = KnowledgeGraph::load(&path);
+        let a = kg.graph.add_node(KnowledgeNode {
+            label: "Rust".into(), kind: NodeKind::Concept, summary: "programming language".into(),
+            created: String::new(), updated: String::new(), tags: vec!["rust".into()],
+        });
+        let b = kg.graph.add_node(KnowledgeNode {
+            label: "HighConf".into(), kind: NodeKind::Fact, summary: "well-known".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+        let c = kg.graph.add_node(KnowledgeNode {
+            label: "LowConf".into(), kind: NodeKind::Fact, summary: "uncertain".into(),
+            created: String::new(), updated: String::new(), tags: vec![],
+        });
+
+        let mut high = KnowledgeEdge::new("uses", "", "2026-01-01", Basis::Observed);
+        high.confidence = 0.9;
+        let mut low = KnowledgeEdge::new("maybe", "", "2026-01-01", Basis::Assumed);
+        low.confidence = 0.1; // Below 0.3 threshold
+
+        kg.graph.add_edge(a, b, high);
+        kg.graph.add_edge(a, c, low);
+        kg.rebuild_index();
+
+        let result = kg.relevant_subgraph("rust programming", 50);
+        // Should include Rust and HighConf, but NOT LowConf (low confidence edge).
+        let labels: Vec<&str> = result.iter()
+            .map(|&idx| kg.graph[idx].label.as_str())
+            .collect();
+        assert!(labels.contains(&"Rust"));
+        assert!(labels.contains(&"HighConf"));
+        assert!(!labels.contains(&"LowConf"), "Low-confidence neighbor should be filtered out");
 
         std::fs::remove_dir_all(&dir).ok();
     }
