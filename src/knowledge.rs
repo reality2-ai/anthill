@@ -26,6 +26,29 @@ pub enum NodeKind {
     Decision,
     Event,
     Fact,
+    // Extended kinds used in topic-specific graphs (thurisaz, reality2, etc.)
+    Theory,
+    Mechanism,
+    Principle,
+    Constraint,
+    Epistemology,
+    Problem,
+    #[serde(rename = "claim_type")]
+    ClaimType,
+    Claim,
+    #[serde(rename = "open_question")]
+    OpenQuestion,
+    Implementation,
+    Entity,
+    Spec,
+    Repo,
+    Platform,
+    Framework,
+    #[serde(rename = "r2_spec")]
+    R2Spec,
+    /// Catch-all for unknown node kinds from external graphs.
+    #[serde(other)]
+    Other,
 }
 
 impl std::fmt::Display for NodeKind {
@@ -39,11 +62,29 @@ impl std::fmt::Display for NodeKind {
             Self::Decision => write!(f, "decision"),
             Self::Event => write!(f, "event"),
             Self::Fact => write!(f, "fact"),
+            Self::Theory => write!(f, "theory"),
+            Self::Mechanism => write!(f, "mechanism"),
+            Self::Principle => write!(f, "principle"),
+            Self::Constraint => write!(f, "constraint"),
+            Self::Epistemology => write!(f, "epistemology"),
+            Self::Problem => write!(f, "problem"),
+            Self::ClaimType => write!(f, "claim_type"),
+            Self::Claim => write!(f, "claim"),
+            Self::OpenQuestion => write!(f, "open_question"),
+            Self::Implementation => write!(f, "implementation"),
+            Self::Entity => write!(f, "entity"),
+            Self::Spec => write!(f, "spec"),
+            Self::Repo => write!(f, "repo"),
+            Self::Platform => write!(f, "platform"),
+            Self::Framework => write!(f, "framework"),
+            Self::R2Spec => write!(f, "r2_spec"),
+            Self::Other => write!(f, "other"),
         }
     }
 }
 
 /// A node in the knowledge graph.
+/// Tolerates extra fields from topic-specific graphs (e.g. "id", "spec", "source", "deps", "layer").
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeNode {
     pub label: String,
@@ -56,6 +97,9 @@ pub struct KnowledgeNode {
     pub updated: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Extra fields from topic graphs (id, spec, source, deps, layer, status, etc.)
+    #[serde(flatten)]
+    pub extra: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// How a conjecture was originally formed.
@@ -310,10 +354,14 @@ pub const ARCHIVE_CONFIDENCE: f64 = 0.10;
 pub const MAX_ACTIVE_NODES: usize = 500;
 
 /// Serializable graph format (petgraph's serde format).
+/// Tolerates extra top-level fields (e.g. "meta") from topic-specific graphs.
 #[derive(Serialize, Deserialize)]
 struct GraphData {
     nodes: Vec<Option<KnowledgeNode>>,
     edges: Vec<(usize, usize, KnowledgeEdge)>,
+    /// Catch-all for extra fields (e.g. "meta" in topic graphs).
+    #[serde(flatten)]
+    _extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Knowledge graph with keyword index for retrieval.
@@ -372,6 +420,63 @@ impl KnowledgeGraph {
             }
         }
 
+        // Also load topic-specific graphs from a sibling graphs/ directory.
+        // Each graph is merged into the main graph with a prefix to avoid ID collisions.
+        if let Some(parent) = path.parent() {
+            let graphs_dir = parent.join("graphs");
+            if graphs_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.extension().and_then(|e| e.to_str()) == Some("json") {
+                            if let Ok(contents) = std::fs::read_to_string(&p) {
+                                if let Ok(data) = serde_json::from_str::<GraphData>(&contents) {
+                                    let topic = p.file_stem()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("unknown");
+                                    // Build index map for this topic graph.
+                                    let mut index_map: Vec<Option<NodeIndex>> = Vec::new();
+                                    for node_opt in &data.nodes {
+                                        if let Some(node) = node_opt {
+                                            // Check for duplicate labels — skip if already in graph.
+                                            let existing = kg.graph.node_indices()
+                                                .find(|&idx| kg.graph[idx].label == node.label);
+                                            if let Some(idx) = existing {
+                                                index_map.push(Some(idx));
+                                            } else {
+                                                let idx = kg.graph.add_node(node.clone());
+                                                index_map.push(Some(idx));
+                                            }
+                                        } else {
+                                            index_map.push(None);
+                                        }
+                                    }
+                                    let mut edge_count = 0;
+                                    for (from, to, edge) in &data.edges {
+                                        if let (Some(Some(from_idx)), Some(Some(to_idx))) =
+                                            (index_map.get(*from), index_map.get(*to))
+                                        {
+                                            kg.graph.add_edge(*from_idx, *to_idx, edge.clone());
+                                            edge_count += 1;
+                                        }
+                                    }
+                                    log::info!(
+                                        "Loaded topic graph '{}': {} nodes, {} edges",
+                                        topic, data.nodes.len(), edge_count
+                                    );
+                                } else {
+                                    log::warn!(
+                                        "Failed to parse topic graph at {}, skipping",
+                                        p.display()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         kg.rebuild_index();
         kg
     }
@@ -422,7 +527,7 @@ impl KnowledgeGraph {
                 Some((a.index(), b.index(), self.graph[e].clone()))
             })
             .collect();
-        GraphData { nodes, edges }
+        GraphData { nodes, edges, _extra: serde_json::Map::new() }
     }
 
     /// Rebuild the keyword inverted index from all nodes.
@@ -487,6 +592,7 @@ impl KnowledgeGraph {
             created: String::new(),
             updated: String::new(),
             tags: vec!["graph".into(), "topic".into()],
+            extra: None,
         })
     }
 
@@ -1607,9 +1713,27 @@ impl CachedGraph {
             .ok()
             .and_then(|m| m.modified().ok());
 
+        // Also check topic graph mtimes in the graphs/ sibling directory.
+        let latest_topic_mtime = self.file_path.parent()
+            .map(|p| p.join("graphs"))
+            .filter(|d| d.is_dir())
+            .and_then(|d| {
+                std::fs::read_dir(d).ok().and_then(|entries| {
+                    entries.flatten()
+                        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+                        .filter_map(|e| std::fs::metadata(e.path()).ok()?.modified().ok())
+                        .max()
+                })
+            });
+
+        let effective_mtime = match (current_mtime, latest_topic_mtime) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+
         let needs_reload = {
             let last = self.last_mtime.lock().ok();
-            match (last.as_deref(), &current_mtime) {
+            match (last.as_deref(), &effective_mtime) {
                 (Some(Some(prev)), Some(curr)) => curr != prev,
                 (Some(None), Some(_)) => true, // file appeared
                 _ => false,
@@ -1623,7 +1747,7 @@ impl CachedGraph {
                 *g = new_graph;
             }
             if let Ok(mut m) = self.last_mtime.lock() {
-                *m = current_mtime;
+                *m = effective_mtime;
             }
         }
     }
