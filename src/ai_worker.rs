@@ -264,6 +264,19 @@ Example thinking_process.md entry:\n\
   before looking for evidence. Previously I searched broadly, which led to\n\
   inconsequential searches. Focused attack is more productive.\n\
   Changed because: 8/10 refutation attempts were inconsequential_search.\n\n\
+COMMUNITY OF PRACTICE — you are not alone:\n\
+You are part of a colony of ANTs, each with different areas of expertise.\n\
+Use 'list_colony_ants' to discover your peers and their topic graphs.\n\
+Use 'query_ant' to ask a peer about their area of expertise.\n\n\
+WHEN TO CONSULT A PEER:\n\
+  - When you encounter a topic OUTSIDE your own expertise\n\
+  - When you want to CROSS-REFERENCE your knowledge with another domain\n\
+  - When ruminating and you find a cross-domain pattern that another ANT might know about\n\
+  - When a user mentions another ANT by name or says 'check with X' or 'X is the expert'\n\n\
+Knowledge from other ANTs is a CONJECTURE (source_id: 'ant:<name>').\n\
+Evaluate it critically using your Popperian process — don't just accept it.\n\
+Record which ANT is expert in what in your meta-graph, so you remember\n\
+who to consult next time without being told.\n\n\
 QUESTIONS FOR HUMAN — memory/questions.json:\n\
 When ruminating or analysing, if you encounter something that needs human input —\n\
 a decision, a clarification, an opinion on competing hypotheses — write it to\n\
