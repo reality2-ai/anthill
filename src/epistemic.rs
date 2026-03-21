@@ -96,7 +96,7 @@ pub enum EvidenceType {
 
 impl EvidenceType {
     /// Base Bayes factor for this evidence type.
-    /// For reputation-dependent types, this is the coefficient (multiply by r).
+    /// All types are then reputation-adjusted via BF_adj = BF_base^(0.5+0.5r).
     pub fn base_bayes_factor(&self) -> f64 {
         match self {
             Self::Corroboration => 2.0,
@@ -126,18 +126,15 @@ impl EvidenceType {
     /// Compute the effective Bayes factor given source reputation.
     /// For reputation-independent types, reputation is ignored.
     pub fn effective_bayes_factor(&self, reputation: f64) -> f64 {
-        let r = reputation.clamp(0.1, 1.0);
-        match self {
-            Self::Corroboration => reputation_adjusted_bf(2.0 * r, reputation),
-            Self::Contradiction => {
-                // BF = 0.3 / r — lower reputation makes contradiction weaker evidence
-                let bf = (0.3 / r).clamp(0.01, 10.0);
-                reputation_adjusted_bf(bf, reputation)
-            }
-            Self::HumanAttestation => reputation_adjusted_bf(1.5 * r, reputation),
-            // Non-reputation types: apply reputation dampening to base BF
-            _ => reputation_adjusted_bf(self.base_bayes_factor(), reputation),
-        }
+        // The "× r" and "/ r" in TH-WEAVE §3.2's evidence type table are
+        // shorthand for "this BF is reputation-dependent" — NOT a literal
+        // coefficient. The reputation adjustment is applied solely through
+        // the exponent: BF_adj = BF_base ^ (0.5 + 0.5r) per §7.1.
+        //
+        // Confirmed by worked example (§10.1): Corroboration with r=0.8
+        // uses BF_base=2.0, NOT 2.0×0.8. The "× r" marker means "apply §7".
+        let bf_base = self.base_bayes_factor();
+        reputation_adjusted_bf(bf_base, reputation)
     }
 
     /// Human-readable description.
