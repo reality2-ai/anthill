@@ -1527,39 +1527,61 @@ async fn handle_web_command(
         },
         "/ruminate" => {
             drop(bots);
-            // Send a rumination request directly via the request channel.
+            // Send multiple focused rumination tasks.
             let bots = registry.bots.read().await;
             if let Some(handle) = bots.get(bot_name) {
-                let task_id = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .subsec_nanos();
-                let _ = handle.request_tx.send(crate::ai_worker::CliRequest {
-                    chat_id,
-                    message: "RUMINATION — MANUAL TRIGGER\n\n\
-                        You have been asked to ruminate — to actively think about and improve \
-                        your knowledge graph.\n\n\
-                        Do ALL of the following:\n\
-                        1. Read your topic graphs in memory/graphs/\n\
-                        2. Pick 2-3 important beliefs with moderate confidence (40-80%) and \
-                           ATTEMPT TO REFUTE them. Remember: not finding counter-evidence is \
-                           'inconsequential_search' (no change), NOT 'refutation_survived'\n\
-                        3. Look for pairs of strong edges (A→B, B→C) where no A→C exists — \
-                           conjecture new transitive relationships with basis 'inferred'\n\
-                        4. Find competing hypotheses (different relations between the same nodes) \
-                           and evaluate which is best supported\n\
-                        5. Look for cross-domain patterns — similar relationships in different \
-                           topic graphs that could inform each other\n\
-                        6. Set beneficial_impact on edges where relevant\n\
-                        7. Update the graph files with all changes\n\n\
-                        Output a summary of what you thought about and what changed.\n\n\
-                        IMPORTANT: Complete this work and STOP. Do not ask follow-up questions.".into(),
-                    new_session: true,
-                    task_id,
-                    source: "rumination".into(),
-                });
+                let tasks: &[(&str, &str)] = &[
+                    ("RUMINATION — REFUTATION",
+                     "Read your topic graphs in memory/graphs/. Pick ONE important belief with \
+                      moderate confidence (40-80%) and ATTEMPT TO REFUTE it.\n\n\
+                      1. State the belief clearly\n\
+                      2. Formulate specific ways it could be wrong\n\
+                      3. Search for evidence that would disprove it\n\
+                      4. If you found evidence that COULD disprove but DIDN'T → 'refutation_survived'\n\
+                      5. If you found evidence that DOES disprove → 'refutation_failed'\n\
+                      6. If you found NOTHING relevant → 'inconsequential_search' (NO change)\n\
+                      7. Update the topic graph file"),
+                    ("RUMINATION — UNDETERMINED CONNECTIONS",
+                     "Read your topic graphs in memory/graphs/. Find edges with relation '?' — \
+                      these are connections where the relationship hasn't been determined yet.\n\n\
+                      1. Pick one '?' connection\n\
+                      2. Look at what other edges connect to those nodes\n\
+                      3. Determine what the relationship should be\n\
+                      4. Replace the '?' edge with the actual relation, set basis to 'inferred'\n\
+                      5. If you can't determine it, add a question to memory/questions.json\n\
+                      6. Update the topic graph file"),
+                    ("RUMINATION — STRENGTHEN AND IMPROVE",
+                     "Read your topic graphs in memory/graphs/. Look for areas to improve:\n\n\
+                      1. Find nodes with few connections — are relationships missing?\n\
+                      2. Set beneficial_impact on edges where relevant (positive for ideas \
+                         that benefit people and planet)\n\
+                      3. Look for edges that should exist based on what you know\n\
+                      4. Add any new conjectures with appropriate basis and confidence\n\
+                      5. Update the topic graph files"),
+                ];
+
+                for (title, body) in tasks {
+                    let task_id = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos();
+                    let prompt = format!(
+                        "{}\n\n{}\n\n\
+                         IMPORTANT: Complete this specific task, update the graph files, \
+                         output a brief summary of what you changed, and STOP. \
+                         Do not ask follow-up questions.",
+                        title, body
+                    );
+                    let _ = handle.request_tx.send(crate::ai_worker::CliRequest {
+                        chat_id,
+                        message: prompt,
+                        new_session: true,
+                        task_id,
+                        source: "rumination".into(),
+                    });
+                }
             }
-            Some("🧠 Starting rumination cycle — refuting, synthesising, competing...".into())
+            Some("🧠 Starting 3 focused rumination tasks — refutation, connections, improvement...".into())
         },
         _ => None,
     };
