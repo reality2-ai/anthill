@@ -361,6 +361,50 @@ fn load_and_clear_questions(path: &std::path::Path) -> Option<String> {
     Some(text)
 }
 
+/// Build a follow-up prompt based on what a rumination task just did.
+/// The follow-up continues the session and goes deeper on what was found.
+fn build_rumination_followup(previous_response: &str) -> String {
+    // Extract what kind of rumination was done from the response.
+    let is_refutation = previous_response.contains("refut") || previous_response.contains("disprove");
+    let is_connection = previous_response.contains("?") || previous_response.contains("undetermined");
+    let found_issues = previous_response.contains("contradict") || previous_response.contains("inconsisten")
+        || previous_response.contains("weakened") || previous_response.contains("failed");
+
+    let followup = if found_issues {
+        "RUMINATION FOLLOW-UP — You found issues in the previous step. Now:\n\n\
+         1. For any beliefs you weakened or contradicted, look at what DEPENDS on them — \
+            are there downstream edges that are now unsupported?\n\
+         2. If you resolved a contradiction, check if the resolution creates new insights\n\
+         3. Update the graph with any cascading changes\n\
+         4. If this raises questions for the human, write them to memory/questions.json"
+    } else if is_refutation {
+        "RUMINATION FOLLOW-UP — Now build on what survived refutation:\n\n\
+         1. The belief you just tested — does its survival suggest new connections?\n\
+         2. Are there RELATED beliefs in the same topic that should also be tested?\n\
+         3. Can you synthesise new edges from this strengthened belief?\n\
+         4. Update the graph with any new conjectures"
+    } else if is_connection {
+        "RUMINATION FOLLOW-UP — Now that you've investigated connections:\n\n\
+         1. Does the new/updated connection reveal other missing links?\n\
+         2. Are there similar '?' connections in other topic graphs?\n\
+         3. Does this connection create a path between previously unlinked clusters?\n\
+         4. Update the graph with any insights"
+    } else {
+        "RUMINATION FOLLOW-UP — Continue improving the knowledge graph:\n\n\
+         1. Review what you just changed — are there consequences or implications?\n\
+         2. Do your changes create any new contradictions or competing hypotheses?\n\
+         3. Are there related areas that could benefit from similar analysis?\n\
+         4. Update the graph with any follow-on insights"
+    };
+
+    format!(
+        "{}\n\n\
+         IMPORTANT: Complete this follow-up task, update the graph files, \
+         output a brief summary, and STOP. Do not ask follow-up questions.",
+        followup
+    )
+}
+
 /// Detect which AI backends are installed on this system.
 pub fn detect_backends() -> Vec<(String, bool)> {
     let backends = [
@@ -790,6 +834,7 @@ pub async fn ai_worker_loop(
         let message_for_backends = actual_message.clone();
         let system_prompt_for_backends = system_prompt;
         let continue_session = !req.new_session;
+        let is_new_session = req.new_session;
         let input_len = req.message.len() as u64;
         let chat_id = req.chat_id;
         let task_id = req.task_id;
@@ -1212,6 +1257,22 @@ pub async fn ai_worker_loop(
                         graph: "all".into(),
                         source: "rumination".into(),
                     });
+                }
+
+                // Spawn a rumination follow-up based on what was just done.
+                // Only spawn from top-level rumination (new_session=true), not from
+                // follow-ups, to prevent infinite chains.
+                if is_new_session && !response_text.is_empty() && response_text.len() > 50 {
+                    let follow_up_prompt = build_rumination_followup(&response_text);
+                    let _ = rq_tx.send(CliRequest {
+                        chat_id,
+                        message: follow_up_prompt,
+                        new_session: false, // continue session for context
+                        task_id: 0,
+                        source: "rumination".into(),
+                    });
+                    log::info!("[{}] Spawned rumination follow-up from task #{}",
+                        bname, task_id);
                 }
             }
 
