@@ -650,14 +650,37 @@ impl KnowledgeGraph {
                         kg.load_graph_data(&data);
                     }
                     Err(e) => {
-                        log::error!(
-                            "Knowledge graph corrupted at {}: {}",
+                        log::warn!(
+                            "Strict parse failed for {}: {} — trying lenient parse",
                             path.display(), e
                         );
 
-                        // Preserve corrupted file for investigation.
-                        let corrupted = path.with_extension("json.corrupted");
-                        let _ = std::fs::copy(path, &corrupted);
+                        // Recovery strategy 0: lenient parse — extract what we can.
+                        // Parse as generic JSON and deserialize nodes/edges individually,
+                        // keeping what works and skipping what doesn't.
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents) {
+                            let (recovered, skipped) = kg.load_lenient(&value);
+                            if recovered > 0 {
+                                log::warn!(
+                                    "Lenient parse recovered {} nodes/edges, skipped {} from {}",
+                                    recovered, skipped, path.display()
+                                );
+                                // Save the cleaned version so future loads succeed strictly.
+                                kg.save();
+                            }
+                        }
+
+                        // If lenient parse also got nothing, try harder recovery.
+                        if kg.graph.node_count() == 0 {
+                            log::error!(
+                                "Lenient parse also failed for {} — trying git/archive recovery",
+                                path.display()
+                            );
+
+                            // Preserve corrupted file for investigation.
+                            let corrupted = path.with_extension("json.corrupted");
+                            let _ = std::fs::copy(path, &corrupted);
+                        }
 
                         // Recovery strategy 1: git checkout (most reliable).
                         // The working directory is a git repo — restore the last committed version.
@@ -788,6 +811,101 @@ impl KnowledgeGraph {
                 self.graph.add_edge(*from_idx, *to_idx, edge);
             }
         }
+    }
+
+    /// Lenient parse: extract nodes and edges individually from generic JSON.
+    /// Tolerates per-item parse failures — keeps what works, skips what doesn't.
+    /// Returns (recovered_count, skipped_count).
+    fn load_lenient(&mut self, value: &serde_json::Value) -> (usize, usize) {
+        let mut recovered = 0usize;
+        let mut skipped = 0usize;
+
+        // Parse nodes.
+        let mut index_map: Vec<Option<NodeIndex>> = Vec::new();
+        if let Some(nodes) = value.get("nodes").and_then(|v| v.as_array()) {
+            for node_val in nodes {
+                if node_val.is_null() {
+                    index_map.push(None);
+                    continue;
+                }
+                match serde_json::from_value::<KnowledgeNode>(node_val.clone()) {
+                    Ok(node) => {
+                        let idx = self.graph.add_node(node);
+                        index_map.push(Some(idx));
+                        recovered += 1;
+                    }
+                    Err(e) => {
+                        // Try minimal extraction — at least get the label.
+                        let label = node_val.get("label")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let node = KnowledgeNode {
+                            label: label.into(),
+                            kind: NodeKind::Other,
+                            summary: format!("(recovered from parse error: {})", e),
+                            ..Default::default()
+                        };
+                        let idx = self.graph.add_node(node);
+                        index_map.push(Some(idx));
+                        recovered += 1;
+                        log::warn!("Lenient: recovered node '{}' with parse error: {}", label, e);
+                    }
+                }
+            }
+        }
+
+        // Parse edges.
+        if let Some(edges) = value.get("edges").and_then(|v| v.as_array()) {
+            for edge_val in edges {
+                let arr = match edge_val.as_array() {
+                    Some(a) if a.len() >= 3 => a,
+                    _ => { skipped += 1; continue; }
+                };
+                let from = match arr[0].as_u64() {
+                    Some(v) => v as usize,
+                    None => { skipped += 1; continue; }
+                };
+                let to = match arr[1].as_u64() {
+                    Some(v) => v as usize,
+                    None => { skipped += 1; continue; }
+                };
+
+                let (from_idx, to_idx) = match (index_map.get(from), index_map.get(to)) {
+                    (Some(Some(f)), Some(Some(t))) => (*f, *t),
+                    _ => { skipped += 1; continue; }
+                };
+
+                match serde_json::from_value::<KnowledgeEdge>(arr[2].clone()) {
+                    Ok(mut edge) => {
+                        edge.ensure_log_odds();
+                        self.graph.add_edge(from_idx, to_idx, edge);
+                        recovered += 1;
+                    }
+                    Err(e) => {
+                        // Try minimal extraction — at least get the relation.
+                        let relation = arr[2].get("relation")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?");
+                        let confidence = arr[2].get("confidence")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.3);
+                        let edge = KnowledgeEdge::new(
+                            relation,
+                            &format!("(recovered from parse error: {})", e),
+                            "",
+                            Basis::Assumed,
+                        );
+                        let mut edge = KnowledgeEdge { confidence, ..edge };
+                        edge.ensure_log_odds();
+                        self.graph.add_edge(from_idx, to_idx, edge);
+                        recovered += 1;
+                        log::warn!("Lenient: recovered edge '{}' with parse error: {}", relation, e);
+                    }
+                }
+            }
+        }
+
+        (recovered, skipped)
     }
 
     /// Migrate existing edges to Thurisaz format.
