@@ -1371,28 +1371,49 @@ pub async fn ai_worker_loop(
                         });
                     }
 
-                    // 2. Send the response to the originating ANT's AI worker
-                    // so it can evaluate and integrate the knowledge.
-                    let _ = rq_tx.send(CliRequest {
-                        chat_id: orig_chat_id,
-                        message: format!(
-                            "COLONY RESPONSE from {} — evaluate this critically:\n\n\
-                             {}\n\n\
-                             Your task:\n\
-                             1. Evaluate this response against your own knowledge\n\
-                             2. If it's well-evidenced and consistent, add relevant facts to \
-                                your graph with source_id 'ant:{}' and evidence_type 'corroboration'\n\
-                             3. If it contradicts your knowledge, record it with 'contradiction'\n\
-                             4. If it's weak or unsupported, note it with 'inconsequential_search'\n\
-                             5. Update the 'expert_in' edge for {} in your meta-graph based on \
-                                the quality of this response\n\n\
-                             IMPORTANT: Complete your evaluation and STOP.",
-                            bname, response_text, bname, bname
-                        ),
-                        new_session: false, // Continue the session for context
-                        task_id: 0,
-                        source: format!("colony-response:{}", bname),
-                    });
+                    // 2. Send the evaluation task to the ORIGINATING ANT (not ourselves).
+                    // Write to their colony inbox so their worker picks it up.
+                    let ants_dir = cfg.memory_dir.parent()
+                        .and_then(|p| p.parent())
+                        .and_then(|p| p.parent());
+                    if let Some(dir) = ants_dir {
+                        let target_memory = dir.join(from_ant).join("working").join("memory");
+                        // Also check ant.toml for custom working_dir.
+                        let target_memory = resolve_ant_memory(dir, from_ant)
+                            .unwrap_or(target_memory);
+                        if target_memory.exists() {
+                            let inbox = target_memory.join("colony_inbox");
+                            let _ = std::fs::create_dir_all(&inbox);
+                            let eval_msg = format!(
+                                "COLONY RESPONSE from {} — evaluate this critically:\n\n\
+                                 {}\n\n\
+                                 Your task:\n\
+                                 1. Evaluate this response against YOUR OWN knowledge\n\
+                                 2. If it's well-evidenced and consistent, add relevant facts to \
+                                    your graph with source_id 'ant:{}' and evidence_type 'corroboration'\n\
+                                 3. If it contradicts your knowledge, record it with 'contradiction'\n\
+                                 4. If it's weak or unsupported, note it with 'inconsequential_search'\n\
+                                 5. Update the 'expert_in' edge for {} in your meta-graph\n\n\
+                                 IMPORTANT: Complete your evaluation and STOP.",
+                                bname, response_text, bname, bname
+                            );
+                            let inbox_msg = serde_json::json!({
+                                "from": bname.to_string(),
+                                "message": eval_msg,
+                                "chat_id": orig_chat_id,
+                                "timestamp": crate::dateutil::datetime_now(),
+                            });
+                            let filename = format!("response-{}-{}.json", bname,
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis());
+                            let _ = std::fs::write(
+                                inbox.join(&filename),
+                                serde_json::to_string_pretty(&inbox_msg).unwrap_or_default()
+                            );
+                        }
+                    }
 
                     log::info!("[{}] Colony query from {} complete ({} chars) — forwarded for evaluation",
                         bname, from_ant, response_text.len());
@@ -2201,6 +2222,19 @@ RECENT EPISODES:
 }
 
 // ── Colony inbox/outbox processing ──────────────────────────────────
+
+/// Resolve an ANT's memory directory, checking ant.toml for custom working_dir.
+fn resolve_ant_memory(ants_dir: &std::path::Path, ant_name: &str) -> Option<std::path::PathBuf> {
+    let config_path = ants_dir.join(ant_name).join("ant.toml");
+    if let Ok(contents) = std::fs::read_to_string(&config_path) {
+        if let Ok(cfg) = toml::from_str::<crate::config::Config>(&contents) {
+            if let Some(wd) = &cfg.claude.working_dir {
+                return Some(std::path::PathBuf::from(wd).join(&cfg.claude.memory_dir));
+            }
+        }
+    }
+    None
+}
 
 /// Process the colony inbox — pick up messages from other ANTs.
 /// Called on a 5-second poll interval, not just on requests.
