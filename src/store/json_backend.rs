@@ -80,6 +80,12 @@ impl StorageBackend for JsonFileBackend {
                         && !filename.ends_with(".corrupted")
                         && !filename.ends_with(".tmp")
                     {
+                        // Only include files that are actual graphs (have "nodes" key).
+                        let is_graph = std::fs::read_to_string(&path)
+                            .map(|c| c.contains("\"nodes\""))
+                            .unwrap_or(false);
+                        if !is_graph { continue; }
+
                         if let Some(stem) = path.file_stem() {
                             names.push(stem.to_string_lossy().to_string());
                         }
