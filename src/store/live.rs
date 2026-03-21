@@ -17,20 +17,21 @@ use crate::store::{
     ConsolidationReport,
     ValidatedNode, ValidatedEdge, ValidatedEvidence,
 };
-use crate::store::json_backend::JsonFileBackend;
+use crate::store::cbor_backend::CborGitBackend;
 
 /// The primary implementation of KnowledgeStore.
+/// Uses CBOR+Git backend for persistence, KnowledgeGraph for in-memory operations.
 pub struct LiveKnowledgeStore {
-    backend: JsonFileBackend,
+    backend: CborGitBackend,
     memory_dir: PathBuf,
     /// Cached graphs, keyed by name ("meta", "anthill", etc.).
     graphs: RwLock<HashMap<String, KnowledgeGraph>>,
 }
 
 impl LiveKnowledgeStore {
-    /// Create a new store backed by JSON files.
+    /// Create a new store backed by CBOR files with git auto-commit.
     pub fn new(memory_dir: PathBuf) -> Self {
-        let backend = JsonFileBackend::new(memory_dir.clone());
+        let backend = CborGitBackend::new(memory_dir.clone());
         Self {
             backend,
             memory_dir,
@@ -39,10 +40,45 @@ impl LiveKnowledgeStore {
     }
 
     /// Get or load a graph by name. Caller must hold the write lock.
+    /// Tries CBOR first, falls back to legacy JSON.
     fn ensure_loaded(graphs: &mut HashMap<String, KnowledgeGraph>, name: &str, memory_dir: &std::path::Path) -> StoreResult<()> {
         if !graphs.contains_key(name) {
-            let path = graph_path(memory_dir, name);
-            let kg = KnowledgeGraph::load(&path);
+            // Try CBOR path first, then JSON.
+            let cbor_path = if name == "meta" || name.is_empty() {
+                memory_dir.join("knowledge.cbor")
+            } else {
+                memory_dir.join("graphs").join(format!("{}.cbor", name))
+            };
+
+            let kg = if cbor_path.exists() {
+                // Load from CBOR via the backend.
+                match std::fs::read(&cbor_path) {
+                    Ok(bytes) => {
+                        match ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&bytes[..]) {
+                            Ok(data) => {
+                                let mut kg = KnowledgeGraph::empty(cbor_path);
+                                kg.load_from_data(&data);
+                                kg
+                            }
+                            Err(e) => {
+                                log::warn!("CBOR parse failed for {}, falling back to JSON: {}", name, e);
+                                let json_path = graph_path(memory_dir, name);
+                                KnowledgeGraph::load(&json_path)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to read {}: {}", cbor_path.display(), e);
+                        let json_path = graph_path(memory_dir, name);
+                        KnowledgeGraph::load(&json_path)
+                    }
+                }
+            } else {
+                // No CBOR file — load from JSON.
+                let json_path = graph_path(memory_dir, name);
+                KnowledgeGraph::load(&json_path)
+            };
+
             graphs.insert(name.to_string(), kg);
         }
         Ok(())
@@ -67,7 +103,7 @@ impl LiveKnowledgeStore {
         f(kg)
     }
 
-    /// Get a mutable reference to a graph, loading if needed. Saves after mutation.
+    /// Get a mutable reference to a graph, loading if needed. Saves after mutation via CBOR backend.
     fn with_graph_mut<F, R>(&self, name: &str, f: F) -> StoreResult<R>
     where
         F: FnOnce(&mut KnowledgeGraph) -> StoreResult<R>,
@@ -76,8 +112,9 @@ impl LiveKnowledgeStore {
         Self::ensure_loaded(&mut graphs, name, &self.memory_dir)?;
         let kg = graphs.get_mut(name).ok_or_else(|| StoreError::NotFound(format!("graph '{}'", name)))?;
         let result = f(kg)?;
-        // Save after mutation.
-        kg.save();
+        // Save after mutation — through CBOR backend (auto-commits to git).
+        let data = kg.to_graph_data();
+        self.backend.save_graph(name, &data)?;
         Ok(result)
     }
 

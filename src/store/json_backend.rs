@@ -14,6 +14,7 @@ pub struct JsonFileBackend {
     memory_dir: PathBuf,
 }
 
+#[allow(dead_code)]
 impl JsonFileBackend {
     pub fn new(memory_dir: PathBuf) -> Self {
         Self { memory_dir }

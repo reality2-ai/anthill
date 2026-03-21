@@ -110,6 +110,11 @@ struct Args {
     /// Fixes invalid enum values, converts non-graph files, cleans up corrupted files.
     #[arg(long)]
     migrate_graphs: Option<PathBuf>,
+
+    /// Convert all JSON knowledge graphs to CBOR format.
+    /// Reads JSON, writes .cbor files, keeps JSON as backup.
+    #[arg(long)]
+    migrate_to_cbor: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -252,6 +257,12 @@ async fn main() -> anyhow::Result<()> {
     // Migrate graphs — fix invalid values, clean up.
     if let Some(ref dir) = args.migrate_graphs {
         store::migration::migrate_all(dir);
+        return Ok(());
+    }
+
+    // Convert JSON graphs to CBOR format.
+    if let Some(ref dir) = args.migrate_to_cbor {
+        store::migration::migrate_to_cbor(dir);
         return Ok(());
     }
 

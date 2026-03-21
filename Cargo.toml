@@ -59,6 +59,9 @@ base64 = "0.22"
 # Knowledge graph
 petgraph = { version = "0.6", features = ["serde-1"] }
 
+# CBOR encoding for knowledge store (Phase 2)
+ciborium = "0.2"
+
 # QR code generation (for key export)
 qrcode = "0.14"
 

@@ -679,6 +679,21 @@ pub struct KnowledgeGraph {
 }
 
 impl KnowledgeGraph {
+    /// Create an empty graph associated with a file path.
+    pub fn empty(path: PathBuf) -> Self {
+        Self {
+            graph: StableGraph::new(),
+            keyword_index: HashMap::new(),
+            file_path: path,
+        }
+    }
+
+    /// Load nodes and edges from GraphData (used by CBOR backend).
+    pub fn load_from_data(&mut self, data: &GraphData) {
+        self.load_graph_data(data);
+        self.rebuild_index();
+    }
+
     /// Load from JSON file, or create empty.
     /// On parse failure, tries the archive as fallback and preserves the
     /// corrupted file for manual recovery.

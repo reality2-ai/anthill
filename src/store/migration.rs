@@ -356,3 +356,93 @@ fn fix_single_graph(path: &Path, topic: &str, stats: &mut MigrationStats) {
         stats.ok += 1;
     }
 }
+
+// ── JSON → CBOR migration ──────────────────────────────────────────
+
+/// Convert all JSON knowledge graphs to CBOR format.
+pub fn migrate_to_cbor(dir: &Path) {
+    println!("Converting JSON graphs to CBOR in {}...", dir.display());
+
+    let ants_dir = dir.join("ants");
+    if ants_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&ants_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let memory_dir = path.join("working").join("memory");
+                    if memory_dir.exists() {
+                        let name = path.file_name()
+                            .map(|f| f.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        println!("\n=== ANT: {} ===", name);
+                        convert_memory_dir_to_cbor(&memory_dir);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    if dir.join("knowledge.json").exists() || dir.join("graphs").exists() {
+        convert_memory_dir_to_cbor(dir);
+        return;
+    }
+
+    let memory_sub = dir.join("memory");
+    if memory_sub.exists() {
+        convert_memory_dir_to_cbor(&memory_sub);
+        return;
+    }
+
+    println!("Could not find knowledge graphs in {}.", dir.display());
+}
+
+fn convert_memory_dir_to_cbor(memory_dir: &Path) {
+    let mut converted = 0u32;
+    let mut failed = 0u32;
+
+    // Convert meta-graph.
+    let meta_json = memory_dir.join("knowledge.json");
+    let meta_cbor = memory_dir.join("knowledge.cbor");
+    if meta_json.exists() && !meta_cbor.exists() {
+        match crate::store::cbor_backend::migrate_json_to_cbor(&meta_json, &meta_cbor, false) {
+            Ok(()) => { println!("  Converted: knowledge.json → knowledge.cbor"); converted += 1; }
+            Err(e) => { println!("  FAILED: knowledge.json: {}", e); failed += 1; }
+        }
+    }
+
+    // Convert topic graphs.
+    let graphs_dir = memory_dir.join("graphs");
+    if graphs_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let filename = path.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                if !filename.ends_with(".json") { continue; }
+                if filename.contains("-archive") || filename.ends_with(".bak") { continue; }
+
+                // Check it's a graph.
+                let is_graph = std::fs::read_to_string(&path)
+                    .map(|c| c.contains("\"nodes\""))
+                    .unwrap_or(false);
+                if !is_graph { continue; }
+
+                let cbor_path = path.with_extension("cbor");
+                if cbor_path.exists() { continue; } // Already converted.
+
+                match crate::store::cbor_backend::migrate_json_to_cbor(&path, &cbor_path, false) {
+                    Ok(()) => { println!("  Converted: {} → .cbor", filename); converted += 1; }
+                    Err(e) => { println!("  FAILED: {}: {}", filename, e); failed += 1; }
+                }
+            }
+        }
+    }
+
+    println!("  Converted: {}, Failed: {}", converted, failed);
+    if converted > 0 {
+        println!("  JSON files kept as backup. Remove them manually when satisfied.");
+    }
+}

@@ -11,6 +11,7 @@
 pub mod validated;
 pub mod engine;
 pub mod json_backend;
+pub mod cbor_backend;
 pub mod live;
 pub mod migration;
 
