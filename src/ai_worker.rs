@@ -765,15 +765,18 @@ pub async fn ai_worker_loop(
 
     while let Some(req) = rx.recv().await {
         let is_rumination = req.source == "rumination";
+        let is_colony_query = req.source.starts_with("colony:");
 
         // Remember chat IDs per source for cross-channel forwarding.
-        if req.chat_id != 0 && req.source != "web" && !is_rumination {
+        if req.chat_id != 0 && req.source != "web" && !is_rumination && !is_colony_query {
             source_chat_ids.insert(req.source.clone(), req.chat_id);
         }
 
-        // Rumination requests use a dedicated memory file, not per-user.
+        // Rumination and colony requests use dedicated memory files.
         let user_memory_file = if is_rumination {
             config.memory_dir.join("rumination.md")
+        } else if is_colony_query {
+            config.memory_dir.join("colony.md")
         } else {
             config.memory_dir.join(format!("{}.md", req.chat_id))
         };
@@ -1291,8 +1294,31 @@ pub async fn ai_worker_loop(
 
             typing_handle.abort();
 
-            // Update stats (skip for rumination — don't pollute user metrics).
-            if req_source != "rumination" {
+            // Handle colony query responses — forward back to the originating ANT.
+            if req_source.starts_with("colony:") {
+                // Parse "colony:<from_ant>:<chat_id>"
+                let parts: Vec<&str> = req_source.splitn(3, ':').collect();
+                if parts.len() >= 3 {
+                    let from_ant = parts[1];
+                    let orig_chat_id: i64 = parts[2].parse().unwrap_or(0);
+
+                    // Forward the response to the originating ANT's chat.
+                    if let Some(ref tx) = etx {
+                        let _ = tx.send(crate::registry::WsEvent::Message {
+                            bot: from_ant.to_string(),
+                            chat_id: orig_chat_id,
+                            text: format!("**Response from {}:**\n\n{}", bname, response_text),
+                            task_id: 0,
+                        });
+                    }
+
+                    log::info!("[{}] Colony query from {} complete ({} chars) — forwarded response",
+                        bname, from_ant, response_text.len());
+                }
+            }
+
+            // Update stats (skip for rumination and colony queries).
+            if req_source != "rumination" && !req_source.starts_with("colony:") {
                 if let Ok(mut map) = st.lock() {
                     let s = map.entry(chat_id).or_default();
                     if s.started.is_none() {

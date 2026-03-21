@@ -227,6 +227,50 @@ impl BotRegistry {
             false
         }
     }
+
+    /// Send a colony query from one ANT to another.
+    /// The target ANT's AI will reason about the question using its own expertise.
+    /// The response is broadcast on the global channel with colony source metadata
+    /// so it can be forwarded back to the requesting ANT's chat.
+    ///
+    /// Source format: "colony:<from_ant>:<chat_id>" — carries the return address.
+    pub async fn ask_ant(
+        &self,
+        from_ant: &str,
+        target_ant: &str,
+        chat_id: i64,
+        question: String,
+    ) -> bool {
+        let bots = self.bots.read().await;
+        if let Some(handle) = bots.get(target_ant) {
+            let task_id = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos();
+
+            // Prefix the question with context about who is asking and why.
+            let colony_message = format!(
+                "COLONY QUERY from {} (chat_id {})\n\n\
+                 Another ANT in your colony is asking for your expertise:\n\n\
+                 {}\n\n\
+                 Respond with your knowledge and reasoning. Be specific about your \
+                 confidence levels and evidence. Your response will be treated as a \
+                 conjecture by the asking ANT — it will evaluate your answer critically.\n\n\
+                 IMPORTANT: Complete your response and STOP. Do not ask follow-up questions.",
+                from_ant, chat_id, question
+            );
+
+            handle.request_tx.send(CliRequest {
+                chat_id: -2, // Colony query — distinct from rumination (-1) and users (positive)
+                message: colony_message,
+                new_session: true,
+                task_id,
+                source: format!("colony:{}:{}", from_ant, chat_id),
+            }).is_ok()
+        } else {
+            false
+        }
+    }
 }
 
 /// Summary info for a bot (serializable for API).
