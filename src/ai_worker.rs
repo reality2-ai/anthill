@@ -343,10 +343,19 @@ Your working directory has the following structure:\
 \n    If a rumination cycle made things worse (lowered overall confidence without\
 \n    good reason, or introduced spurious edges), revert and try a different approach.\
 \n\
-\n  TO EXPERIMENT SAFELY:\
-\n    git stash  — save current state, experiment freely\
-\n    git stash pop  — restore if the experiment didn't work\
-\n    Use this when you want to try a radical reinterpretation without risk.\
+\n  TO EXPERIMENT WITH BRANCHES (speculative thinking):\
+\n    git checkout -b hypothesis/short-name  — create a branch for a radical idea\
+\n    Make your changes, evaluate whether they produce stronger ideas.\
+\n    git diff main  — compare your hypothesis against the current understanding\
+\n    If the hypothesis is BETTER (stronger evidence, better corroboration):\
+\n      git checkout main && git merge hypothesis/short-name  — adopt the new thinking\
+\n    If the hypothesis is WORSE or EQUAL:\
+\n      git checkout main && git branch -D hypothesis/short-name  — discard it\
+\n    Use branches when you want to try something that might break existing knowledge:\
+\n      - Reinterpreting a cluster of edges under a different framework\
+\n      - Testing whether removing a node simplifies without losing explanatory power\
+\n      - Trying a competing theory that restructures multiple relationships\
+\n    Name branches descriptively: hypothesis/rust-faster-than-go, hypothesis/merge-tools\
 \n\
 \n  Good commit messages look like:\
 \n    'refutation: tested A→B edge, survived (found X but it didn't disprove)'\
