@@ -1319,13 +1319,12 @@ pub async fn ai_worker_loop(
 
             // Handle colony query responses — forward back to the originating ANT.
             if req_source.starts_with("colony:") {
-                // Parse "colony:<from_ant>:<chat_id>"
                 let parts: Vec<&str> = req_source.splitn(3, ':').collect();
                 if parts.len() >= 3 {
                     let from_ant = parts[1];
                     let orig_chat_id: i64 = parts[2].parse().unwrap_or(0);
 
-                    // Forward the response to the originating ANT's chat.
+                    // 1. Show the response in the originating ANT's chat (for the human).
                     if let Some(ref tx) = etx {
                         let _ = tx.send(crate::registry::WsEvent::Message {
                             bot: from_ant.to_string(),
@@ -1335,7 +1334,30 @@ pub async fn ai_worker_loop(
                         });
                     }
 
-                    log::info!("[{}] Colony query from {} complete ({} chars) — forwarded response",
+                    // 2. Send the response to the originating ANT's AI worker
+                    // so it can evaluate and integrate the knowledge.
+                    let _ = rq_tx.send(CliRequest {
+                        chat_id: orig_chat_id,
+                        message: format!(
+                            "COLONY RESPONSE from {} — evaluate this critically:\n\n\
+                             {}\n\n\
+                             Your task:\n\
+                             1. Evaluate this response against your own knowledge\n\
+                             2. If it's well-evidenced and consistent, add relevant facts to \
+                                your graph with source_id 'ant:{}' and evidence_type 'corroboration'\n\
+                             3. If it contradicts your knowledge, record it with 'contradiction'\n\
+                             4. If it's weak or unsupported, note it with 'inconsequential_search'\n\
+                             5. Update the 'expert_in' edge for {} in your meta-graph based on \
+                                the quality of this response\n\n\
+                             IMPORTANT: Complete your evaluation and STOP.",
+                            bname, response_text, bname, bname
+                        ),
+                        new_session: false, // Continue the session for context
+                        task_id: 0,
+                        source: format!("colony-response:{}", bname),
+                    });
+
+                    log::info!("[{}] Colony query from {} complete ({} chars) — forwarded for evaluation",
                         bname, from_ant, response_text.len());
                 }
             }
