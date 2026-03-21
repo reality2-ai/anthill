@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Colony Bridge — inter-ANT communication plugin.
 //!
 //! Enables ANTs within the same colony to query each other's knowledge graphs

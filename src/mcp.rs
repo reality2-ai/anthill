@@ -607,7 +607,7 @@ fn handle_tool_call(
                 .and_then(|p| p.parent())
                 .and_then(|p| p.parent());
 
-            let self_name = memory_dir.parent()
+            let _self_name = memory_dir.parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.file_name())
                 .map(|f| f.to_string_lossy().to_string())

@@ -280,6 +280,7 @@ impl CborGitBackend {
     }
 
     /// Compare current branch with main — what's different on this thought branch.
+    #[allow(dead_code)]
     pub fn diff_from_main(&self) -> StoreResult<String> {
         let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
 

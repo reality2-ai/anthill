@@ -145,6 +145,7 @@ impl LiveKnowledgeStore {
     }
 
     /// Search the semantic changelog.
+    #[allow(dead_code)]
     pub fn search_changelog(&self, query: &str, limit: usize) -> Vec<String> {
         let changelog = Changelog::load(&self.memory_dir);
         let entries = changelog.search(query, limit);

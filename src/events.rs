@@ -14,8 +14,10 @@ pub const RELAY_AI_READY: u32 = r2_fnv::fnv1a_32(b"relay.ai_ready");
 
 /// Query another ANT's knowledge graph.
 /// Payload: CBOR { "to": str, "msg_id": uint, "query_type": str, "entity": str, "depth": uint }
+#[allow(dead_code)]
 pub const COLONY_QUERY: u32 = r2_fnv::fnv1a_32(b"colony.query");
 
 /// Response from another ANT.
 /// Payload: CBOR { "from": str, "msg_id": uint, "summary": str }
+#[allow(dead_code)]
 pub const COLONY_RESPONSE: u32 = r2_fnv::fnv1a_32(b"colony.response");

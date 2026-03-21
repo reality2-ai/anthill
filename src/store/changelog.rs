@@ -44,6 +44,7 @@ pub struct Changelog {
     pub entries: Vec<ChangeEntry>,
 }
 
+#[allow(dead_code)]
 impl Changelog {
     const MAX_ENTRIES: usize = 500;
 
