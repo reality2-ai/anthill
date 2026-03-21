@@ -338,4 +338,10 @@ Most AI agent systems are sophisticated chat bots that accumulate knowledge by c
 
 ## License
 
-MIT OR Apache-2.0
+**Dual licensed:**
+
+- **AGPL-3.0-or-later** — free for open source projects. You may use, modify, and distribute Anthill provided you share your changes under the same license and make source available to network users. See [LICENSE](LICENSE).
+
+- **Commercial license** — for organisations that need to use Anthill without AGPL obligations (e.g., proprietary products, SaaS without source disclosure). Contact [Dr Roy C. Davies](mailto:roy.c.davies@ieee.org) for commercial licensing.
+
+Copyright (c) 2024-2026 Dr Roy C. Davies. All rights reserved.
