@@ -86,6 +86,14 @@ impl LiveKnowledgeStore {
         &self.memory_dir
     }
 
+    /// Render a query result using the graph's render method.
+    /// This is a convenience for MCP/web consumers that need formatted output.
+    pub fn with_graph_render(&self, graph: &str, result: &QueryResult) -> Option<String> {
+        let graphs = self.graphs.read().ok()?;
+        let kg = graphs.get(graph)?;
+        Some(kg.render_query_result(result, 8000))
+    }
+
     /// Invalidate a cached graph so it's reloaded from disk next time.
     pub fn invalidate(&self, name: &str) {
         if let Ok(mut graphs) = self.graphs.write() {

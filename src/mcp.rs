@@ -1,30 +1,29 @@
 //! MCP (Model Context Protocol) server for knowledge graph operations.
 //!
 //! Exposes the knowledge graph API as structured tools that Claude Code
-//! can call directly, instead of reading/writing raw JSON files.
+//! can call directly. All writes go through the validated KnowledgeStore
+//! trait — the AI cannot write invalid data.
 //!
 //! Protocol: JSON-RPC over stdio (MCP specification).
 //! Launch: anthill --mcp-server --memory-dir <path>
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use crate::knowledge::*;
-use crate::epistemic::{to_log_odds, DecayCategory, EvidenceType, JustificationStep};
+use crate::store::{KnowledgeStore, ValidatedNode, ValidatedEdge, ValidatedEvidence};
+use crate::store::live::LiveKnowledgeStore;
 use crate::reputation::{ReputationRegistry, SourceCategory};
-use petgraph::visit::EdgeRef;
 
 /// Run the MCP server loop (stdio JSON-RPC).
 pub fn run_mcp_server(memory_dir: PathBuf) {
-    let graphs_dir = memory_dir.join("graphs");
-    let meta_path = memory_dir.join("knowledge.json");
+    let store = Arc::new(LiveKnowledgeStore::new(memory_dir.clone()));
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    // Send server capabilities on startup.
     let init_response = serde_json::json!({
         "jsonrpc": "2.0",
         "result": {
@@ -38,7 +37,7 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
     loop {
         line.clear();
         if reader.read_line(&mut line).unwrap_or(0) == 0 {
-            break; // EOF
+            break;
         }
         let line = line.trim();
         if line.is_empty() { continue; }
@@ -67,7 +66,7 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
                     .and_then(|n| n.as_str()).unwrap_or("");
                 let args = request.pointer("/params/arguments")
                     .cloned().unwrap_or(serde_json::json!({}));
-                let result = handle_tool_call(tool_name, &args, &meta_path, &graphs_dir);
+                let result = handle_tool_call(tool_name, &args, &store, &memory_dir);
                 serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": id,
@@ -76,7 +75,7 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
                     }
                 })
             }
-            "notifications/initialized" => continue, // no response needed
+            "notifications/initialized" => continue,
             _ => {
                 serde_json::json!({
                     "jsonrpc": "2.0",
@@ -100,183 +99,176 @@ fn tool_definitions() -> Vec<serde_json::Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "entity": { "type": "string", "description": "Entity label to query about" },
-                    "depth": { "type": "integer", "description": "Traversal depth (default 2)", "default": 2 },
-                    "graph": { "type": "string", "description": "Topic graph name (default: meta)", "default": "meta" }
+                    "entity": { "type": "string", "description": "Node label or keyword to search for" },
+                    "depth": { "type": "integer", "description": "How many hops to traverse (default: 2)", "default": 2 },
+                    "graph": { "type": "string", "description": "Graph name (default: meta). Use a topic name like 'anthill', 'infrastructure'." }
                 },
                 "required": ["entity"]
             }
         }),
         serde_json::json!({
             "name": "graph_query_path",
-            "description": "Find how two entities are connected. Returns shortest path(s) with cumulative confidence (product along the chain).",
+            "description": "Find paths between two entities in the knowledge graph, showing confidence along the path.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "from": { "type": "string", "description": "Source entity label" },
-                    "to": { "type": "string", "description": "Target entity label" },
-                    "graph": { "type": "string", "description": "Topic graph name (default: meta)", "default": "meta" }
+                    "from": { "type": "string", "description": "Starting node label" },
+                    "to": { "type": "string", "description": "Target node label" },
+                    "graph": { "type": "string" }
                 },
                 "required": ["from", "to"]
             }
         }),
         serde_json::json!({
             "name": "graph_add_node",
-            "description": "Add a node to the knowledge graph. Returns the node ID. Checks for duplicates.",
+            "description": "Add a new node to a knowledge graph. The node is validated before insertion.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "label": { "type": "string" },
-                    "kind": { "type": "string", "enum": ["person","project","server","tool","concept","decision","event","fact"] },
+                    "label": { "type": "string", "description": "Human-readable name" },
+                    "kind": { "type": "string", "enum": ["person", "project", "server", "tool", "concept", "decision", "event", "fact", "theory", "mechanism", "principle", "constraint", "problem", "claim", "open_question", "implementation", "entity", "spec", "repo", "platform", "framework"] },
                     "summary": { "type": "string" },
                     "tags": { "type": "array", "items": { "type": "string" } },
-                    "graph": { "type": "string", "default": "meta" }
+                    "graph": { "type": "string" }
                 },
                 "required": ["label", "kind", "summary"]
             }
         }),
         serde_json::json!({
             "name": "graph_add_edge",
-            "description": "Add a conjectural edge between two nodes. Auto-sets valid_from, source. Checks for duplicates.",
+            "description": "Add a conjectural relationship between two nodes. Validated: from/to must exist, basis must be valid.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "from": { "type": "string", "description": "Source entity label" },
-                    "to": { "type": "string", "description": "Target entity label" },
+                    "from": { "type": "string", "description": "Source node label" },
+                    "to": { "type": "string", "description": "Target node label" },
+                    "relation": { "type": "string", "description": "Relationship type (e.g. 'works_on', 'deployed_on')" },
+                    "context": { "type": "string", "description": "Brief description" },
+                    "basis": { "type": "string", "enum": ["observed", "told", "inferred", "assumed"] },
+                    "view": { "type": "string", "enum": ["semantic", "temporal", "causal", "entity"] },
+                    "source": { "type": "string", "description": "Provenance (e.g. 'document:README.md', 'user:roy')" },
+                    "beneficial_impact": { "type": "number", "description": "Impact on people/planet (-1.0 to 1.0, default 0)" },
+                    "graph": { "type": "string" }
+                },
+                "required": ["from", "to", "relation", "basis"]
+            }
+        }),
+        serde_json::json!({
+            "name": "graph_update_evidence",
+            "description": "Update an edge with typed evidence (primary Thurisaz update path). Validated evidence types only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string" },
+                    "to": { "type": "string" },
                     "relation": { "type": "string" },
-                    "basis": { "type": "string", "enum": ["observed","told","inferred","assumed"], "default": "told" },
-                    "view": { "type": "string", "enum": ["semantic","temporal","causal","entity"], "default": "entity" },
-                    "context": { "type": "string", "default": "" },
-                    "graph": { "type": "string", "default": "meta" }
+                    "evidence_type": { "type": "string", "enum": ["corroboration", "contradiction", "refutation_survived", "refutation_failed", "human_attestation", "consistency", "inconsistency", "synthesis", "competition_won", "competition_lost", "pattern_transfer", "inconsequential_search"] },
+                    "test": { "type": "string", "description": "What was tested or observed" },
+                    "detail": { "type": "string", "description": "The evidence itself" },
+                    "source_id": { "type": "string", "description": "e.g. 'document:README.md', 'user:roy', 'ai:inference'" },
+                    "graph": { "type": "string" }
+                },
+                "required": ["from", "to", "relation", "evidence_type", "test"]
+            }
+        }),
+        serde_json::json!({
+            "name": "graph_strengthen",
+            "description": "Strengthen an edge (refutation survived — actively tried to disprove, claim held). BF=2.5.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string" }, "to": { "type": "string" },
+                    "relation": { "type": "string" },
+                    "test": { "type": "string", "description": "What refutation was attempted" },
+                    "evidence": { "type": "string", "description": "What evidence was considered" },
+                    "graph": { "type": "string" }
                 },
                 "required": ["from", "to", "relation"]
             }
         }),
         serde_json::json!({
-            "name": "graph_strengthen",
-            "description": "A conjecture survived refutation. You MUST describe what test was performed and what evidence was considered.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "from": { "type": "string" },
-                    "to": { "type": "string" },
-                    "relation": { "type": "string" },
-                    "test": { "type": "string", "description": "What refutation was attempted? e.g. 'Checked if Anthill still deploys to Alfred'" },
-                    "evidence": { "type": "string", "description": "What evidence was considered? e.g. 'Deploy logs show successful push today'" },
-                    "graph": { "type": "string", "default": "meta" }
-                },
-                "required": ["from", "to", "relation", "test", "evidence"]
-            }
-        }),
-        serde_json::json!({
             "name": "graph_weaken",
-            "description": "Evidence weakened a conjecture but didn't refute it. You MUST describe the test and counter-evidence.",
+            "description": "Weaken an edge (inconsistency found). BF=0.4.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "from": { "type": "string" },
-                    "to": { "type": "string" },
+                    "from": { "type": "string" }, "to": { "type": "string" },
                     "relation": { "type": "string" },
-                    "test": { "type": "string", "description": "What was tested?" },
-                    "evidence": { "type": "string", "description": "What counter-evidence was found?" },
-                    "graph": { "type": "string", "default": "meta" }
+                    "test": { "type": "string" }, "evidence": { "type": "string" },
+                    "graph": { "type": "string" }
                 },
-                "required": ["from", "to", "relation", "test", "evidence"]
+                "required": ["from", "to", "relation"]
             }
         }),
         serde_json::json!({
             "name": "graph_contradict",
-            "description": "Strong evidence directly contradicts a conjecture. You MUST describe the contradicting evidence.",
+            "description": "Contradict an edge (refutation failed — direct contradiction). BF=0.1.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "from": { "type": "string" },
-                    "to": { "type": "string" },
+                    "from": { "type": "string" }, "to": { "type": "string" },
                     "relation": { "type": "string" },
-                    "test": { "type": "string", "description": "What was tested?" },
-                    "evidence": { "type": "string", "description": "What contradicting evidence was found?" },
-                    "graph": { "type": "string", "default": "meta" }
+                    "test": { "type": "string" }, "evidence": { "type": "string" },
+                    "graph": { "type": "string" }
                 },
-                "required": ["from", "to", "relation", "test", "evidence"]
+                "required": ["from", "to", "relation"]
             }
         }),
         serde_json::json!({
             "name": "graph_query_uncertain",
-            "description": "List all edges below a confidence threshold.",
+            "description": "List edges below a confidence threshold.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "threshold": { "type": "number", "default": 0.5 },
-                    "graph": { "type": "string", "default": "meta" }
+                    "threshold": { "type": "number", "description": "Confidence threshold (default 0.5)" },
+                    "graph": { "type": "string" }
                 }
             }
         }),
         serde_json::json!({
             "name": "graph_query_by_kind",
-            "description": "List all nodes of a specific kind (person, project, tool, etc.).",
+            "description": "List all nodes of a specific kind.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "kind": { "type": "string", "enum": ["person","project","server","tool","concept","decision","event","fact"] },
-                    "graph": { "type": "string", "default": "meta" }
+                    "kind": { "type": "string", "enum": ["person", "project", "server", "tool", "concept", "decision", "event", "fact"] },
+                    "graph": { "type": "string" }
                 },
                 "required": ["kind"]
             }
         }),
         serde_json::json!({
             "name": "graph_list_graphs",
-            "description": "List all available knowledge graphs (meta + topics).",
+            "description": "List all available knowledge graphs with node counts.",
             "inputSchema": { "type": "object", "properties": {} }
         }),
         serde_json::json!({
             "name": "graph_list_orphans",
-            "description": "List nodes connected only by '?' placeholder edges.",
+            "description": "List nodes with no meaningful connections (only '?' edges).",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "graph": { "type": "string", "default": "meta" }
-                }
-            }
-        }),
-        serde_json::json!({
-            "name": "graph_update_evidence",
-            "description": "Submit typed evidence to update an edge using Thurisaz Bayesian updating. This is the primary update path — prefer this over graph_strengthen/weaken/contradict.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "from": { "type": "string", "description": "Source entity label" },
-                    "to": { "type": "string", "description": "Target entity label" },
-                    "relation": { "type": "string", "description": "Edge relation" },
-                    "evidence_type": { "type": "string", "enum": ["corroboration", "contradiction", "refutation_survived", "refutation_failed", "human_attestation", "consistency", "inconsistency"], "description": "Type of evidence being submitted" },
-                    "test": { "type": "string", "description": "What was tested or observed?" },
-                    "detail": { "type": "string", "description": "The evidence detail" },
-                    "source_id": { "type": "string", "description": "Source identifier (e.g. 'document:README.md', 'user:roy', 'ai:inference')", "default": "ai:inference" },
-                    "graph": { "type": "string", "default": "meta" }
-                },
-                "required": ["from", "to", "relation", "evidence_type", "test", "detail"]
+                "properties": { "graph": { "type": "string" } }
             }
         }),
         serde_json::json!({
             "name": "graph_query_justification",
-            "description": "Return the provenance chain (justificatory chain + evidence log) for an edge. Answers 'why do I believe this?'",
+            "description": "Show the full justificatory chain and evidence log for an edge.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "from": { "type": "string", "description": "Source entity label" },
-                    "to": { "type": "string", "description": "Target entity label" },
-                    "relation": { "type": "string", "description": "Edge relation" },
-                    "graph": { "type": "string", "default": "meta" }
+                    "from": { "type": "string" }, "to": { "type": "string" },
+                    "relation": { "type": "string" }, "graph": { "type": "string" }
                 },
                 "required": ["from", "to", "relation"]
             }
         }),
         serde_json::json!({
             "name": "graph_query_reputation",
-            "description": "Check the reputation score of an information source.",
+            "description": "Query source reputation scores.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "source_id": { "type": "string", "description": "Source identifier to query (e.g. 'document:README.md', 'user:roy')" }
+                    "source_id": { "type": "string", "description": "Source ID to query (empty = list all)" }
                 },
                 "required": ["source_id"]
             }
@@ -284,390 +276,212 @@ fn tool_definitions() -> Vec<serde_json::Value> {
     ]
 }
 
-fn resolve_graph_path(graph_name: &str, meta_path: &std::path::Path, graphs_dir: &std::path::Path) -> PathBuf {
-    if graph_name.is_empty() || graph_name == "meta" {
-        meta_path.to_path_buf()
-    } else {
-        graphs_dir.join(format!("{}.json", graph_name))
-    }
-}
-
 fn handle_tool_call(
     tool: &str,
     args: &serde_json::Value,
-    meta_path: &std::path::Path,
-    graphs_dir: &std::path::Path,
+    store: &LiveKnowledgeStore,
+    memory_dir: &std::path::Path,
 ) -> String {
-    let graph_name = args.get("graph").and_then(|g| g.as_str()).unwrap_or("meta");
-    let path = resolve_graph_path(graph_name, meta_path, graphs_dir);
+    let graph = args.get("graph").and_then(|g| g.as_str()).unwrap_or("meta");
 
     match tool {
         "graph_query_about" => {
             let entity = args.get("entity").and_then(|e| e.as_str()).unwrap_or("");
             let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
-            let kg = KnowledgeGraph::load(&path);
-            let result = kg.query_about(entity, depth);
-            kg.render_query_result(&result, 8000)
+            match store.query_about(graph, entity, depth) {
+                Ok(result) => {
+                    // Use the graph's render method for formatting.
+                    match store.to_visualization(graph) {
+                        Ok(_) => {
+                            // Render query result text.
+                            store.with_graph_render(graph, &result)
+                                .unwrap_or_else(|| format!("Found results for '{}'", entity))
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                Err(e) => format!("Error: {}", e),
+            }
         }
         "graph_query_path" => {
             let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
             let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
-            let kg = KnowledgeGraph::load(&path);
-            let result = kg.query_path(from, to, 5);
-            if result.paths.is_empty() {
-                format!("No path found between '{}' and '{}'", from, to)
-            } else {
-                kg.render_query_result(&result, 8000)
+            match store.query_path(graph, from, to, 5) {
+                Ok(result) if result.paths.is_empty() => {
+                    format!("No path found between '{}' and '{}'", from, to)
+                }
+                Ok(_result) => {
+                    store.with_graph_render(graph, &_result)
+                        .unwrap_or_else(|| format!("Path found from '{}' to '{}'", from, to))
+                }
+                Err(e) => format!("Error: {}", e),
             }
         }
         "graph_add_node" => {
             let label = args.get("label").and_then(|l| l.as_str()).unwrap_or("");
-            let kind_str = args.get("kind").and_then(|k| k.as_str()).unwrap_or("fact");
+            let kind = args.get("kind").and_then(|k| k.as_str()).unwrap_or("fact");
             let summary = args.get("summary").and_then(|s| s.as_str()).unwrap_or("");
             let tags: Vec<String> = args.get("tags")
                 .and_then(|t| t.as_array())
                 .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
 
-            if label.is_empty() { return "Error: label is required".into(); }
-
-            let _ = std::fs::create_dir_all(graphs_dir);
-            let mut kg = KnowledgeGraph::load(&path);
-
-            // Check for duplicate.
-            if kg.find_by_label(label).is_some() {
-                return format!("Node '{}' already exists", label);
+            match ValidatedNode::new(label, kind, summary, tags) {
+                Ok(node) => match store.add_node(graph, node) {
+                    Ok(_) => format!("Added node '{}' ({})", label, kind),
+                    Err(e) => format!("Error: {}", e),
+                },
+                Err(e) => format!("Error: {}", e),
             }
-
-            let kind = match kind_str {
-                "person" => NodeKind::Person,
-                "project" => NodeKind::Project,
-                "server" => NodeKind::Server,
-                "tool" => NodeKind::Tool,
-                "concept" => NodeKind::Concept,
-                "decision" => NodeKind::Decision,
-                "event" => NodeKind::Event,
-                _ => NodeKind::Fact,
-            };
-
-            let today = chrono_today();
-            kg.graph.add_node(KnowledgeNode {
-                label: label.into(),
-                kind,
-                summary: summary.into(),
-                created: today.clone(),
-                updated: today,
-                tags,
-                _extra: serde_json::Map::new(),
-            });
-            kg.rebuild_index();
-            kg.save();
-            format!("Added node '{}' ({})", label, kind_str)
         }
         "graph_add_edge" => {
             let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
             let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
             let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
-            let basis_str = args.get("basis").and_then(|b| b.as_str()).unwrap_or("told");
-            let view_str = args.get("view").and_then(|v| v.as_str()).unwrap_or("entity");
             let context = args.get("context").and_then(|c| c.as_str()).unwrap_or("");
+            let basis = args.get("basis").and_then(|b| b.as_str()).unwrap_or("told");
+            let view = args.get("view").and_then(|v| v.as_str()).unwrap_or("entity");
+            let source = args.get("source").and_then(|s| s.as_str()).unwrap_or("mcp");
+            let impact = args.get("beneficial_impact").and_then(|b| b.as_f64()).unwrap_or(0.0);
 
-            let _ = std::fs::create_dir_all(graphs_dir);
-            let mut kg = KnowledgeGraph::load(&path);
-
-            let from_idx = match kg.find_by_label(from) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", from),
-            };
-            let to_idx = match kg.find_by_label(to) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", to),
-            };
-
-            // Check for duplicate.
-            if kg.has_edge_between(from_idx, to_idx, relation) {
-                return format!("Edge '{}' → {} → '{}' already exists", from, relation, to);
-            }
-
-            let basis = match basis_str {
-                "observed" => Basis::Observed,
-                "told" => Basis::Told,
-                "inferred" => Basis::Inferred,
-                _ => Basis::Assumed,
-            };
-            let view = match view_str {
-                "semantic" => EdgeView::Semantic,
-                "temporal" => EdgeView::Temporal,
-                "causal" => EdgeView::Causal,
-                _ => EdgeView::Entity,
-            };
-            let today = chrono_today();
-            let confidence = basis.initial_confidence();
-
-            let log_odds = to_log_odds(confidence);
-            let decay_category = DecayCategory::from_basis(basis_str);
-            kg.graph.add_edge(from_idx, to_idx, KnowledgeEdge {
-                relation: relation.into(),
-                context: context.into(),
-                since: today.clone(),
-                confidence,
-                tests: 0,
-                survived: 0,
-                basis,
-                last_tested: String::new(),
-                importance: 0.5,
-                references: 0,
-                valid_from: today.clone(),
-                valid_until: String::new(),
-                view,
-                source: "mcp".into(),
-                refutation_log: vec![RefutationEntry { date: today.clone(), test: "Initial conjecture via MCP".into(), evidence: context.into(), outcome: format!("conjectured (basis: {})", basis_str), confidence_before: 0.0, confidence_after: confidence }],
-                log_odds,
-                evidence_log: Vec::new(),
-                justificatory_chain: vec![JustificationStep {
-                    step: 1,
-                    process: format!("Initial conjecture via MCP (basis: {})", basis_str),
-                    confidence,
-                    source: "mcp".into(),
-                }],
-                source_id: "mcp".into(),
-                decay_category,
-                beneficial_impact: 0.0,
-                corroboration_strength: 0.0,
-                competition_group: String::new(),
-            });
-            kg.save();
-            format!("Added edge: '{}' → {} → '{}' [confidence: {:.0}%]", from, relation, to, confidence * 100.0)
-        }
-        "graph_strengthen" | "graph_weaken" | "graph_contradict" => {
-            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
-            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
-            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
-
-            let mut kg = KnowledgeGraph::load(&path);
-            let from_idx = match kg.find_by_label(from) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", from),
-            };
-            let to_idx = match kg.find_by_label(to) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", to),
-            };
-
-            // Find the edge.
-            let edge_idx = kg.graph.edges_directed(from_idx, petgraph::Direction::Outgoing)
-                .find(|e| e.target() == to_idx && e.weight().relation == relation)
-                .map(|e| e.id());
-
-            match edge_idx {
-                Some(eid) => {
-                    let today = chrono_today();
-                    let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
-                    let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
-                    let before = kg.graph[eid].confidence;
-                    match tool {
-                        "graph_strengthen" => kg.graph[eid].strengthen_with(&today, test, evidence),
-                        "graph_weaken" => kg.graph[eid].weaken_with(&today, test, evidence),
-                        "graph_contradict" => kg.graph[eid].contradict_with(&today, test, evidence),
-                        _ => {}
-                    }
-                    let after = kg.graph[eid].confidence;
-                    let tests = kg.graph[eid].tests;
-                    let survived = kg.graph[eid].survived;
-                    kg.save();
-                    format!("'{}' → {} → '{}': confidence {:.0}% → {:.0}% (tests: {}, survived: {})",
-                        from, relation, to, before * 100.0, after * 100.0, tests, survived)
-                }
-                None => format!("Edge '{}' → {} → '{}' not found", from, relation, to),
-            }
-        }
-        "graph_query_uncertain" => {
-            let threshold = args.get("threshold").and_then(|t| t.as_f64()).unwrap_or(0.5);
-            let kg = KnowledgeGraph::load(&path);
-            let result = kg.query_uncertain(threshold);
-            if result.edges.is_empty() {
-                format!("No edges below {:.0}% confidence", threshold * 100.0)
-            } else {
-                kg.render_query_result(&result, 8000)
-            }
-        }
-        "graph_query_by_kind" => {
-            let kind_str = args.get("kind").and_then(|k| k.as_str()).unwrap_or("fact");
-            let kind = match kind_str {
-                "person" => NodeKind::Person,
-                "project" => NodeKind::Project,
-                "server" => NodeKind::Server,
-                "tool" => NodeKind::Tool,
-                "concept" => NodeKind::Concept,
-                "decision" => NodeKind::Decision,
-                "event" => NodeKind::Event,
-                _ => NodeKind::Fact,
-            };
-            let kg = KnowledgeGraph::load(&path);
-            let result = kg.query_by_kind(&kind);
-            if result.nodes.is_empty() {
-                format!("No {} nodes found", kind_str)
-            } else {
-                kg.render_query_result(&result, 8000)
-            }
-        }
-        "graph_list_graphs" => {
-            let mut graphs = vec!["meta".to_string()];
-            if graphs_dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(graphs_dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        if p.extension().map(|e| e == "json").unwrap_or(false) {
-                            if let Some(stem) = p.file_stem() {
-                                let name = stem.to_string_lossy().to_string();
-                                let kg = KnowledgeGraph::load(&p);
-                                graphs.push(format!("{} ({} nodes)", name, kg.node_count()));
-                            }
-                        }
-                    }
-                }
-            }
-            graphs.join("\n")
-        }
-        "graph_list_orphans" => {
-            let kg = KnowledgeGraph::load(&path);
-            let orphans: Vec<String> = kg.graph.node_indices()
-                .filter(|&idx| {
-                    let edges: Vec<_> = kg.graph.edges(idx).collect();
-                    edges.is_empty() || edges.iter().all(|e| e.weight().relation == "?")
-                })
-                .map(|idx| {
-                    let n = &kg.graph[idx];
-                    format!("{} ({}): {}", n.label, n.kind, n.summary)
-                })
-                .collect();
-            if orphans.is_empty() {
-                "No orphan nodes".into()
-            } else {
-                format!("{} orphan(s):\n{}", orphans.len(), orphans.join("\n"))
+            match ValidatedEdge::new(from, to, relation, context, basis, view, source, impact) {
+                Ok(edge) => match store.add_edge(graph, edge) {
+                    Ok(_) => format!("Added edge: '{}' → {} → '{}'", from, relation, to),
+                    Err(e) => format!("Error: {}", e),
+                },
+                Err(e) => format!("Error: {}", e),
             }
         }
         "graph_update_evidence" => {
             let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
             let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
             let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
-            let evidence_type_str = args.get("evidence_type").and_then(|e| e.as_str()).unwrap_or("");
+            let evidence_type = args.get("evidence_type").and_then(|e| e.as_str()).unwrap_or("");
             let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
             let detail = args.get("detail").and_then(|d| d.as_str()).unwrap_or("");
             let source_id = args.get("source_id").and_then(|s| s.as_str()).unwrap_or("ai:inference");
 
-            let evidence_type = match evidence_type_str {
-                "corroboration" => EvidenceType::Corroboration,
-                "contradiction" => EvidenceType::Contradiction,
-                "refutation_survived" => EvidenceType::RefutationSurvived,
-                "refutation_failed" => EvidenceType::RefutationFailed,
-                "human_attestation" => EvidenceType::HumanAttestation,
-                "consistency" => EvidenceType::Consistency,
-                "inconsistency" => EvidenceType::Inconsistency,
-                _ => return format!("Unknown evidence type: '{}'. Use: corroboration, contradiction, refutation_survived, refutation_failed, human_attestation, consistency, inconsistency", evidence_type_str),
-            };
+            // Get source reputation.
+            let rep_path = memory_dir.join("reputation.json");
+            let mut registry = ReputationRegistry::load(&rep_path);
+            let category = if source_id.starts_with("user:") { SourceCategory::User }
+                else if source_id.starts_with("document:") { SourceCategory::Document }
+                else if source_id.starts_with("ai:") { SourceCategory::AiInference }
+                else { SourceCategory::Unknown };
+            let reputation = registry.get_reputation(source_id, category);
 
-            let mut kg = KnowledgeGraph::load(&path);
-            let from_idx = match kg.find_by_label(from) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", from),
-            };
-            let to_idx = match kg.find_by_label(to) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", to),
-            };
-
-            let edge_idx = kg.graph.edges_directed(from_idx, petgraph::Direction::Outgoing)
-                .find(|e| e.target() == to_idx && e.weight().relation == relation)
-                .map(|e| e.id());
-
-            match edge_idx {
-                Some(eid) => {
-                    let today = chrono_today();
-                    // Get source reputation
-                    let rep_path = meta_path.parent().unwrap_or(std::path::Path::new(".")).join("reputation.json");
-                    let mut registry = ReputationRegistry::load(&rep_path);
-                    let category = if source_id.starts_with("user:") { SourceCategory::User }
-                        else if source_id.starts_with("document:") { SourceCategory::Document }
-                        else if source_id.starts_with("ai:") { SourceCategory::AiInference }
-                        else { SourceCategory::Unknown };
-                    let reputation = registry.get_reputation(source_id, category);
-
-                    let before = kg.graph[eid].confidence;
-                    kg.graph[eid].update_with_evidence(evidence_type, &today, test, detail, source_id, reputation);
-                    let after = kg.graph[eid].confidence;
-                    let lo = kg.graph[eid].log_odds;
-
-                    // Update source reputation based on evidence direction
-                    if after > before {
-                        registry.record_corroboration(source_id);
-                    } else if after < before {
-                        registry.record_contradiction(source_id);
+            match ValidatedEvidence::new(evidence_type, test, detail, source_id, reputation) {
+                Ok(evidence) => match store.update_evidence(graph, from, to, relation, evidence) {
+                    Ok(update) => {
+                        // Update source reputation.
+                        if update.confidence_after > update.confidence_before {
+                            registry.record_corroboration(source_id);
+                        } else if update.confidence_after < update.confidence_before {
+                            registry.record_contradiction(source_id);
+                        }
+                        registry.save(&rep_path);
+                        format!("'{}' → {} → '{}': confidence {:.0}% → {:.0}% (BF={:.2}, rep={:.2})",
+                            from, relation, to,
+                            update.confidence_before * 100.0, update.confidence_after * 100.0,
+                            update.bayes_factor, reputation)
                     }
-                    registry.save(&rep_path);
-                    kg.save();
+                    Err(e) => format!("Error: {}", e),
+                },
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_strengthen" => {
+            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+            let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
+            let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
 
-                    format!("'{}' → {} → '{}': confidence {:.0}% → {:.0}% (log-odds: {:.2}, BF applied, rep: {:.2})",
-                        from, relation, to, before * 100.0, after * 100.0, lo, reputation)
+            match store.strengthen(graph, from, to, relation, test, evidence) {
+                Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
+                    from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_weaken" => {
+            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+            let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
+            let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
+
+            match store.weaken(graph, from, to, relation, test, evidence) {
+                Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
+                    from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_contradict" => {
+            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+            let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
+            let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
+
+            match store.contradict(graph, from, to, relation, test, evidence) {
+                Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
+                    from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_query_uncertain" => {
+            let threshold = args.get("threshold").and_then(|t| t.as_f64()).unwrap_or(0.5);
+            match store.query_uncertain(graph, threshold) {
+                Ok(result) if result.edges.is_empty() => {
+                    format!("No edges below {:.0}% confidence", threshold * 100.0)
                 }
-                None => format!("Edge '{}' → {} → '{}' not found", from, relation, to),
+                Ok(result) => store.with_graph_render(graph, &result)
+                    .unwrap_or_else(|| "Results found".into()),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_query_by_kind" => {
+            let kind = args.get("kind").and_then(|k| k.as_str()).unwrap_or("fact");
+            match store.query_by_kind(graph, kind) {
+                Ok(result) if result.nodes.is_empty() => {
+                    format!("No '{}' nodes found", kind)
+                }
+                Ok(result) => store.with_graph_render(graph, &result)
+                    .unwrap_or_else(|| "Results found".into()),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_list_graphs" => {
+            match store.list_graphs() {
+                Ok(graphs) => graphs.iter()
+                    .map(|g| format!("{} ({} nodes, {} edges)", g.name, g.node_count, g.edge_count))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_list_orphans" => {
+            match store.list_orphans(graph) {
+                Ok(orphans) if orphans.is_empty() => "No orphan nodes".into(),
+                Ok(orphans) => format!("{} orphan(s):\n{}", orphans.len(), orphans.join("\n")),
+                Err(e) => format!("Error: {}", e),
             }
         }
         "graph_query_justification" => {
             let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
             let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
             let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
-
-            let kg = KnowledgeGraph::load(&path);
-            let from_idx = match kg.find_by_label(from) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", from),
-            };
-            let to_idx = match kg.find_by_label(to) {
-                Some(idx) => idx,
-                None => return format!("Node '{}' not found", to),
-            };
-
-            let edge = kg.graph.edges_directed(from_idx, petgraph::Direction::Outgoing)
-                .find(|e| e.target() == to_idx && e.weight().relation == relation)
-                .map(|e| e.weight());
-
-            match edge {
-                Some(e) => {
-                    let mut result = format!("'{}' → {} → '{}'\n", from, relation, to);
-                    result.push_str(&format!("Confidence: {:.0}% (log-odds: {:.2})\n", e.confidence * 100.0, e.log_odds));
-                    result.push_str(&format!("Decay category: {:?} (half-life: {:.0} days)\n", e.decay_category, e.decay_category.half_life_days()));
-                    result.push_str(&format!("Source: {} (id: {})\n\n", e.source, e.source_id));
-
-                    if !e.justificatory_chain.is_empty() {
-                        result.push_str("JUSTIFICATORY CHAIN:\n");
-                        for step in &e.justificatory_chain {
-                            result.push_str(&format!("  {}. {} [confidence: {:.0}%, source: {}]\n",
-                                step.step, step.process, step.confidence * 100.0, step.source));
-                        }
-                    }
-
-                    if !e.evidence_log.is_empty() {
-                        result.push_str(&format!("\nEVIDENCE LOG ({} entries):\n", e.evidence_log.len()));
-                        for ev in &e.evidence_log {
-                            result.push_str(&format!("  [{}] {:?} BF={:.2} (rep={:.2}): {} → {}\n",
-                                ev.date, ev.evidence_type, ev.bayes_factor, ev.source_reputation,
-                                ev.test, ev.detail));
-                        }
-                    }
-
-                    result
-                }
-                None => format!("Edge '{}' → {} → '{}' not found", from, relation, to),
+            match store.query_justification(graph, from, to, relation) {
+                Ok(text) => text,
+                Err(e) => format!("Error: {}", e),
             }
         }
         "graph_query_reputation" => {
             let source_id = args.get("source_id").and_then(|s| s.as_str()).unwrap_or("");
-            let rep_path = meta_path.parent().unwrap_or(std::path::Path::new(".")).join("reputation.json");
+            let rep_path = memory_dir.join("reputation.json");
             let registry = ReputationRegistry::load(&rep_path);
 
             if source_id.is_empty() {
-                // List all sources
                 registry.render_summary()
             } else {
                 match registry.peek_reputation(source_id) {
@@ -676,31 +490,10 @@ fn handle_tool_call(
                         format!("{}: {:.0}% reputation ({} corroborations, {} contradictions, category: {:?})",
                             source_id, score * 100.0, entry.corroborations, entry.contradictions, entry.category)
                     }
-                    None => format!("Source '{}' not tracked. It will be created on first evidence submission.", source_id),
+                    None => format!("Source '{}' not tracked yet.", source_id),
                 }
             }
         }
         _ => format!("Unknown tool: {}", tool),
     }
-}
-
-fn chrono_today() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = now / 86400;
-    // Simple date calculation (approximate — good enough for YYYY-MM-DD).
-    let y = 1970 + (days * 400 / 146097);
-    let remaining = days - (y - 1970) * 365 - ((y - 1969) / 4) + ((y - 1901) / 100) - ((y - 1601) / 400);
-    let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut m = 0;
-    let mut d = remaining;
-    for (i, &md) in month_days.iter().enumerate() {
-        let md = if i == 1 && (y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400))) { 29 } else { md };
-        if d < md { m = i + 1; break; }
-        d -= md;
-    }
-    if m == 0 { m = 12; }
-    format!("{:04}-{:02}-{:02}", y, m, d + 1)
 }
