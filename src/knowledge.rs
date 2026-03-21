@@ -1117,6 +1117,25 @@ impl KnowledgeGraph {
 
     // ── Rumination support methods ─────────────────────────────────
 
+    /// Find undetermined connections — edges with relation "?" that need investigation.
+    /// Returns (from_label, to_label) pairs.
+    pub fn undetermined_connections(&self, limit: usize) -> Vec<(String, String)> {
+        let mut results = Vec::new();
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            if edge.relation == "?" {
+                if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                    results.push((
+                        self.graph[src].label.clone(),
+                        self.graph[tgt].label.clone(),
+                    ));
+                }
+            }
+            if results.len() >= limit { break; }
+        }
+        results
+    }
+
     /// Find candidates for idea synthesis: A→B→C where both edges are strong
     /// and no direct A→C edge exists yet.
     /// Returns (A_index, C_index, B_label, relation_AB, relation_BC) tuples.

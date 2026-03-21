@@ -193,6 +193,9 @@ async fn run_rumination(
         }
     }
 
+    // 1b. Investigate undetermined connections ('?' edges).
+    run_undetermined_connections(config, request_tx, &mut log);
+
     // 2. Competition — pit similar ideas against each other.
     run_competition(config, request_tx, &mut log);
 
@@ -246,6 +249,83 @@ fn run_corroboration_update(config: &MaintenanceConfig) {
         kg.compute_corroboration_strength();
         kg.save();
         broadcast_graph_update(config, &topic_name(&path), "rumination");
+    }
+}
+
+// ── Undetermined Connections ─────────────────────────────────────────
+
+/// Find '?' edges (undetermined connections) and ask the AI to investigate them.
+fn run_undetermined_connections(
+    config: &MaintenanceConfig,
+    request_tx: &mpsc::UnboundedSender<CliRequest>,
+    log: &mut RuminationLog,
+) {
+    let graphs_dir = config.memory_dir.join("graphs");
+    if !graphs_dir.exists() { return; }
+
+    let entries = match std::fs::read_dir(&graphs_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut sent = 0u32;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_topic_graph(&path) { continue; }
+
+        let topic = topic_name(&path);
+        if !config.rumination.topics.is_empty()
+            && !config.rumination.topics.iter().any(|t| t == &topic)
+        {
+            continue;
+        }
+
+        let kg = crate::knowledge::KnowledgeGraph::load(&path);
+        let undetermined = kg.undetermined_connections(3);
+
+        for (from, to) in &undetermined {
+            let prompt = format!(
+                "RUMINATION — UNDETERMINED CONNECTION\n\n\
+                 In the topic graph 'memory/graphs/{}.json', there is a '?' connection \
+                 between '{}' and '{}'. This means these entities are in the graph but \
+                 their relationship hasn't been established yet.\n\n\
+                 Your task:\n\
+                 1. Consider what relationship might exist between '{}' and '{}'\n\
+                 2. Look at their other connections in the graph for clues\n\
+                 3. If you can determine a relationship:\n\
+                    - Replace the '?' edge with a proper relation name\n\
+                    - Set basis to 'inferred', confidence based on how certain you are\n\
+                    - Add an evidence_log entry explaining your reasoning\n\
+                 4. If you cannot determine a relationship:\n\
+                    - Leave it as '?' — don't make something up\n\
+                    - Consider adding a question to memory/questions.json for the human\n\
+                 5. Update the topic graph file{}",
+                topic, from, to, from, to, RUMINATION_STOP_DIRECTIVE
+            );
+
+            let _ = request_tx.send(CliRequest {
+                chat_id: RUMINATION_CHAT_ID,
+                message: prompt,
+                new_session: true,
+                task_id: 0,
+                source: "rumination".into(),
+            });
+
+            log.append(RuminationEntry {
+                timestamp: chrono_now(),
+                kind: "undetermined".into(),
+                topic: topic.clone(),
+                description: format!("Investigating '?' connection: {} ↔ {}", from, to),
+                edges_created: 0,
+                edges_updated: 0,
+            }, &config.memory_dir);
+
+            sent += 1;
+            if sent >= 2 { break; }
+        }
+
+        if sent >= 2 { break; }
     }
 }
 
