@@ -1018,6 +1018,7 @@ impl KnowledgeGraph {
     }
 
     /// Convert the in-memory graph to the serializable format.
+    #[allow(dead_code)]
     pub fn to_graph_data(&self) -> GraphData {
         self.to_serializable()
     }
@@ -1144,6 +1145,7 @@ impl KnowledgeGraph {
     }
 
     /// Add an edge to the graph (used by synthesis and other direct-write operations).
+    #[allow(dead_code)]
     pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, edge: KnowledgeEdge) {
         self.graph.add_edge(from, to, edge);
     }
@@ -2924,6 +2926,7 @@ impl CachedGraph {
 
     /// Run graph consolidation: dedup nodes, merge edges, collapse chains.
     /// Returns a report of what was done.
+    #[allow(dead_code)]
     pub fn consolidate(&self) -> ConsolidationReport {
         self.maybe_reload();
         let mut graph = match self.graph.lock() {
@@ -2949,6 +2952,7 @@ impl CachedGraph {
 
     /// Apply time-based confidence decay to all edges.
     /// Called when the ANT has been idle — decays untested conjectures.
+    #[allow(dead_code)]
     pub fn apply_decay(&self, days: u32) {
         self.maybe_reload();
         let mut graph = match self.graph.lock() {

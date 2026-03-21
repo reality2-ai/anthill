@@ -18,6 +18,7 @@ use std::fmt;
 
 // Re-export key types for consumers.
 pub use validated::{ValidatedNode, ValidatedEdge, ValidatedEvidence};
+#[allow(unused_imports)]
 pub use live::LiveKnowledgeStore;
 
 // ── Error types ────────────────────────────────────────────────────
@@ -37,6 +38,7 @@ pub enum StoreError {
     /// I/O or serialization error.
     Storage(String),
     /// Git operation failed.
+    #[allow(dead_code)]
     Git(String),
 }
 
@@ -76,6 +78,7 @@ pub struct GraphInfo {
 
 /// Detailed stats about a graph.
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct GraphStats {
     pub name: String,
     pub node_count: usize,
@@ -87,6 +90,7 @@ pub struct GraphStats {
 
 /// Info about a git commit.
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct CommitInfo {
     pub hash: String,
     pub message: String,
@@ -124,6 +128,7 @@ pub struct ConsolidationReport {
 /// Writes are validated — invalid data is rejected with StoreError::Validation.
 /// The AI interacts through MCP tools that call these methods.
 /// Direct file editing is not supported.
+#[allow(dead_code)]
 pub trait KnowledgeStore: Send + Sync {
     // ── Graph management ──
 
@@ -265,6 +270,7 @@ pub trait KnowledgeStore: Send + Sync {
 // ── StorageBackend trait ───────────────────────────────────────────
 
 /// Low-level storage operations. Implementations handle file I/O and git.
+#[allow(dead_code)]
 pub(crate) trait StorageBackend: Send + Sync {
     /// Load a graph by name. Returns None if it doesn't exist.
     fn load_graph(&self, name: &str) -> StoreResult<Option<crate::knowledge::GraphData>>;

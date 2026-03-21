@@ -220,6 +220,7 @@ impl DecayCategory {
     }
 
     /// Half-life in days (for display).
+    #[allow(dead_code)]
     pub fn half_life_days(&self) -> f64 {
         self.half_life_secs() / 86400.0
     }

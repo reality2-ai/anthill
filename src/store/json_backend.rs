@@ -3,8 +3,7 @@
 //! Wraps the current file-based load/save logic including lenient parsing,
 //! git checkout recovery, and atomic writes with fsync.
 //!
-//! TODO: Implement StorageBackend trait.
-//! For now this is a stub to keep the crate compiling.
+//! Implements the StorageBackend trait for JSON file storage.
 
 use std::path::PathBuf;
 use crate::store::{StorageBackend, StoreResult, StoreError, CommitInfo};
@@ -20,10 +19,12 @@ impl JsonFileBackend {
         Self { memory_dir }
     }
 
+    #[allow(dead_code)]
     fn meta_path(&self) -> PathBuf {
         self.memory_dir.join("knowledge.json")
     }
 
+    #[allow(dead_code)]
     fn graph_path(&self, name: &str) -> PathBuf {
         if name == "meta" || name.is_empty() {
             self.meta_path()

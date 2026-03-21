@@ -290,15 +290,8 @@ fn handle_tool_call(
             let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
             match store.query_about(graph, entity, depth) {
                 Ok(result) => {
-                    // Use the graph's render method for formatting.
-                    match store.to_visualization(graph) {
-                        Ok(_) => {
-                            // Render query result text.
-                            store.with_graph_render(graph, &result)
-                                .unwrap_or_else(|| format!("Found results for '{}'", entity))
-                        }
-                        Err(e) => format!("Error: {}", e),
-                    }
+                    store.with_graph_render(graph, &result)
+                        .unwrap_or_else(|| format!("Found results for '{}'", entity))
                 }
                 Err(e) => format!("Error: {}", e),
             }
@@ -310,8 +303,8 @@ fn handle_tool_call(
                 Ok(result) if result.paths.is_empty() => {
                     format!("No path found between '{}' and '{}'", from, to)
                 }
-                Ok(_result) => {
-                    store.with_graph_render(graph, &_result)
+                Ok(result) => {
+                    store.with_graph_render(graph, &result)
                         .unwrap_or_else(|| format!("Path found from '{}' to '{}'", from, to))
                 }
                 Err(e) => format!("Error: {}", e),

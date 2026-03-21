@@ -606,13 +606,6 @@ async fn auth_middleware(
     next.run(req).await.into_response()
 }
 
-// urlencoding module removed — credential no longer accepted via query params.
-#[allow(dead_code)]
-mod urlencoding {
-    pub fn decode(s: &str) -> Result<String, ()> {
-        Ok(s.to_string())
-    }
-}
 
 // --- Authentication ---
 

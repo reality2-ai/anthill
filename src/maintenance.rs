@@ -247,24 +247,6 @@ async fn run_rumination(
     log::info!("[{}] Rumination cycle complete", config.ant_name);
 }
 
-// ── Corroboration Network Strength ──────────────────────────────────
-
-/// Recompute corroboration_strength for all edges in all topic graphs.
-/// This gives ideas that are well-connected to other strong ideas a fitness boost.
-fn run_corroboration_update(config: &MaintenanceConfig) {
-    use crate::store::KnowledgeStore;
-    let store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
-
-    if let Ok(graphs) = store.list_graphs() {
-        for g in &graphs {
-            if g.node_count < 2 { continue; }
-            if store.compute_corroboration_strength(&g.name).is_ok() {
-                broadcast_graph_update(config, &g.name, "rumination");
-            }
-        }
-    }
-}
-
 // ── Undetermined Connections ─────────────────────────────────────────
 
 /// Find '?' edges (undetermined connections) and ask the AI to investigate them.
@@ -737,9 +719,6 @@ fn run_initiative(
     }, &config.memory_dir);
 }
 
-// ── Existing maintenance functions ──────────────────────────────────
-
-/// Consolidate all topic graphs and the meta-graph.
 // ── Meta-Rumination (Self-Modification) ─────────────────────────────
 
 /// Review and evolve the ANT's own thinking process.
@@ -819,7 +798,7 @@ fn run_meta_rumination(
     }, &config.memory_dir);
 }
 
-// ── Existing maintenance functions ──────────────────────────────────
+// ── File Housekeeping ────────────────────────────────────────────────
 
 /// Move stray graph files into graphs/ and clean up .corrupted/.tmp files.
 fn run_file_housekeeping(config: &MaintenanceConfig) {
@@ -929,8 +908,6 @@ fn clean_temp_files_recursive(dir: &std::path::Path) -> u32 {
 }
 
 fn run_consolidation(config: &MaintenanceConfig) {
-    let graphs_dir = config.memory_dir.join("graphs");
-
     // Housekeeping: move stray graph files into graphs/ and clean up corrupted files.
     run_file_housekeeping(config);
 
@@ -1177,47 +1154,6 @@ fn filtered_topics(config: &MaintenanceConfig, store: &LiveKnowledgeStore) -> Ve
         .collect()
 }
 
-fn is_topic_graph(path: &std::path::Path) -> bool {
-    path.extension().map(|e| e == "json").unwrap_or(false)
-        && !path.to_string_lossy().contains("-archive")
-}
-
-fn topic_name(path: &std::path::Path) -> String {
-    path.file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default()
-}
-
 fn chrono_now() -> String {
-    // Simple ISO date without chrono dependency.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // Convert to YYYY-MM-DD HH:MM:SS (approximate — good enough for logging).
-    let days = now / 86400;
-    let secs_today = now % 86400;
-    let hours = secs_today / 3600;
-    let minutes = (secs_today % 3600) / 60;
-    let seconds = secs_today % 60;
-
-    // Days since epoch to date — simplified calculation.
-    let mut y = 1970i64;
-    let mut remaining = days as i64;
-    loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if remaining < days_in_year { break; }
-        remaining -= days_in_year;
-        y += 1;
-    }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut m = 0;
-    for (i, &md) in month_days.iter().enumerate() {
-        if remaining < md as i64 { m = i + 1; break; }
-        remaining -= md as i64;
-    }
-    let d = remaining + 1;
-
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, hours, minutes, seconds)
+    crate::dateutil::datetime_now()
 }

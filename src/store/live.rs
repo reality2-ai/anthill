@@ -39,7 +39,7 @@ impl LiveKnowledgeStore {
     }
 
     /// Get or load a graph by name. Caller must hold the write lock.
-    fn ensure_loaded(graphs: &mut HashMap<String, KnowledgeGraph>, name: &str, memory_dir: &PathBuf) -> StoreResult<()> {
+    fn ensure_loaded(graphs: &mut HashMap<String, KnowledgeGraph>, name: &str, memory_dir: &std::path::Path) -> StoreResult<()> {
         if !graphs.contains_key(name) {
             let path = graph_path(memory_dir, name);
             let kg = KnowledgeGraph::load(&path);
@@ -82,7 +82,8 @@ impl LiveKnowledgeStore {
     }
 
     /// Get the memory directory path (for components that need it during migration).
-    pub fn memory_dir(&self) -> &PathBuf {
+    #[allow(dead_code)]
+    pub fn memory_dir(&self) -> &std::path::Path {
         &self.memory_dir
     }
 
@@ -103,6 +104,7 @@ impl LiveKnowledgeStore {
     }
 
     /// Invalidate a cached graph so it's reloaded from disk next time.
+    #[allow(dead_code)]
     pub fn invalidate(&self, name: &str) {
         if let Ok(mut graphs) = self.graphs.write() {
             graphs.remove(name);
@@ -110,6 +112,7 @@ impl LiveKnowledgeStore {
     }
 
     /// Invalidate all cached graphs.
+    #[allow(dead_code)]
     pub fn invalidate_all(&self) {
         if let Ok(mut graphs) = self.graphs.write() {
             graphs.clear();
@@ -207,7 +210,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 &evidence.source_id,
                 evidence.source_reputation,
             );
-            let _ = eid; // used for finding
+            let _eid = eid;
             Ok(EdgeUpdate {
                 confidence_before: before_conf,
                 confidence_after: edge.confidence,
@@ -378,7 +381,8 @@ impl KnowledgeStore for LiveKnowledgeStore {
             let before = kg.undetermined_connections(1000).len();
             kg.link_orphans(graph);
             let after = kg.undetermined_connections(1000).len();
-            Ok((after - before) as u32)
+            // after can be larger than before if linking creates new '?' edges.
+            Ok(after.saturating_sub(before) as u32)
         })
     }
 
@@ -442,7 +446,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-fn graph_path(memory_dir: &PathBuf, name: &str) -> PathBuf {
+fn graph_path(memory_dir: &std::path::Path, name: &str) -> PathBuf {
     if name == "meta" || name.is_empty() {
         memory_dir.join("knowledge.json")
     } else {
@@ -497,25 +501,5 @@ fn find_edge<'a>(
 }
 
 fn today() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = now / 86400;
-    let mut y = 1970i64;
-    let mut remaining = days as i64;
-    loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if remaining < days_in_year { break; }
-        remaining -= days_in_year;
-        y += 1;
-    }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut m = 0;
-    for (i, &md) in month_days.iter().enumerate() {
-        if remaining < md as i64 { m = i + 1; break; }
-        remaining -= md as i64;
-    }
-    format!("{:04}-{:02}-{:02}", y, m, remaining + 1)
+    crate::dateutil::today_string()
 }

@@ -5,7 +5,7 @@
 //! a clear error message through MCP if it provides invalid data.
 
 use crate::knowledge::{Basis, EdgeView, KnowledgeEdge, KnowledgeNode, NodeKind};
-use crate::epistemic::{DecayCategory, EvidenceType};
+use crate::epistemic::EvidenceType;
 use crate::store::{StoreError, StoreResult};
 
 // ── ValidatedNode ──────────────────────────────────────────────────
@@ -222,27 +222,7 @@ fn parse_evidence_type(s: &str) -> StoreResult<EvidenceType> {
 }
 
 fn today_string() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = now / 86400;
-    let mut y = 1970i64;
-    let mut remaining = days as i64;
-    loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if remaining < days_in_year { break; }
-        remaining -= days_in_year;
-        y += 1;
-    }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut m = 0;
-    for (i, &md) in month_days.iter().enumerate() {
-        if remaining < md as i64 { m = i + 1; break; }
-        remaining -= md as i64;
-    }
-    format!("{:04}-{:02}-{:02}", y, m, remaining + 1)
+    crate::dateutil::today_string()
 }
 
 #[cfg(test)]

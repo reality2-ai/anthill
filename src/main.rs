@@ -8,6 +8,7 @@ mod backup;
 mod bot;
 mod ai_worker;
 mod config;
+mod dateutil;
 mod epistemic;
 mod events;
 mod history;
