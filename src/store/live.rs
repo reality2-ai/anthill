@@ -18,6 +18,7 @@ use crate::store::{
     ValidatedNode, ValidatedEdge, ValidatedEvidence,
 };
 use crate::store::cbor_backend::CborGitBackend;
+use crate::store::changelog::{Changelog, ChangeEntry, ChangeKind};
 
 /// The primary implementation of KnowledgeStore.
 /// Uses CBOR+Git backend for persistence, KnowledgeGraph for in-memory operations.
@@ -132,6 +133,24 @@ impl LiveKnowledgeStore {
         })
     }
 
+    /// Log a semantic change to the changelog.
+    fn log_change(&self, graph: &str, kind: ChangeKind, description: &str) {
+        let mut changelog = Changelog::load(&self.memory_dir);
+        changelog.append(ChangeEntry {
+            timestamp: crate::dateutil::datetime_now(),
+            graph: graph.into(),
+            kind,
+            description: description.into(),
+        }, &self.memory_dir);
+    }
+
+    /// Search the semantic changelog.
+    pub fn search_changelog(&self, query: &str, limit: usize) -> Vec<String> {
+        let changelog = Changelog::load(&self.memory_dir);
+        let entries = changelog.search(query, limit);
+        entries.iter().map(|e| format!("{} [{}] {}", e.timestamp, e.graph, e.description)).collect()
+    }
+
     /// Render a query result using the graph's render method.
     /// This is a convenience for MCP/web consumers that need formatted output.
     pub fn with_graph_render(&self, graph: &str, result: &QueryResult) -> Option<String> {
@@ -193,15 +212,20 @@ impl KnowledgeStore for LiveKnowledgeStore {
     // ── Node operations ──
 
     fn add_node(&self, graph: &str, node: ValidatedNode) -> StoreResult<NodeId> {
-        self.with_graph_mut(graph, |kg| {
-            // Check for duplicate.
-            if kg.find_by_label(&node.inner.label).is_some() {
-                return Err(StoreError::Duplicate(format!("node '{}' already exists", node.inner.label)));
+        let label = node.inner.label.clone();
+        let kind = node.inner.kind.to_string();
+        let result = self.with_graph_mut(graph, |kg| {
+            if kg.find_by_label(&label).is_some() {
+                return Err(StoreError::Duplicate(format!("node '{}' already exists", label)));
             }
             let idx = kg.graph.add_node(node.inner);
             kg.rebuild_index();
             Ok(NodeId(idx))
-        })
+        })?;
+        self.log_change(graph,
+            ChangeKind::NodeAdded { label: label.clone(), node_kind: kind.clone() },
+            &format!("Added node '{}' ({})", label, kind));
+        Ok(result)
     }
 
     fn get_node(&self, graph: &str, label: &str) -> StoreResult<KnowledgeNode> {
@@ -235,7 +259,12 @@ impl KnowledgeStore for LiveKnowledgeStore {
         &self, graph: &str, from: &str, to: &str, relation: &str,
         evidence: ValidatedEvidence,
     ) -> StoreResult<EdgeUpdate> {
-        self.with_graph_mut(graph, |kg| {
+        let from_s = from.to_string();
+        let to_s = to.to_string();
+        let rel_s = relation.to_string();
+        let ev_type = format!("{:?}", evidence.evidence_type);
+
+        let result = self.with_graph_mut(graph, |kg| {
             let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
             let before_conf = edge.confidence;
             let before_lo = edge.log_odds;
@@ -260,7 +289,14 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 bayes_factor: evidence.evidence_type.effective_bayes_factor(evidence.source_reputation),
                 confirmation_bias_warning: warning,
             })
-        })
+        })?;
+        self.log_change(graph,
+            ChangeKind::EvidenceUpdated {
+                from: from_s, to: to_s, relation: rel_s, evidence_type: ev_type,
+                confidence_before: result.confidence_before, confidence_after: result.confidence_after,
+            },
+            &format!("Evidence: {:.0}% → {:.0}%", result.confidence_before * 100.0, result.confidence_after * 100.0));
+        Ok(result)
     }
 
     fn strengthen(
