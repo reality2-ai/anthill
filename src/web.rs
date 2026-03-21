@@ -1254,6 +1254,7 @@ async fn handle_web_command(
             /new — fresh conversation\n\
             /analyse <file> — thematic analysis → knowledge graph\n\
             /reflect — review and consolidate knowledge graph\n\
+            /ruminate — trigger a rumination cycle now\n\
             /specify <file> — generate spec from code\n\
             /test-vectors <file> — generate test cases\n\n\
             Everything else is sent as a prompt to the AI.".into()
@@ -1503,6 +1504,42 @@ async fn handle_web_command(
                 out.push_str("**All required items present.**");
             }
             Some(out)
+        },
+        "/ruminate" => {
+            drop(bots);
+            // Send a rumination request directly via the request channel.
+            let bots = registry.bots.read().await;
+            if let Some(handle) = bots.get(bot_name) {
+                let task_id = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos();
+                let _ = handle.request_tx.send(crate::ai_worker::CliRequest {
+                    chat_id,
+                    message: "RUMINATION — MANUAL TRIGGER\n\n\
+                        You have been asked to ruminate — to actively think about and improve \
+                        your knowledge graph.\n\n\
+                        Do ALL of the following:\n\
+                        1. Read your topic graphs in memory/graphs/\n\
+                        2. Pick 2-3 important beliefs with moderate confidence (40-80%) and \
+                           ATTEMPT TO REFUTE them. Remember: not finding counter-evidence is \
+                           'inconsequential_search' (no change), NOT 'refutation_survived'\n\
+                        3. Look for pairs of strong edges (A→B, B→C) where no A→C exists — \
+                           conjecture new transitive relationships with basis 'inferred'\n\
+                        4. Find competing hypotheses (different relations between the same nodes) \
+                           and evaluate which is best supported\n\
+                        5. Look for cross-domain patterns — similar relationships in different \
+                           topic graphs that could inform each other\n\
+                        6. Set beneficial_impact on edges where relevant\n\
+                        7. Update the graph files with all changes\n\n\
+                        Output a summary of what you thought about and what changed.\n\n\
+                        IMPORTANT: Complete this work and STOP. Do not ask follow-up questions.".into(),
+                    new_session: true,
+                    task_id,
+                    source: "rumination".into(),
+                });
+            }
+            Some("🧠 Starting rumination cycle — refuting, synthesising, competing...".into())
         },
         _ => None,
     };

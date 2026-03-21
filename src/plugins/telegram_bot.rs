@@ -235,6 +235,7 @@ fn classify_command(text: &str) -> u8 {
         s if s == "/followup" || s.starts_with("/followup ") => 8,
         s if s.starts_with("/analyse ") || s.starts_with("/analyze ") => 9,
         "/reflect" => 10,
+        "/ruminate" => 13,
         s if s.starts_with("/specify ") => 11,
         s if s.starts_with("/test-vectors ") || s.starts_with("/testvectors ") => 12,
         _ => 0, // regular message

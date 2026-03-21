@@ -31,6 +31,7 @@ pub const CMD_STATUS: u8 = 0x09;    // Show live status of workers
 pub const CMD_FOLLOWUP: u8 = 0x0A;  // Queue follow-up for a running task
 pub const CMD_ANALYSE: u8 = 0x0B;   // Thematic analysis of a file
 pub const CMD_REFLECT: u8 = 0x0C;   // Meta-analysis / reflect on knowledge graph
+pub const CMD_RUMINATE: u8 = 0x0F;  // Trigger rumination cycle manually
 pub const CMD_SPECIFY: u8 = 0x0D;   // Generate spec from code
 pub const CMD_TEST_VECTORS: u8 = 0x0E; // Generate test vectors from code/spec
 
@@ -46,6 +47,7 @@ const HELP_TEXT: &str = "\
 /new — start a fresh conversation
 /analyse <file> — thematic analysis on a file → knowledge graph
 /reflect — review and consolidate the knowledge graph
+/ruminate — trigger a rumination cycle now (refute, synthesise, compete)
 /specify <file> — generate a specification from code
 /test-vectors <file> — generate test vectors from code
 
@@ -597,6 +599,43 @@ impl AiPlugin {
         });
     }
 
+    fn handle_ruminate(&mut self, data: &[u8]) {
+        let chat_id = Self::decode_chat_id(data);
+
+        self.send_telegram(chat_id, "🧠 Starting rumination cycle — refuting, synthesising, competing...");
+
+        // Trigger rumination by sending a meta-prompt that tells the AI to
+        // review its knowledge graph, challenge beliefs, and improve ideas.
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+
+        let _ = self.request_tx.send(CliRequest {
+            chat_id,
+            message: "RUMINATION — MANUAL TRIGGER\n\n\
+                You have been asked to ruminate — to actively think about and improve \
+                your knowledge graph.\n\n\
+                Do ALL of the following:\n\
+                1. Read your topic graphs in memory/graphs/\n\
+                2. Pick 2-3 important beliefs with moderate confidence (40-80%) and \
+                   ATTEMPT TO REFUTE them. Remember: not finding counter-evidence is \
+                   'inconsequential_search' (no change), NOT 'refutation_survived'\n\
+                3. Look for pairs of strong edges (A→B, B→C) where no A→C exists — \
+                   conjecture new transitive relationships with basis 'inferred'\n\
+                4. Find competing hypotheses (different relations between the same nodes) \
+                   and evaluate which is best supported\n\
+                5. Look for cross-domain patterns — similar relationships in different \
+                   topic graphs that could inform each other\n\
+                6. Set beneficial_impact on edges where relevant (positive for ideas \
+                   beneficial to people and planet)\n\
+                7. Update the graph files with all changes\n\n\
+                Output a summary of what you thought about and what changed.\n\n\
+                IMPORTANT: Complete this work and STOP. Do not ask follow-up questions.".into(),
+            new_session: true,
+            task_id,
+            source: "rumination".into(),
+        });
+    }
+
     fn handle_specify(&mut self, data: &[u8]) {
         let chat_id = Self::decode_chat_id(data);
 
@@ -728,6 +767,7 @@ impl Plugin for AiPlugin {
             CMD_FOLLOWUP => { self.handle_followup(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_ANALYSE => { self.handle_analyse(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_REFLECT => { self.handle_reflect(data); PluginResult::Ok(PluginResponse::empty()) }
+            CMD_RUMINATE => { self.handle_ruminate(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_SPECIFY => { self.handle_specify(data); PluginResult::Ok(PluginResponse::empty()) }
             CMD_TEST_VECTORS => { self.handle_test_vectors(data); PluginResult::Ok(PluginResponse::empty()) }
             _ => PluginResult::Error(PluginError::new(0xFF, "unknown command")),
