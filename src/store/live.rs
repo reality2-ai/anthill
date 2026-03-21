@@ -41,18 +41,32 @@ impl LiveKnowledgeStore {
     }
 
     /// Get or load a graph by name. Caller must hold the write lock.
-    /// Tries CBOR first, falls back to legacy JSON.
+    /// When both CBOR and JSON exist, loads the NEWER one (by mtime).
     fn ensure_loaded(graphs: &mut HashMap<String, KnowledgeGraph>, name: &str, memory_dir: &std::path::Path) -> StoreResult<()> {
         if !graphs.contains_key(name) {
-            // Try CBOR path first, then JSON.
             let cbor_path = if name == "meta" || name.is_empty() {
                 memory_dir.join("knowledge.cbor")
             } else {
                 memory_dir.join("graphs").join(format!("{}.cbor", name))
             };
+            let json_path = graph_path(memory_dir, name);
 
-            let kg = if cbor_path.exists() {
-                // Load from CBOR via the backend.
+            let cbor_exists = cbor_path.exists();
+            let json_exists = json_path.exists();
+
+            // When both exist, prefer the newer one (the AI might have edited JSON directly).
+            let use_cbor = if cbor_exists && json_exists {
+                let cbor_mtime = std::fs::metadata(&cbor_path).ok().and_then(|m| m.modified().ok());
+                let json_mtime = std::fs::metadata(&json_path).ok().and_then(|m| m.modified().ok());
+                match (cbor_mtime, json_mtime) {
+                    (Some(c), Some(j)) => c >= j,
+                    _ => true, // Default to CBOR if mtime unavailable.
+                }
+            } else {
+                cbor_exists
+            };
+
+            let kg = if use_cbor {
                 match std::fs::read(&cbor_path) {
                     Ok(bytes) => {
                         match ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&bytes[..]) {
@@ -63,21 +77,20 @@ impl LiveKnowledgeStore {
                             }
                             Err(e) => {
                                 log::warn!("CBOR parse failed for {}, falling back to JSON: {}", name, e);
-                                let json_path = graph_path(memory_dir, name);
                                 KnowledgeGraph::load(&json_path)
                             }
                         }
                     }
                     Err(e) => {
                         log::warn!("Failed to read {}: {}", cbor_path.display(), e);
-                        let json_path = graph_path(memory_dir, name);
                         KnowledgeGraph::load(&json_path)
                     }
                 }
-            } else {
-                // No CBOR file — load from JSON.
-                let json_path = graph_path(memory_dir, name);
+            } else if json_exists {
                 KnowledgeGraph::load(&json_path)
+            } else {
+                // Neither exists — empty graph.
+                KnowledgeGraph::empty(cbor_path)
             };
 
             graphs.insert(name.to_string(), kg);
