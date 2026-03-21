@@ -1085,6 +1085,10 @@ impl KnowledgeGraph {
         self.graph.node_count()
     }
 
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
+
     /// All node labels (for cross-referencing between graphs).
     pub fn all_node_labels(&self) -> Vec<String> {
         self.graph.node_indices()

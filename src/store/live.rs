@@ -1,35 +1,505 @@
 //! LiveKnowledgeStore — the primary KnowledgeStore implementation.
 //!
-//! Wraps GraphEngine + StorageBackend behind the KnowledgeStore trait.
-//! Handles caching, validation, and git integration.
-//!
-//! TODO: Implement the full KnowledgeStore trait.
-//! For now this is a structural stub to verify the module compiles.
+//! Manages multiple named graphs (meta + topics), caches them in memory,
+//! validates all writes, and delegates to KnowledgeGraph methods.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::RwLock;
+
+use crate::knowledge::{
+    self, KnowledgeGraph, KnowledgeNode, CompetitorGroup, ContradictionPair,
+    PatternMatch, UncertaintyStats, QueryResult, NodeKind,
+};
+use crate::store::{
+    KnowledgeStore, StorageBackend, StoreError, StoreResult,
+    NodeId, EdgeId, EdgeUpdate, GraphInfo, GraphStats, CommitInfo,
+    ConsolidationReport,
+    ValidatedNode, ValidatedEdge, ValidatedEvidence,
+};
 use crate::store::json_backend::JsonFileBackend;
 
 /// The primary implementation of KnowledgeStore.
 pub struct LiveKnowledgeStore {
     backend: JsonFileBackend,
-    #[allow(dead_code)]
     memory_dir: PathBuf,
+    /// Cached graphs, keyed by name ("meta", "anthill", etc.).
+    graphs: RwLock<HashMap<String, KnowledgeGraph>>,
 }
 
 impl LiveKnowledgeStore {
     /// Create a new store backed by JSON files.
     pub fn new(memory_dir: PathBuf) -> Self {
         let backend = JsonFileBackend::new(memory_dir.clone());
-        Self { backend, memory_dir }
+        Self {
+            backend,
+            memory_dir,
+            graphs: RwLock::new(HashMap::new()),
+        }
     }
 
-    /// Get a reference to the backend (for direct operations during migration).
-    #[allow(dead_code)]
-    pub fn backend(&self) -> &JsonFileBackend {
-        &self.backend
+    /// Get or load a graph by name. Caller must hold the write lock.
+    fn ensure_loaded(graphs: &mut HashMap<String, KnowledgeGraph>, name: &str, memory_dir: &PathBuf) -> StoreResult<()> {
+        if !graphs.contains_key(name) {
+            let path = graph_path(memory_dir, name);
+            let kg = KnowledgeGraph::load(&path);
+            graphs.insert(name.to_string(), kg);
+        }
+        Ok(())
+    }
+
+    /// Get a read-only reference to a graph, loading if needed.
+    fn with_graph<F, R>(&self, name: &str, f: F) -> StoreResult<R>
+    where
+        F: FnOnce(&KnowledgeGraph) -> StoreResult<R>,
+    {
+        // Try read lock first.
+        {
+            let graphs = self.graphs.read().map_err(|_| StoreError::Storage("lock poisoned".into()))?;
+            if let Some(kg) = graphs.get(name) {
+                return f(kg);
+            }
+        }
+        // Need to load — acquire write lock.
+        let mut graphs = self.graphs.write().map_err(|_| StoreError::Storage("lock poisoned".into()))?;
+        Self::ensure_loaded(&mut graphs, name, &self.memory_dir)?;
+        let kg = graphs.get(name).ok_or_else(|| StoreError::NotFound(format!("graph '{}'", name)))?;
+        f(kg)
+    }
+
+    /// Get a mutable reference to a graph, loading if needed. Saves after mutation.
+    fn with_graph_mut<F, R>(&self, name: &str, f: F) -> StoreResult<R>
+    where
+        F: FnOnce(&mut KnowledgeGraph) -> StoreResult<R>,
+    {
+        let mut graphs = self.graphs.write().map_err(|_| StoreError::Storage("lock poisoned".into()))?;
+        Self::ensure_loaded(&mut graphs, name, &self.memory_dir)?;
+        let kg = graphs.get_mut(name).ok_or_else(|| StoreError::NotFound(format!("graph '{}'", name)))?;
+        let result = f(kg)?;
+        // Save after mutation.
+        kg.save();
+        Ok(result)
+    }
+
+    /// Get the memory directory path (for components that need it during migration).
+    pub fn memory_dir(&self) -> &PathBuf {
+        &self.memory_dir
+    }
+
+    /// Invalidate a cached graph so it's reloaded from disk next time.
+    pub fn invalidate(&self, name: &str) {
+        if let Ok(mut graphs) = self.graphs.write() {
+            graphs.remove(name);
+        }
+    }
+
+    /// Invalidate all cached graphs.
+    pub fn invalidate_all(&self) {
+        if let Ok(mut graphs) = self.graphs.write() {
+            graphs.clear();
+        }
     }
 }
 
-// TODO: impl KnowledgeStore for LiveKnowledgeStore { ... }
-// This will be filled in as we refactor consumers to use the trait.
-// For now, consumers still use KnowledgeGraph directly.
+impl KnowledgeStore for LiveKnowledgeStore {
+    // ── Graph management ──
+
+    fn list_graphs(&self) -> StoreResult<Vec<GraphInfo>> {
+        let names = self.backend.list_graphs()?;
+        let mut result = Vec::new();
+        for name in names {
+            let info = self.with_graph(&name, |kg| {
+                Ok(GraphInfo {
+                    name: name.clone(),
+                    node_count: kg.node_count(),
+                    edge_count: kg.edge_count(),
+                })
+            })?;
+            result.push(info);
+        }
+        Ok(result)
+    }
+
+    fn graph_stats(&self, graph: &str) -> StoreResult<GraphStats> {
+        self.with_graph(graph, |kg| {
+            let stats = kg.uncertainty_stats();
+            Ok(GraphStats {
+                name: graph.into(),
+                node_count: kg.node_count(),
+                edge_count: stats.edge_count,
+                avg_confidence: stats.avg_confidence,
+                uncertain_edges: stats.uncertain_edge_count,
+                orphan_nodes: 0, // TODO
+            })
+        })
+    }
+
+    // ── Node operations ──
+
+    fn add_node(&self, graph: &str, node: ValidatedNode) -> StoreResult<NodeId> {
+        self.with_graph_mut(graph, |kg| {
+            // Check for duplicate.
+            if kg.find_by_label(&node.inner.label).is_some() {
+                return Err(StoreError::Duplicate(format!("node '{}' already exists", node.inner.label)));
+            }
+            let idx = kg.graph.add_node(node.inner);
+            kg.rebuild_index();
+            Ok(NodeId(idx))
+        })
+    }
+
+    fn get_node(&self, graph: &str, label: &str) -> StoreResult<KnowledgeNode> {
+        self.with_graph(graph, |kg| {
+            let idx = kg.find_by_label(label)
+                .ok_or_else(|| StoreError::NotFound(format!("node '{}' in graph '{}'", label, graph)))?;
+            Ok(kg.graph[idx].clone())
+        })
+    }
+
+    fn list_nodes(&self, graph: &str) -> StoreResult<Vec<String>> {
+        self.with_graph(graph, |kg| {
+            Ok(kg.all_node_labels())
+        })
+    }
+
+    // ── Edge operations ──
+
+    fn add_edge(&self, graph: &str, edge: ValidatedEdge) -> StoreResult<EdgeId> {
+        self.with_graph_mut(graph, |kg| {
+            let from_idx = kg.find_by_label(&edge.from_label)
+                .ok_or_else(|| StoreError::NotFound(format!("node '{}' not found", edge.from_label)))?;
+            let to_idx = kg.find_by_label(&edge.to_label)
+                .ok_or_else(|| StoreError::NotFound(format!("node '{}' not found", edge.to_label)))?;
+            let eid = kg.graph.add_edge(from_idx, to_idx, edge.inner);
+            Ok(EdgeId(eid))
+        })
+    }
+
+    fn update_evidence(
+        &self, graph: &str, from: &str, to: &str, relation: &str,
+        evidence: ValidatedEvidence,
+    ) -> StoreResult<EdgeUpdate> {
+        self.with_graph_mut(graph, |kg| {
+            let (eid, edge) = find_edge_mut(kg, from, to, relation)?;
+            let before_conf = edge.confidence;
+            let before_lo = edge.log_odds;
+            edge.update_with_evidence(
+                evidence.evidence_type.clone(),
+                &evidence.date,
+                &evidence.test,
+                &evidence.detail,
+                &evidence.source_id,
+                evidence.source_reputation,
+            );
+            let _ = eid; // used for finding
+            Ok(EdgeUpdate {
+                confidence_before: before_conf,
+                confidence_after: edge.confidence,
+                log_odds_before: before_lo,
+                log_odds_after: edge.log_odds,
+                evidence_type: format!("{:?}", evidence.evidence_type),
+                bayes_factor: evidence.evidence_type.effective_bayes_factor(evidence.source_reputation),
+            })
+        })
+    }
+
+    fn strengthen(
+        &self, graph: &str, from: &str, to: &str, relation: &str,
+        test: &str, evidence: &str,
+    ) -> StoreResult<EdgeUpdate> {
+        self.with_graph_mut(graph, |kg| {
+            let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
+            let before = (edge.confidence, edge.log_odds);
+            edge.strengthen_with(&today(), test, evidence);
+            Ok(EdgeUpdate {
+                confidence_before: before.0,
+                confidence_after: edge.confidence,
+                log_odds_before: before.1,
+                log_odds_after: edge.log_odds,
+                evidence_type: "refutation_survived".into(),
+                bayes_factor: 2.5,
+            })
+        })
+    }
+
+    fn weaken(
+        &self, graph: &str, from: &str, to: &str, relation: &str,
+        test: &str, evidence: &str,
+    ) -> StoreResult<EdgeUpdate> {
+        self.with_graph_mut(graph, |kg| {
+            let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
+            let before = (edge.confidence, edge.log_odds);
+            edge.weaken_with(&today(), test, evidence);
+            Ok(EdgeUpdate {
+                confidence_before: before.0,
+                confidence_after: edge.confidence,
+                log_odds_before: before.1,
+                log_odds_after: edge.log_odds,
+                evidence_type: "inconsistency".into(),
+                bayes_factor: 0.4,
+            })
+        })
+    }
+
+    fn contradict(
+        &self, graph: &str, from: &str, to: &str, relation: &str,
+        test: &str, evidence: &str,
+    ) -> StoreResult<EdgeUpdate> {
+        self.with_graph_mut(graph, |kg| {
+            let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
+            let before = (edge.confidence, edge.log_odds);
+            edge.contradict_with(&today(), test, evidence);
+            Ok(EdgeUpdate {
+                confidence_before: before.0,
+                confidence_after: edge.confidence,
+                log_odds_before: before.1,
+                log_odds_after: edge.log_odds,
+                evidence_type: "refutation_failed".into(),
+                bayes_factor: 0.1,
+            })
+        })
+    }
+
+    // ── Queries ──
+
+    fn query_about(&self, graph: &str, entity: &str, depth: usize) -> StoreResult<QueryResult> {
+        self.with_graph(graph, |kg| Ok(kg.query_about(entity, depth)))
+    }
+
+    fn query_path(&self, graph: &str, from: &str, to: &str, max_paths: usize) -> StoreResult<QueryResult> {
+        self.with_graph(graph, |kg| Ok(kg.query_path(from, to, max_paths)))
+    }
+
+    fn query_by_kind(&self, graph: &str, kind: &str) -> StoreResult<QueryResult> {
+        let node_kind: NodeKind = serde_json::from_value(serde_json::Value::String(kind.into()))
+            .unwrap_or(NodeKind::Other);
+        self.with_graph(graph, |kg| Ok(kg.query_by_kind(&node_kind)))
+    }
+
+    fn query_uncertain(&self, graph: &str, threshold: f64) -> StoreResult<QueryResult> {
+        self.with_graph(graph, |kg| Ok(kg.query_uncertain(threshold)))
+    }
+
+    fn query_justification(&self, graph: &str, from: &str, to: &str, relation: &str) -> StoreResult<String> {
+        self.with_graph(graph, |kg| {
+            let (_eid, edge) = find_edge(kg, from, to, relation)?;
+            let mut text = String::new();
+            for step in &edge.justificatory_chain {
+                text.push_str(&format!("{}. {} (conf: {:.0}%, source: {})\n",
+                    step.step, step.process, step.confidence * 100.0, step.source));
+            }
+            if text.is_empty() {
+                text = "No justificatory chain recorded.".into();
+            }
+            Ok(text)
+        })
+    }
+
+    fn list_orphans(&self, graph: &str) -> StoreResult<Vec<String>> {
+        self.with_graph(graph, |kg| {
+            Ok(kg.undetermined_connections(100).into_iter()
+                .flat_map(|(a, b)| vec![a, b])
+                .collect())
+        })
+    }
+
+    // ── Rendering ──
+
+    fn render_for_prompt(&self, message: &str, max_chars: usize) -> String {
+        // Load meta graph + relevant topic graphs.
+        let meta_path = self.memory_dir.join("knowledge.json");
+        let cached = knowledge::CachedGraph::new(&meta_path);
+        cached.render_for_prompt(message, max_chars)
+    }
+
+    fn to_visualization(&self, graph: &str) -> StoreResult<serde_json::Value> {
+        self.with_graph(graph, |kg| Ok(kg.to_visualization()))
+    }
+
+    // ── Maintenance ──
+
+    fn consolidate(&self, graph: &str) -> StoreResult<ConsolidationReport> {
+        self.with_graph_mut(graph, |kg| {
+            kg.backfill_refutation_logs();
+            kg.backfill_to_thurisaz();
+            let report = kg.consolidate();
+            kg.link_orphans(graph);
+            Ok(ConsolidationReport {
+                nodes_merged: report.nodes_merged,
+                edges_merged: report.edges_merged,
+                chains_collapsed: report.chains_collapsed,
+                contradictions: report.contradictions,
+                clusters: report.clusters,
+            })
+        })
+    }
+
+    fn apply_decay(&self, graph: &str, days: u32) -> StoreResult<u32> {
+        self.with_graph_mut(graph, |kg| {
+            let mut decayed = 0u32;
+            let edge_indices: Vec<_> = kg.graph.edge_indices().collect();
+            for eid in edge_indices {
+                let before = kg.graph[eid].confidence;
+                kg.graph[eid].decay(days);
+                if (before - kg.graph[eid].confidence).abs() > 0.001 {
+                    decayed += 1;
+                }
+            }
+            Ok(decayed)
+        })
+    }
+
+    fn compute_corroboration_strength(&self, graph: &str) -> StoreResult<()> {
+        self.with_graph_mut(graph, |kg| {
+            kg.compute_corroboration_strength();
+            Ok(())
+        })
+    }
+
+    fn link_orphans(&self, graph: &str) -> StoreResult<u32> {
+        self.with_graph_mut(graph, |kg| {
+            // Count orphans before.
+            let before = kg.undetermined_connections(1000).len();
+            kg.link_orphans(graph);
+            let after = kg.undetermined_connections(1000).len();
+            Ok((after - before) as u32)
+        })
+    }
+
+    fn backfill_thurisaz(&self, graph: &str) -> StoreResult<u32> {
+        self.with_graph_mut(graph, |kg| {
+            let count = kg.backfill_to_thurisaz();
+            Ok(count as u32)
+        })
+    }
+
+    // ── Rumination support ──
+
+    fn refutation_candidates(&self, graph: &str, limit: usize) -> StoreResult<Vec<(String, String, String, f64, f64)>> {
+        self.with_graph(graph, |kg| Ok(kg.refutation_candidates(limit)))
+    }
+
+    fn synthesis_candidates(&self, graph: &str, limit: usize) -> StoreResult<Vec<(NodeId, NodeId, String, String, String)>> {
+        self.with_graph(graph, |kg| {
+            Ok(kg.synthesis_candidates(limit).into_iter()
+                .map(|(a, c, b, r1, r2)| (NodeId(a), NodeId(c), b, r1, r2))
+                .collect())
+        })
+    }
+
+    fn undetermined_connections(&self, graph: &str, limit: usize) -> StoreResult<Vec<(String, String)>> {
+        self.with_graph(graph, |kg| Ok(kg.undetermined_connections(limit)))
+    }
+
+    fn find_competitors(&self, graph: &str) -> StoreResult<Vec<CompetitorGroup>> {
+        self.with_graph(graph, |kg| Ok(kg.find_competitors()))
+    }
+
+    fn contradiction_pairs(&self, graph: &str) -> StoreResult<Vec<ContradictionPair>> {
+        self.with_graph(graph, |kg| Ok(kg.contradiction_pairs()))
+    }
+
+    fn uncertainty_stats(&self, graph: &str) -> StoreResult<UncertaintyStats> {
+        self.with_graph(graph, |kg| Ok(kg.uncertainty_stats()))
+    }
+
+    fn cross_domain_patterns(&self, graph_a: &str, graph_b: &str, limit: usize) -> StoreResult<Vec<PatternMatch>> {
+        // Need both graphs loaded. Use the with_graph helper for each.
+        let mut graphs = self.graphs.write().map_err(|_| StoreError::Storage("lock poisoned".into()))?;
+        Self::ensure_loaded(&mut graphs, graph_a, &self.memory_dir)?;
+        Self::ensure_loaded(&mut graphs, graph_b, &self.memory_dir)?;
+        let kg_a = graphs.get(graph_a).ok_or_else(|| StoreError::NotFound(graph_a.into()))?;
+        let kg_b = graphs.get(graph_b).ok_or_else(|| StoreError::NotFound(graph_b.into()))?;
+        Ok(kg_a.find_cross_domain_patterns(kg_b, limit))
+    }
+
+    // ── Git ──
+
+    fn commit(&self, message: &str) -> StoreResult<String> {
+        self.backend.commit(message)
+    }
+
+    fn history(&self, graph: &str, limit: usize) -> StoreResult<Vec<CommitInfo>> {
+        self.backend.history(graph, limit)
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+fn graph_path(memory_dir: &PathBuf, name: &str) -> PathBuf {
+    if name == "meta" || name.is_empty() {
+        memory_dir.join("knowledge.json")
+    } else {
+        memory_dir.join("graphs").join(format!("{}.json", name))
+    }
+}
+
+/// Find an edge by from/to labels and relation. Returns edge index and mutable reference.
+fn find_edge_mut<'a>(
+    kg: &'a mut KnowledgeGraph,
+    from: &str, to: &str, relation: &str,
+) -> StoreResult<(petgraph::graph::EdgeIndex, &'a mut knowledge::KnowledgeEdge)> {
+    use petgraph::visit::EdgeRef;
+    use petgraph::Direction;
+
+    let from_idx = kg.find_by_label(from)
+        .ok_or_else(|| StoreError::NotFound(format!("node '{}'", from)))?;
+    let to_idx = kg.find_by_label(to)
+        .ok_or_else(|| StoreError::NotFound(format!("node '{}'", to)))?;
+
+    let eid = kg.graph.edges_directed(from_idx, Direction::Outgoing)
+        .find(|e| e.target() == to_idx && e.weight().relation == relation)
+        .map(|e| e.id())
+        .ok_or_else(|| StoreError::NotFound(format!(
+            "edge '{}' -> '{}' via '{}'", from, to, relation
+        )))?;
+
+    let edge = &mut kg.graph[eid];
+    Ok((eid, edge))
+}
+
+/// Find an edge by from/to labels and relation (immutable).
+fn find_edge<'a>(
+    kg: &'a KnowledgeGraph,
+    from: &str, to: &str, relation: &str,
+) -> StoreResult<(petgraph::graph::EdgeIndex, &'a knowledge::KnowledgeEdge)> {
+    use petgraph::visit::EdgeRef;
+    use petgraph::Direction;
+
+    let from_idx = kg.find_by_label(from)
+        .ok_or_else(|| StoreError::NotFound(format!("node '{}'", from)))?;
+    let to_idx = kg.find_by_label(to)
+        .ok_or_else(|| StoreError::NotFound(format!("node '{}'", to)))?;
+
+    let edge_ref = kg.graph.edges_directed(from_idx, Direction::Outgoing)
+        .find(|e| e.target() == to_idx && e.weight().relation == relation)
+        .ok_or_else(|| StoreError::NotFound(format!(
+            "edge '{}' -> '{}' via '{}'", from, to, relation
+        )))?;
+
+    Ok((edge_ref.id(), edge_ref.weight()))
+}
+
+fn today() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let days = now / 86400;
+    let mut y = 1970i64;
+    let mut remaining = days as i64;
+    loop {
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if remaining < days_in_year { break; }
+        remaining -= days_in_year;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if remaining < md as i64 { m = i + 1; break; }
+        remaining -= md as i64;
+    }
+    format!("{:04}-{:02}-{:02}", y, m, remaining + 1)
+}
