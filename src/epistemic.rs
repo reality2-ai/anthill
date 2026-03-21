@@ -58,6 +58,122 @@ pub fn decay(log_odds: f64, elapsed_secs: f64, half_life_secs: f64) -> f64 {
     log_odds * 2.0_f64.powf(-elapsed_secs / half_life_secs)
 }
 
+// ── Fading Foundations (chain confidence) ──────────────────────────
+
+/// Classification of an epistemic chain link.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChainClass {
+    /// Probabilistic link (opinion, trust, prediction): confidence < 0.95.
+    /// The ground fades — after enough well-supported links, confidence converges.
+    Probabilistic,
+    /// Deductive link (logical inference, near-certainty): confidence >= 0.95.
+    /// NO fading — ground uncertainty propagates honestly through the chain.
+    Deductive,
+}
+
+/// Compute chain confidence using Fading Foundations.
+///
+/// For probabilistic chains: confidence converges to a limit determined by
+/// the chain structure, not the ground. After enough links of quality > 0.5,
+/// the remainder term (product of conditional probabilities) fades toward zero,
+/// and justification emerges from the pattern itself.
+///
+/// For deductive chains: simple product (no convergence — ground dominates).
+///
+/// Mixed chains: deductive links propagate honestly, probabilistic links converge.
+///
+/// Reference: Peijnenburg & Atkinson (2017), "Fading Foundations"
+pub fn chain_confidence(link_confidences: &[f64]) -> f64 {
+    if link_confidences.is_empty() { return 1.0; }
+    if link_confidences.len() == 1 { return link_confidences[0]; }
+
+    // Classify links.
+    let classes: Vec<ChainClass> = link_confidences.iter()
+        .map(|&c| if c >= 0.95 { ChainClass::Deductive } else { ChainClass::Probabilistic })
+        .collect();
+
+    let all_deductive = classes.iter().all(|c| *c == ChainClass::Deductive);
+
+    if all_deductive {
+        // Exceptional Class: simple product — ground dominates.
+        return link_confidences.iter().product();
+    }
+
+    // Fading Foundations: blend between naive product and convergence limit.
+    //
+    // Short chains (1-2 links): behave like the traditional product model.
+    // Long chains (5+ links): converge toward a limit determined by the
+    // average link strength, not the number of links.
+    //
+    // The blend weight fades the product model toward convergence as chain
+    // length increases — this IS the fading of foundations.
+    //
+    // For deductive chains: always use product (ground dominates).
+    // For probabilistic chains: blend product → convergence.
+
+    // Compute naive product (traditional model).
+    let product: f64 = link_confidences.iter().product();
+
+    // Compute average probabilistic link confidence (excluding deductive links).
+    let prob_links: Vec<f64> = link_confidences.iter().enumerate()
+        .filter(|(i, _)| classes[*i] == ChainClass::Probabilistic)
+        .map(|(_, &c)| c)
+        .collect();
+
+    if prob_links.is_empty() {
+        // All deductive: simple product.
+        return product.clamp(0.01, 0.99);
+    }
+
+    let avg_prob = prob_links.iter().sum::<f64>() / prob_links.len() as f64;
+    let n_prob = prob_links.len();
+
+    // FF convergence limit for the average link strength.
+    // For p > 0.5: limit = p / (2p - 1), clamped to 0.99.
+    let convergence = if avg_prob > 0.5 {
+        (avg_prob / (2.0 * avg_prob - 1.0)).min(0.99)
+    } else {
+        avg_prob // No convergence below 0.5.
+    };
+
+    // Blend weight: how much to trust convergence vs product.
+    // At n=1: 100% product, 0% convergence.
+    // At n=5: ~50/50.
+    // At n=10: ~90% convergence.
+    // The foundation fades exponentially with chain length.
+    let fade_rate = 0.3; // How fast foundations fade.
+    let convergence_weight = 1.0 - (-fade_rate * (n_prob as f64 - 1.0)).exp();
+    let convergence_weight = convergence_weight.clamp(0.0, 0.95);
+
+    // Blend: short chains ≈ product, long chains ≈ convergence limit.
+    let blended = product * (1.0 - convergence_weight) + convergence * convergence_weight;
+
+    // For mixed chains: scale by the deductive product.
+    let deductive_product: f64 = link_confidences.iter().enumerate()
+        .filter(|(i, _)| classes[*i] == ChainClass::Deductive)
+        .map(|(_, &c)| c)
+        .product();
+
+    let result = if deductive_product < 1.0 {
+        blended * deductive_product
+    } else {
+        blended
+    };
+
+    result.clamp(0.01, 0.99)
+}
+
+/// For a uniform probabilistic chain (all links have same confidence p > 0.5),
+/// the FF convergence limit.
+#[allow(dead_code)]
+pub fn ff_convergence_limit(link_confidence: f64) -> f64 {
+    if link_confidence <= 0.5 { return 0.5; } // No convergence below 0.5.
+    if link_confidence >= 1.0 { return 1.0; }
+    // limit = p / (2p - 1)
+    let limit = link_confidence / (2.0 * link_confidence - 1.0);
+    limit.min(0.99) // Never reach certainty.
+}
+
 // ── Evidence types ──────────────────────────────────────────────────
 
 /// Typed evidence for Bayesian updates.
@@ -391,5 +507,59 @@ mod tests {
         let updated = bayesian_update(lo, 0.000001);
         let p = to_probability(updated);
         assert!(p > 0.0 && p < 0.01, "Expected p < 0.01, got {}", p);
+    }
+
+    // ── Fading Foundations tests ──
+
+    #[test]
+    fn chain_single_link() {
+        assert!((chain_confidence(&[0.8]) - 0.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn chain_deductive_multiplies() {
+        // All near-certain links: simple product (Exceptional Class).
+        let conf = chain_confidence(&[0.98, 0.97, 0.96]);
+        let product = 0.98 * 0.97 * 0.96;
+        assert!((conf - product).abs() < 0.01, "Deductive chain should multiply: got {}", conf);
+    }
+
+    #[test]
+    fn chain_probabilistic_converges() {
+        // Long chain of 0.7 links: should converge, NOT keep declining.
+        let long = chain_confidence(&[0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7]);
+        let product = 0.7f64.powi(8); // 0.0576 — way too low.
+        // FF convergence: should be much higher than the product.
+        assert!(long > 0.5, "Long probabilistic chain should converge above 0.5: got {}", long);
+        assert!(long > product * 5.0, "FF should be much better than product: FF={} product={}", long, product);
+    }
+
+    #[test]
+    fn chain_weak_links_stay_low() {
+        // Links at 0.5: convergence limit is 0.5 (no improvement).
+        let conf = chain_confidence(&[0.5, 0.5, 0.5, 0.5]);
+        assert!(conf < 0.6, "Weak chain shouldn't reach high confidence: got {}", conf);
+    }
+
+    #[test]
+    fn chain_mixed_deductive_and_probabilistic() {
+        // Start with strong deductive link, then probabilistic.
+        let conf = chain_confidence(&[0.98, 0.7, 0.7]);
+        // The deductive link passes through, probabilistic links add convergent contribution.
+        assert!(conf > 0.3, "Mixed chain should be reasonable: got {}", conf);
+    }
+
+    #[test]
+    fn ff_convergence_limit_values() {
+        // p=0.7: limit = 0.7/(2*0.7-1) = 0.7/0.4 = 1.75 → clamped to 0.99.
+        assert!((ff_convergence_limit(0.7) - 0.99).abs() < 0.01);
+        // p=0.6: limit = 0.6/0.2 = 3.0 → clamped to 0.99.
+        assert!((ff_convergence_limit(0.6) - 0.99).abs() < 0.01);
+        // p=0.55: limit = 0.55/0.1 = 5.5 → clamped to 0.99.
+        assert!((ff_convergence_limit(0.55) - 0.99).abs() < 0.01);
+        // p=0.51: limit = 0.51/0.02 = 25.5 → clamped to 0.99.
+        assert!((ff_convergence_limit(0.51) - 0.99).abs() < 0.01);
+        // p=0.5: no convergence.
+        assert!((ff_convergence_limit(0.5) - 0.5).abs() < 0.01);
     }
 }

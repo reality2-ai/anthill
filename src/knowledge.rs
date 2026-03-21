@@ -1850,27 +1850,32 @@ impl KnowledgeGraph {
             None => return result,
         };
 
-        // BFS to find shortest paths (unweighted distance, but track confidence).
-        let mut queue: std::collections::VecDeque<(NodeIndex, Vec<NodeIndex>, f64)> = std::collections::VecDeque::new();
-        queue.push_back((from, vec![from], 1.0));
+        // BFS to find shortest paths. Track the sequence of edge confidences
+        // for Fading Foundations chain confidence calculation.
+        let mut queue: std::collections::VecDeque<(NodeIndex, Vec<NodeIndex>, Vec<f64>)> =
+            std::collections::VecDeque::new();
+        queue.push_back((from, vec![from], vec![]));
         let mut visited = HashSet::new();
         visited.insert(from);
 
-        while let Some((current, path, cum_conf)) = queue.pop_front() {
+        while let Some((current, path, conf_chain)) = queue.pop_front() {
             if result.paths.len() >= max_paths { break; }
             if path.len() > 10 { continue; } // max depth safety
 
             for edge_ref in self.graph.edges_directed(current, Direction::Outgoing) {
                 let target = edge_ref.target();
-                let edge_conf = edge_ref.weight().confidence;
-                let new_conf = cum_conf * edge_conf; // product = weakest link chain
+                let mut chain = conf_chain.clone();
+                chain.push(edge_ref.weight().confidence);
 
                 if target == to {
                     let mut full_path = path.clone();
                     full_path.push(to);
+                    // Fading Foundations: probabilistic chains converge,
+                    // deductive chains propagate ground uncertainty.
+                    let cum_conf = crate::epistemic::chain_confidence(&chain);
                     result.paths.push(ConfidencePath {
                         nodes: full_path,
-                        cumulative_confidence: new_conf,
+                        cumulative_confidence: cum_conf,
                     });
                     continue;
                 }
@@ -1878,22 +1883,23 @@ impl KnowledgeGraph {
                 if visited.insert(target) {
                     let mut new_path = path.clone();
                     new_path.push(target);
-                    queue.push_back((target, new_path, new_conf));
+                    queue.push_back((target, new_path, chain));
                 }
             }
 
             // Also traverse incoming edges (undirected search).
             for edge_ref in self.graph.edges_directed(current, Direction::Incoming) {
                 let source = edge_ref.source();
-                let edge_conf = edge_ref.weight().confidence;
-                let new_conf = cum_conf * edge_conf;
+                let mut chain = conf_chain.clone();
+                chain.push(edge_ref.weight().confidence);
 
                 if source == to {
                     let mut full_path = path.clone();
                     full_path.push(to);
+                    let cum_conf = crate::epistemic::chain_confidence(&chain);
                     result.paths.push(ConfidencePath {
                         nodes: full_path,
-                        cumulative_confidence: new_conf,
+                        cumulative_confidence: cum_conf,
                     });
                     continue;
                 }
@@ -1901,7 +1907,7 @@ impl KnowledgeGraph {
                 if visited.insert(source) {
                     let mut new_path = path.clone();
                     new_path.push(source);
-                    queue.push_back((source, new_path, new_conf));
+                    queue.push_back((source, new_path, chain));
                 }
             }
         }
@@ -3972,8 +3978,12 @@ mod tests {
         assert!(!result.paths.is_empty());
         let path = &result.paths[0];
         assert_eq!(path.nodes.len(), 3); // Roy, Anthill, Alfred
-        // Cumulative confidence: 0.85 * 0.72 = 0.612.
-        assert!((path.cumulative_confidence - 0.612).abs() < 0.01);
+        // Fading Foundations chain confidence: higher than naive product (0.612)
+        // because FF blends product with convergence limit for short chains.
+        assert!(path.cumulative_confidence > 0.6,
+            "FF confidence should be above product: got {}", path.cumulative_confidence);
+        assert!(path.cumulative_confidence < 0.85,
+            "FF confidence should be below strongest link: got {}", path.cumulative_confidence);
 
         std::fs::remove_dir_all(&dir).ok();
     }
