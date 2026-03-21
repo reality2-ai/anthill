@@ -106,6 +106,9 @@ pub struct EdgeUpdate {
     pub log_odds_after: f64,
     pub evidence_type: String,
     pub bayes_factor: f64,
+    /// Warning message if the update pattern looks like confirmation bias.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmation_bias_warning: Option<String>,
 }
 
 // ── Consolidation report ───────────────────────────────────────────

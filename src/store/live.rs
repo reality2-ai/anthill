@@ -199,7 +199,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
         evidence: ValidatedEvidence,
     ) -> StoreResult<EdgeUpdate> {
         self.with_graph_mut(graph, |kg| {
-            let (eid, edge) = find_edge_mut(kg, from, to, relation)?;
+            let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
             let before_conf = edge.confidence;
             let before_lo = edge.log_odds;
             edge.update_with_evidence(
@@ -210,7 +210,10 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 &evidence.source_id,
                 evidence.source_reputation,
             );
-            let _eid = eid;
+
+            // Check for confirmation bias patterns.
+            let warning = detect_confirmation_bias(edge);
+
             Ok(EdgeUpdate {
                 confidence_before: before_conf,
                 confidence_after: edge.confidence,
@@ -218,6 +221,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 log_odds_after: edge.log_odds,
                 evidence_type: format!("{:?}", evidence.evidence_type),
                 bayes_factor: evidence.evidence_type.effective_bayes_factor(evidence.source_reputation),
+                confirmation_bias_warning: warning,
             })
         })
     }
@@ -230,6 +234,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
             let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
             let before = (edge.confidence, edge.log_odds);
             edge.strengthen_with(&today(), test, evidence);
+            let warning = detect_confirmation_bias(edge);
             Ok(EdgeUpdate {
                 confidence_before: before.0,
                 confidence_after: edge.confidence,
@@ -237,6 +242,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 log_odds_after: edge.log_odds,
                 evidence_type: "refutation_survived".into(),
                 bayes_factor: 2.5,
+                confirmation_bias_warning: warning,
             })
         })
     }
@@ -256,6 +262,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 log_odds_after: edge.log_odds,
                 evidence_type: "inconsistency".into(),
                 bayes_factor: 0.4,
+                confirmation_bias_warning: None,
             })
         })
     }
@@ -275,6 +282,7 @@ impl KnowledgeStore for LiveKnowledgeStore {
                 log_odds_after: edge.log_odds,
                 evidence_type: "refutation_failed".into(),
                 bayes_factor: 0.1,
+                confirmation_bias_warning: None,
             })
         })
     }
@@ -502,4 +510,65 @@ fn find_edge<'a>(
 
 fn today() -> String {
     crate::dateutil::today_string()
+}
+
+/// Detect confirmation bias patterns in an edge's evidence history.
+/// Returns a warning message if the pattern is suspicious.
+fn detect_confirmation_bias(edge: &knowledge::KnowledgeEdge) -> Option<String> {
+    let log = &edge.evidence_log;
+    if log.len() < 3 { return None; }
+
+    // Count evidence types.
+    let mut positive = 0u32;
+    let mut negative = 0u32;
+    let mut _neutral = 0u32;
+    let mut types_seen = std::collections::HashSet::new();
+
+    for entry in log {
+        types_seen.insert(std::mem::discriminant(&entry.evidence_type));
+        if entry.bayes_factor > 1.0 {
+            positive += 1;
+        } else if entry.bayes_factor < 1.0 {
+            negative += 1;
+        } else {
+            _neutral += 1;
+        }
+    }
+
+    let total = log.len() as f64;
+    let positive_rate = positive as f64 / total;
+
+    let mut warnings = Vec::new();
+
+    // All positive, no negative — suspicious.
+    if positive >= 5 && negative == 0 {
+        warnings.push(format!(
+            "{} consecutive positive updates with zero negative — are you genuinely testing or just confirming?",
+            positive
+        ));
+    }
+
+    // Very high positive rate with low diversity.
+    if positive_rate > 0.85 && types_seen.len() <= 2 && log.len() >= 5 {
+        warnings.push(format!(
+            "{:.0}% positive rate with only {} evidence type(s) — diversity of testing needed. \
+             Try different kinds of refutation, not just the same approach.",
+            positive_rate * 100.0, types_seen.len()
+        ));
+    }
+
+    // Confidence above ceiling — the structural limit kicked in.
+    if edge.confidence >= 0.69 && types_seen.len() <= 1 {
+        warnings.push(
+            "Confidence capped at 70% — only one type of evidence present. \
+             To increase further, the edge needs different kinds of evidence \
+             (e.g. corroboration AND refutation_survived, not just repeated corroborations).".into()
+        );
+    }
+
+    if warnings.is_empty() {
+        None
+    } else {
+        Some(format!("CONFIRMATION BIAS WARNING: {}", warnings.join(" | ")))
+    }
 }

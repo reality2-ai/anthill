@@ -396,6 +396,42 @@ impl KnowledgeEdge {
         self.log_odds = bayesian_update(self.log_odds, bf);
         self.sync_confidence();
 
+        // ── Structural anti-confirmation-bias measures ──────────────
+        //
+        // These enforce Popperian principles at the math level, not just
+        // through prompting. The AI's training pushes it toward confirmation;
+        // these structural limits push back.
+
+        // 1. Confidence ceiling based on evidence type diversity.
+        //    An edge can only reach high confidence if it has survived
+        //    DIFFERENT KINDS of tests — not just repeated corroborations.
+        //    Real strength comes from diversity of evidence, not quantity.
+        let diversity = self.evidence_type_diversity();
+        let ceiling = match diversity {
+            0..=1 => 0.70,  // Only one type of evidence → max 70%
+            2     => 0.85,  // Two types → max 85%
+            3     => 0.92,  // Three types → max 92%
+            _     => 0.99,  // Four+ types → near-certain (but never 1.0)
+        };
+        if self.confidence > ceiling {
+            self.confidence = ceiling;
+            self.log_odds = to_log_odds(ceiling);
+        }
+
+        // 2. Consecutive-confirmation dampening.
+        //    If the last 5+ evidence entries are all positive (BF > 1.0),
+        //    dampen the update — something is probably wrong. Real knowledge
+        //    encounters friction.
+        let recent_positive = self.evidence_log.iter().rev().take(5)
+            .filter(|e| e.bayes_factor > 1.0)
+            .count();
+        if recent_positive >= 5 && bf > 1.0 {
+            // Dampen: pull confidence back toward the pre-update value.
+            let dampened = before_conf + (self.confidence - before_conf) * 0.3;
+            self.confidence = dampened;
+            self.log_odds = to_log_odds(dampened);
+        }
+
         // Update test counters for backward compatibility
         self.tests += 1;
         if bf > 1.0 { self.survived += 1; }
@@ -507,6 +543,16 @@ impl KnowledgeEdge {
         self.log_odds = epistemic::decay(self.log_odds, elapsed_secs, half_life);
         self.sync_confidence();
         if self.confidence < 0.01 { self.confidence = 0.01; self.log_odds = to_log_odds(0.01); }
+    }
+
+    /// Count how many distinct evidence types appear in the evidence log.
+    /// Higher diversity = edge has been tested from multiple angles.
+    fn evidence_type_diversity(&self) -> usize {
+        let mut types = std::collections::HashSet::new();
+        for entry in &self.evidence_log {
+            types.insert(std::mem::discriminant(&entry.evidence_type));
+        }
+        types.len()
     }
 
     /// Confidence tier for rendering.
