@@ -57,7 +57,8 @@ pub async fn run_web_server(
         .route("/api/ants/create", post(create_ant))
         .route("/api/ants/{id}/files", get(list_files))
         .route("/api/ants/{id}/files/{*path}", get(get_file).delete(delete_file))
-        .route("/api/ants/{id}/upload/{*path}", post(upload_file))
+        .route("/api/ants/{id}/upload/{*path}", post(upload_file)
+            .layer(axum::extract::DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
         .route("/api/ants/{id}", axum::routing::delete(delete_ant))
         .route("/api/ants/reload", post(reload_ants))
         .route("/api/ants/{id}/restart", post(restart_ant))
@@ -880,6 +881,59 @@ async fn get_file(
 /// Maximum upload size: 50 MiB.
 const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
+/// Extract a zip file into a directory using the system `unzip` command.
+fn extract_zip(data: &[u8], dest: &std::path::Path) -> Result<usize, String> {
+    let _ = std::fs::create_dir_all(dest);
+
+    // Write zip to a temp file.
+    let tmp = dest.join(".upload.zip.tmp");
+    std::fs::write(&tmp, data).map_err(|e| format!("write tmp: {}", e))?;
+
+    // Extract using unzip.
+    let output = std::process::Command::new("unzip")
+        .args(["-o", "-q"])  // overwrite, quiet
+        .arg(&tmp)
+        .arg("-d")
+        .arg(dest)
+        .output()
+        .map_err(|e| format!("unzip not found: {}", e))?;
+
+    let _ = std::fs::remove_file(&tmp);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("unzip failed: {}", stderr));
+    }
+
+    // Count extracted files.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let count = stdout.lines().filter(|l| l.contains("inflating") || l.contains("extracting")).count();
+    // If quiet mode hides output, count files in dest that are newer than 5 seconds.
+    let count = if count == 0 {
+        walkdir(dest)
+    } else {
+        count
+    };
+
+    Ok(count)
+}
+
+/// Count files in a directory recursively.
+fn walkdir(dir: &std::path::Path) -> usize {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                count += walkdir(&path);
+            } else {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 /// POST /api/ants/:id/upload/{*path} — upload a file.
 async fn upload_file(
     State(state): State<AppState>,
@@ -903,12 +957,34 @@ async fn upload_file(
         }
     }
 
-    match std::fs::write(&full, &body) {
-        Ok(()) => {
-            log::info!("[{}] uploaded: {} ({} bytes)", id, subpath, body.len());
-            StatusCode::CREATED.into_response()
+    // Check if it's a zip file — extract contents into the target directory.
+    let is_zip = subpath.ends_with(".zip") || (body.len() > 4 && body[0..4] == [0x50, 0x4B, 0x03, 0x04]);
+
+    if is_zip {
+        // Extract zip into the parent directory of the target path.
+        let extract_dir = full.parent().unwrap_or(&full);
+        match extract_zip(&body, extract_dir) {
+            Ok(count) => {
+                log::info!("[{}] uploaded and extracted zip: {} ({} files)", id, subpath, count);
+                (StatusCode::CREATED, format!("Extracted {} files", count)).into_response()
+            }
+            Err(e) => {
+                log::warn!("[{}] zip extraction failed: {}", id, e);
+                // Fall back to saving as raw file.
+                match std::fs::write(&full, &body) {
+                    Ok(()) => StatusCode::CREATED.into_response(),
+                    Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+                }
+            }
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    } else {
+        match std::fs::write(&full, &body) {
+            Ok(()) => {
+                log::info!("[{}] uploaded: {} ({} bytes)", id, subpath, body.len());
+                StatusCode::CREATED.into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
     }
 }
 
