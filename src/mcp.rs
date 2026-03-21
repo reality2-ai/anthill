@@ -273,6 +273,25 @@ fn tool_definitions() -> Vec<serde_json::Value> {
                 "required": ["source_id"]
             }
         }),
+        // Colony tools — inter-ANT communication.
+        serde_json::json!({
+            "name": "query_ant",
+            "description": "Ask another ANT in the colony about a topic. Each ANT is an expert in its domain. The response is a CONJECTURE — evaluate it critically using your Popperian process. Knowledge from other ANTs enters with source_id 'ant:<name>'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ant": { "type": "string", "description": "Name of the ANT to ask (use list_colony_ants to see available)" },
+                    "entity": { "type": "string", "description": "Entity or topic to ask about" },
+                    "depth": { "type": "integer", "description": "How many hops to traverse (default: 2)", "default": 2 }
+                },
+                "required": ["ant", "entity"]
+            }
+        }),
+        serde_json::json!({
+            "name": "list_colony_ants",
+            "description": "List all ANTs in the colony with their areas of expertise (topic graphs). Use this to discover which ANT to ask about a topic.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
     ]
 }
 
@@ -360,6 +379,7 @@ fn handle_tool_call(
             let category = if source_id.starts_with("user:") { SourceCategory::User }
                 else if source_id.starts_with("document:") { SourceCategory::Document }
                 else if source_id.starts_with("ai:") { SourceCategory::AiInference }
+                else if source_id.starts_with("ant:") { SourceCategory::Ant }
                 else { SourceCategory::Unknown };
             let reputation = registry.get_reputation(source_id, category);
 
@@ -486,6 +506,110 @@ fn handle_tool_call(
                     None => format!("Source '{}' not tracked yet.", source_id),
                 }
             }
+        }
+        "query_ant" => {
+            let ant_name = args.get("ant").and_then(|a| a.as_str()).unwrap_or("");
+            let entity = args.get("entity").and_then(|e| e.as_str()).unwrap_or("");
+            let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
+
+            if ant_name.is_empty() || entity.is_empty() {
+                return "Error: 'ant' and 'entity' are required. Use list_colony_ants to see available ANTs.".into();
+            }
+
+            // Find the other ANT's working directory.
+            // Convention: memory_dir is .../ants/<self>/working/memory
+            // Other ANTs are at .../ants/<other>/working/memory
+            let ants_dir = memory_dir.parent()  // working/
+                .and_then(|p| p.parent())       // ants/<self>/
+                .and_then(|p| p.parent());      // ants/
+
+            let other_memory = match ants_dir {
+                Some(dir) => dir.join(ant_name).join("working").join("memory"),
+                None => return format!("Error: cannot locate colony directory from {}", memory_dir.display()),
+            };
+
+            if !other_memory.exists() {
+                return format!("ANT '{}' not found. Use list_colony_ants to see available ANTs.", ant_name);
+            }
+
+            let other_store = LiveKnowledgeStore::new(other_memory);
+
+            // Query all graphs in the other ANT.
+            let mut response = String::new();
+            if let Ok(graphs) = other_store.list_graphs() {
+                for g in &graphs {
+                    if let Ok(result) = other_store.query_about(&g.name, entity, depth) {
+                        if !result.nodes.is_empty() {
+                            if let Some(rendered) = other_store.with_graph_render(&g.name, &result) {
+                                if !rendered.trim().is_empty() {
+                                    response.push_str(&format!("### {} (from {})\n", g.name, ant_name));
+                                    response.push_str(&rendered);
+                                    response.push('\n');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if response.is_empty() {
+                format!("{} has no knowledge about '{}'. They may have expertise in other areas — try list_colony_ants.", ant_name, entity)
+            } else {
+                format!("Knowledge from {} about '{}' — treat as CONJECTURE (source_id: 'ant:{}'):\n\n{}",
+                    ant_name, entity, ant_name, response)
+            }
+        }
+        "list_colony_ants" => {
+            // Find all ANTs in the colony.
+            let ants_dir = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent());
+
+            let Some(dir) = ants_dir else {
+                return "Error: cannot locate colony directory".into();
+            };
+
+            let entries = match std::fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => return "Error: cannot read colony directory".into(),
+            };
+
+            let mut listing = String::from("Colony ANTs (communities of practice):\n\n");
+            let self_name = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.file_name())
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() { continue; }
+                let name = path.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let is_self = name == self_name;
+                let memory = path.join("working").join("memory");
+                if !memory.exists() { continue; }
+
+                let other_store = LiveKnowledgeStore::new(memory);
+                let topics: Vec<String> = other_store.list_graphs()
+                    .map(|gs| gs.iter()
+                        .filter(|g| g.name != "meta" && g.node_count > 0)
+                        .map(|g| format!("{} ({} nodes)", g.name, g.node_count))
+                        .collect())
+                    .unwrap_or_default();
+
+                let marker = if is_self { " ← you" } else { "" };
+                listing.push_str(&format!("**{}**{}: {}\n",
+                    name, marker,
+                    if topics.is_empty() { "no topic graphs yet".into() }
+                    else { topics.join(", ") }
+                ));
+            }
+
+            listing.push_str("\nUse query_ant(ant='<name>', entity='<topic>') to consult a peer.");
+            listing
         }
         _ => format!("Unknown tool: {}", tool),
     }

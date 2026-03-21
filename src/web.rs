@@ -1238,6 +1238,7 @@ async fn handle_web_command(
             /reflect — review and consolidate knowledge graph\n\
             /ruminate — trigger a rumination cycle now\n\
             /questions — show pending questions from rumination\n\
+            /ask <ant> <topic> — query another ANT's knowledge\n\
             /specify <file> — generate spec from code\n\
             /test-vectors <file> — generate test cases\n\n\
             Everything else is sent as a prompt to the AI.".into()
@@ -1499,6 +1500,56 @@ async fn handle_web_command(
                 }
                 text.push_str("\nAnswer these naturally in conversation. They'll be cleared when you next send a message.");
                 Some(text)
+            }
+        },
+        s if s.starts_with("/ask ") => {
+            let rest = s.strip_prefix("/ask ").unwrap_or("").trim();
+            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+            if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+                Some("Usage: /ask <ant-name> <question>\nExample: /ask gaea what do you know about circular economy?\n\nUse /ants to see available ANTs.".into())
+            } else {
+                let target_ant = parts[0].to_string();
+                let question = parts[1].to_string();
+                // Extract the ants directory path before dropping bots.
+                let ants_dir = handle.working_dir.parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf());
+                drop(bots);
+
+                let Some(dir) = ants_dir else {
+                    return false;
+                };
+                let other_memory = dir.join(&target_ant).join("working").join("memory");
+
+                if !other_memory.exists() {
+                    Some(format!("ANT '{}' not found. Use /ants to see available ANTs.", target_ant))
+                } else {
+                    use crate::store::KnowledgeStore;
+                    let other_store = crate::store::live::LiveKnowledgeStore::new(other_memory);
+
+                    let mut resp_text = String::new();
+                    if let Ok(graphs) = other_store.list_graphs() {
+                        for g in &graphs {
+                            if let Ok(result) = other_store.query_about(&g.name, &question, 2) {
+                                if !result.nodes.is_empty() {
+                                    if let Some(rendered) = other_store.with_graph_render(&g.name, &result) {
+                                        if !rendered.trim().is_empty() {
+                                            resp_text.push_str(&format!("### {} (from {})\n", g.name, target_ant));
+                                            resp_text.push_str(&rendered);
+                                            resp_text.push('\n');
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if resp_text.is_empty() {
+                        Some(format!("{} has no knowledge about '{}'. Try /ants to see their topics.", target_ant, question))
+                    } else {
+                        Some(format!("**Knowledge from {}** (treat as conjecture):\n\n{}", target_ant, resp_text))
+                    }
+                }
             }
         },
         "/ruminate" => {

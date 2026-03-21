@@ -51,6 +51,7 @@ const HELP_TEXT: &str = "\
 /reflect — review and consolidate the knowledge graph
 /ruminate — trigger a rumination cycle now (refute, synthesise, compete)
 /questions — show pending questions from rumination
+/ask <ant> <topic> — ask another ANT about a topic (community of practice)
 /specify <file> — generate a specification from code
 /test-vectors <file> — generate test vectors from code
 

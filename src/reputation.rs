@@ -47,6 +47,8 @@ pub enum SourceCategory {
     ThematicAnalysis,
     /// MCP tool call.
     Mcp,
+    /// Another ANT in the colony (community of practice).
+    Ant,
     /// Unknown source.
     Unknown,
 }
@@ -60,6 +62,7 @@ impl SourceCategory {
             Self::User => 0.7,
             Self::ThematicAnalysis => 0.5,
             Self::Mcp => 0.6,
+            Self::Ant => 0.6,   // Peer ANT — between document and user
             Self::Unknown => 0.3,
         }
     }
