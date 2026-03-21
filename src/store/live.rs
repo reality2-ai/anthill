@@ -487,6 +487,34 @@ impl KnowledgeStore for LiveKnowledgeStore {
     fn history(&self, graph: &str, limit: usize) -> StoreResult<Vec<CommitInfo>> {
         self.backend.history(graph, limit)
     }
+
+    // ── Thought branches ──
+
+    fn create_thought_branch(&self, name: &str) -> StoreResult<String> {
+        // Invalidate all cached graphs — we're switching branches.
+        self.invalidate_all();
+        self.backend.create_branch(name)
+    }
+
+    fn merge_thought_branch(&self, branch: &str) -> StoreResult<bool> {
+        self.invalidate_all();
+        let result = self.backend.merge_branch(branch)?;
+        self.invalidate_all(); // Reload after merge.
+        Ok(result)
+    }
+
+    fn abandon_thought_branch(&self, branch: &str) -> StoreResult<()> {
+        self.invalidate_all();
+        self.backend.abandon_branch(branch)
+    }
+
+    fn list_thought_branches(&self) -> StoreResult<Vec<String>> {
+        self.backend.list_branches()
+    }
+
+    fn current_branch(&self) -> StoreResult<String> {
+        self.backend.current_branch()
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────

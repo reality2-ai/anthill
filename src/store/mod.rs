@@ -269,6 +269,23 @@ pub trait KnowledgeStore: Send + Sync {
 
     /// Get recent commit history for a graph.
     fn history(&self, graph: &str, limit: usize) -> StoreResult<Vec<CommitInfo>>;
+
+    // ── Thought branches ──
+
+    /// Create a thought branch for speculative exploration.
+    fn create_thought_branch(&self, name: &str) -> StoreResult<String>;
+
+    /// Merge a thought branch into main — the ideas survived evaluation.
+    fn merge_thought_branch(&self, branch: &str) -> StoreResult<bool>;
+
+    /// Abandon a thought branch — the exploration was a dead end.
+    fn abandon_thought_branch(&self, branch: &str) -> StoreResult<()>;
+
+    /// List all thought branches.
+    fn list_thought_branches(&self) -> StoreResult<Vec<String>>;
+
+    /// Get the current branch name.
+    fn current_branch(&self) -> StoreResult<String>;
 }
 
 // ── StorageBackend trait ───────────────────────────────────────────

@@ -276,7 +276,7 @@ fn tool_definitions() -> Vec<serde_json::Value> {
         // Colony tools — inter-ANT communication.
         serde_json::json!({
             "name": "query_ant",
-            "description": "Ask another ANT in the colony about a topic. Each ANT is an expert in its domain. The response is a CONJECTURE — evaluate it critically using your Popperian process. Knowledge from other ANTs enters with source_id 'ant:<name>'.",
+            "description": "Ask another ANT in the colony about a topic. This sends a real message that fires up the other ANT's AI to THINK about your question — it doesn't just read their files. The response will appear in your chat when ready. Use list_colony_ants first to discover peers.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -509,54 +509,46 @@ fn handle_tool_call(
         }
         "query_ant" => {
             let ant_name = args.get("ant").and_then(|a| a.as_str()).unwrap_or("");
-            let entity = args.get("entity").and_then(|e| e.as_str()).unwrap_or("");
-            let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
+            let question = args.get("entity").and_then(|e| e.as_str()).unwrap_or("");
 
-            if ant_name.is_empty() || entity.is_empty() {
+            if ant_name.is_empty() || question.is_empty() {
                 return "Error: 'ant' and 'entity' are required. Use list_colony_ants to see available ANTs.".into();
             }
 
-            // Find the other ANT's working directory.
-            // Convention: memory_dir is .../ants/<self>/working/memory
-            // Other ANTs are at .../ants/<other>/working/memory
-            let ants_dir = memory_dir.parent()  // working/
-                .and_then(|p| p.parent())       // ants/<self>/
-                .and_then(|p| p.parent());      // ants/
+            // DON'T read the other ANT's files directly — that bypasses their reasoning.
+            // Instead, send a real message that fires up their AI worker.
+            // The response will be forwarded back to our chat when ready.
+            let ants_dir = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent());
 
-            let other_memory = match ants_dir {
-                Some(dir) => dir.join(ant_name).join("working").join("memory"),
-                None => return format!("Error: cannot locate colony directory from {}", memory_dir.display()),
-            };
+            let self_name = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.file_name())
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".into());
 
-            if !other_memory.exists() {
-                return format!("ANT '{}' not found. Use list_colony_ants to see available ANTs.", ant_name);
-            }
+            // Check the target ANT exists.
+            let exists = ants_dir
+                .map(|d| d.join(ant_name).join("working").join("memory").exists())
+                .unwrap_or(false);
 
-            let other_store = LiveKnowledgeStore::new(other_memory);
-
-            // Query all graphs in the other ANT.
-            let mut response = String::new();
-            if let Ok(graphs) = other_store.list_graphs() {
-                for g in &graphs {
-                    if let Ok(result) = other_store.query_about(&g.name, entity, depth) {
-                        if !result.nodes.is_empty() {
-                            if let Some(rendered) = other_store.with_graph_render(&g.name, &result) {
-                                if !rendered.trim().is_empty() {
-                                    response.push_str(&format!("### {} (from {})\n", g.name, ant_name));
-                                    response.push_str(&rendered);
-                                    response.push('\n');
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if response.is_empty() {
-                format!("{} has no knowledge about '{}'. They may have expertise in other areas — try list_colony_ants.", ant_name, entity)
+            if !exists {
+                format!("ANT '{}' not found. Use list_colony_ants to see available ANTs.", ant_name)
             } else {
-                format!("Knowledge from {} about '{}' — treat as CONJECTURE (source_id: 'ant:{}'):\n\n{}",
-                    ant_name, entity, ant_name, response)
+                // We can't send async messages from MCP (it's synchronous stdio).
+                // Tell the AI to use the chat channel instead.
+                format!(
+                    "To ask {} about '{}', send this message in the chat:\n\n\
+                     /ask {} {}\n\n\
+                     This will fire up {}'s AI worker to think about your question \
+                     using their own knowledge and expertise. The response will \
+                     appear in your chat when ready.\n\n\
+                     Note: Direct memory reading is disabled — ANTs must COMMUNICATE, \
+                     not just read each other's files. This ensures each ANT reasons \
+                     with its own perspective.",
+                    ant_name, question, ant_name, question, ant_name
+                )
             }
         }
         "list_colony_ants" => {

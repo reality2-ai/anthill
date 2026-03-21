@@ -96,6 +96,138 @@ impl CborGitBackend {
             Err(StoreError::Git(String::from_utf8_lossy(&output.stderr).to_string()))
         }
     }
+
+    // ── Branch management (thought branches) ──
+
+    /// Create a new thought branch and switch to it.
+    /// Returns the branch name.
+    pub fn create_branch(&self, name: &str) -> StoreResult<String> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+        let branch = format!("thought/{}", name);
+
+        // Commit any pending changes first.
+        let _ = self.git_commit(&format!("checkpoint before branching to {}", branch));
+
+        let output = std::process::Command::new("git")
+            .args(["checkout", "-b", &branch])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        if output.status.success() {
+            log::info!("Created thought branch: {}", branch);
+            Ok(branch)
+        } else {
+            Err(StoreError::Git(format!("Failed to create branch {}: {}",
+                branch, String::from_utf8_lossy(&output.stderr))))
+        }
+    }
+
+    /// Switch back to main branch.
+    pub fn switch_to_main(&self) -> StoreResult<()> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        // Commit any pending changes on the current branch.
+        let _ = self.git_commit("checkpoint before switching to main");
+
+        let output = std::process::Command::new("git")
+            .args(["checkout", "main"])
+            .current_dir(working_dir)
+            .output()
+            .or_else(|_| {
+                // Try "master" if "main" doesn't exist.
+                std::process::Command::new("git")
+                    .args(["checkout", "master"])
+                    .current_dir(working_dir)
+                    .output()
+            })
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        if output.status.success() { Ok(()) }
+        else { Err(StoreError::Git(String::from_utf8_lossy(&output.stderr).to_string())) }
+    }
+
+    /// Merge a thought branch into main if the exploration was fruitful.
+    /// Returns true if merge succeeded.
+    pub fn merge_branch(&self, branch: &str) -> StoreResult<bool> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        // Make sure we're on main.
+        self.switch_to_main()?;
+
+        let output = std::process::Command::new("git")
+            .args(["merge", branch, "--no-ff", "-m",
+                &format!("Merge thought branch '{}' — ideas survived evaluation", branch)])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        if output.status.success() {
+            log::info!("Merged thought branch: {}", branch);
+            // Delete the branch after successful merge.
+            let _ = std::process::Command::new("git")
+                .args(["branch", "-d", branch])
+                .current_dir(working_dir)
+                .output();
+            Ok(true)
+        } else {
+            // Merge conflict or failure — abort and stay on main.
+            let _ = std::process::Command::new("git")
+                .args(["merge", "--abort"])
+                .current_dir(working_dir)
+                .output();
+            log::warn!("Failed to merge thought branch {}: conflict", branch);
+            Ok(false)
+        }
+    }
+
+    /// Abandon a thought branch — the exploration was a dead end.
+    pub fn abandon_branch(&self, branch: &str) -> StoreResult<()> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        self.switch_to_main()?;
+
+        // Delete the branch (force — it was never merged).
+        let _ = std::process::Command::new("git")
+            .args(["branch", "-D", branch])
+            .current_dir(working_dir)
+            .output();
+
+        log::info!("Abandoned thought branch: {}", branch);
+        Ok(())
+    }
+
+    /// List all thought branches.
+    pub fn list_branches(&self) -> StoreResult<Vec<String>> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        let output = std::process::Command::new("git")
+            .args(["branch", "--list", "thought/*"])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let branches: Vec<String> = text.lines()
+            .map(|l| l.trim().trim_start_matches("* ").to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        Ok(branches)
+    }
+
+    /// Get the current branch name.
+    pub fn current_branch(&self) -> StoreResult<String> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        let output = std::process::Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
 }
 
 impl StorageBackend for CborGitBackend {
