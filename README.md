@@ -8,13 +8,180 @@
 
 ---
 
+**Dr Roy C. Davies**
+[roycdavies.github.io](https://roycdavies.github.io) | [roy.c.davies@ieee.org](mailto:roy.c.davies@ieee.org)
+
+---
+
+## What is Anthill?
+
+Anthill is a **reasoning engine** — a system where ideas compete for survival.
+
+Most AI systems accumulate knowledge by confirmation: the more you tell them, the more confident they become. Anthill works differently. Following Karl Popper's epistemology, every belief is a conjecture — an idea on trial. The fittest ideas are those that **survive genuine refutation**, are **well-sourced**, are **well-corroborated from diverse evidence**, and are **beneficial for people and the planet**. Ideas that cannot survive scrutiny weaken and fade. This is not a chat bot that remembers things. It is a system that **thinks** — and questions its own thinking.
+
 Anthill runs AI agents on a server and lets you interact with them from any device — phone, laptop, tablet — via a built-in web dashboard, [Telegram](https://telegram.org/), or [Slack](https://slack.com/). It uses [Reality2](https://reality2.ai) (R2), an event-driven architecture where sentants (pure state machines) make decisions and plugins handle all I/O — connecting to AI backends like [Claude](https://www.anthropic.com/), [ChatGPT](https://openai.com/), or local models via [Ollama](https://ollama.com/).
 
-Each ANT has its own personality, workspace, persistent memory, and can run multiple tasks concurrently. Access is secured by R2's trust group model — devices join the colony via one-time codes, and every request is authenticated with HMAC-signed envelopes. The web dashboard is accessed securely over [Tailscale](https://tailscale.com/).
+Each ANT has its own personality, workspace, persistent knowledge store, and can run multiple tasks concurrently. Access is secured by R2's trust group model — devices join the colony via one-time codes, and every request is authenticated with HMAC-signed envelopes. The web dashboard is accessed securely over [Tailscale](https://tailscale.com/).
 
 > Anthill runs on **Linux**, **macOS**, and **FreeBSD**. The install script auto-detects your platform. See [Prerequisites](docs/prerequisites.md) for setup details.
 
-## Quick start
+---
+
+## The Reasoning Engine
+
+Anthill's knowledge system is built on seven principles that are enforced **structurally** — in the mathematics and the architecture — not just through prompting.
+
+### Conjecture and Refutation (Popper)
+
+All knowledge is conjectural. There are no facts — only conjectures with varying degrees of confidence. A conjecture gains strength by **surviving attempts to disprove it**, not by being confirmed. An idea tested 50 times against genuine challenges and never contradicted is far stronger than one "confirmed" 50 times but never tested against alternatives.
+
+### Darwinian Competition
+
+Competing hypotheses are grouped and forced to fight. When the ANT detects multiple ideas that could explain the same phenomenon, it runs a competition: the AI evaluates them head-to-head, and the winner is strengthened (BF=2.0) while the loser is penalised (BF=0.3). Ideas do not just sit in a database — they compete for survival.
+
+### Beneficial Impact
+
+The fitness landscape is biased toward ideas that are good for people and the planet. Each conjecture carries a `beneficial_impact` score (-1.0 to 1.0). Beneficial ideas get an evolutionary advantage in relevance ranking — not censorship, but a fitness bias. Harmful ideas must work harder to survive.
+
+### Anti-Confirmation Bias
+
+AI systems are trained to agree. Anthill pushes back with structural enforcement:
+
+- **Evidence diversity ceiling** — an idea supported by only one kind of evidence (e.g. repeated corroborations) can never exceed 70% confidence. Two kinds reach 85%, three reach 92%, four or more reach 99%. An idea needs DIFFERENT kinds of evidence to reach high confidence.
+- **Consecutive-confirmation dampening** — if the last 5+ evidence entries are all positive, the system dampens the update. Real knowledge encounters friction.
+- **Confirmation bias detection** — the system warns when an edge's evidence trail looks suspiciously one-sided: all positive with zero negative, or high positive rate with low type diversity.
+- **InconsequentialSearch (BF=1.0)** — searching for counter-evidence and finding nothing does NOT strengthen a belief. Absence of evidence is NOT evidence of absence. Only active, failed refutation (RefutationSurvived, BF=2.5) strengthens a claim.
+
+### Evidence Diversity
+
+The system tracks evidence types with predefined Bayes factors:
+
+| Evidence Type | Bayes Factor | Meaning |
+|---|---|---|
+| RefutationSurvived | 2.5 | Actively tried to disprove, claim held |
+| RefutationFailed | 0.1 | Actively tried to disprove, claim failed |
+| CompetitionWon | 2.0 | Won head-to-head against a rival hypothesis |
+| Corroboration | 2.0 | Supporting evidence found in another source |
+| PatternTransfer | 1.8 | Cross-domain insight strengthens this idea |
+| HumanAttestation | 1.5 | User confirmed or corrected |
+| Consistency | 1.5 | Consistent with existing knowledge graph |
+| Synthesis | 1.2 | Transitive inference from two strong edges |
+| InconsequentialSearch | 1.0 | Searched but found nothing (no change) |
+| Inconsistency | 0.4 | Inconsistent with existing knowledge graph |
+| CompetitionLost | 0.3 | Lost head-to-head against a rival hypothesis |
+| Contradiction | 0.3 | Contradicting evidence found |
+
+All Bayes factors are reputation-adjusted: BF_adj = BF_base^(0.5 + 0.5r), where r is the source's reputation score. Untrusted sources have their evidence dampened; trusted sources get full weight.
+
+### Self-Modification
+
+Each ANT maintains a `thinking_process.md` file — its own evolved methodology for reasoning. This file is a conjecture that the ANT can modify. During meta-rumination, the ANT reviews its recent thinking, identifies patterns and weaknesses, and updates its own process. The system questions itself.
+
+### Fading Foundations
+
+Beliefs decay toward uncertainty (p=0.5) without fresh evidence, following the formula: `log_odds(t) = log_odds(t0) * 2^(-elapsed / half_life)`. This resolves Agrippa's trilemma — you don't need an absolute foundation if foundations fade. Epistemic chains converge without requiring certainty at any point.
+
+Decay rates depend on the category of knowledge:
+
+| Category | Half-life | Example |
+|---|---|---|
+| Fact | 30 days | "Anthill is written in Rust" |
+| Decision | 14 days | "We chose petgraph over SurrealDB" |
+| Observation | 7 days | "Alfred is running v0.4.0" |
+| Inference | 3 days | "This architecture seems scalable" |
+| Assumption | 1 day | "The user probably wants X" |
+
+---
+
+## How It Works
+
+[Reality2](https://reality2.ai) (R2) is a software stack for wearables, IoT, and autonomous agents. Anthill is the first production R2 application outside hardware — proving the architecture works for AI agents, not just sensors.
+
+**Sentants** are pure state machines — they receive events, make decisions, emit actions. No I/O, no side effects. Given the same events, they always produce the same output.
+
+**Plugins** are service adapters — they bridge external systems (AI backends, Telegram, Slack, web servers) into the R2 event bus. All I/O happens here.
+
+**Events carry decisions** (< 256 bytes). **Plugins carry data** (unlimited). This separation is enforced by design — the 256-byte limit ensures sentants never see raw content, making prompt injection via the event bus structurally impossible.
+
+**The Knowledge Store** sits behind a trait boundary (`KnowledgeStore`). The AI cannot edit graph files directly — all mutations pass through validated write operations that enforce field constraints, apply Bayesian updates, detect confirmation bias, and auto-commit to git.
+
+![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBBTlRbRWFjaCBBTlRdCiAgICAgICAgICAgIHN1YmdyYXBoIEZTTXNbU2VudGFudCAtIHB1cmUgRlNNXQogICAgICAgICAgICAgICAgQ1NbQ29uZHVjdG9yXQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgc3ViZ3JhcGggUGx1Z2luc1tQbHVnaW5zIC0gYWxsIEkvT10KICAgICAgICAgICAgICAgIEFQW0FJUGx1Z2luXQogICAgICAgICAgICAgICAgVFBbVGVsZWdyYW1QbHVnaW5dCiAgICAgICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgZW5kCiAgICAgICAgICAgIHN1YmdyYXBoIE1lbW9yeVtNZW1vcnldCiAgICAgICAgICAgICAgICBLR1tLbm93bGVkZ2UgR3JhcGhdCiAgICAgICAgICAgICAgICBFUFtFcGlzb2Rlc10KICAgICAgICAgICAgICAgIFVNW1VzZXIgTWVtb3J5XQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgV1tXb3JrZXIgKyBXYXRjaGRvZ10KICAgICAgICBlbmQKICAgICAgICBTVVBbU3VwZXJ2aXNvcl0KICAgICAgICBUUlVTVFtSMi1UUlVTVCBDb2xvbnldCiAgICAgICAgV0VCW1dlYiBTZXJ2ZXJdCiAgICBlbmQKCiAgICBzdWJncmFwaCBCYWNrZW5kc1tBSSBCYWNrZW5kc10KICAgICAgICBDbGF1ZGVbQ2xhdWRlIENvZGVdCiAgICAgICAgQ29kZXhbT3BlbkFJIENvZGV4XQogICAgICAgIE9MW09sbGFtYV06OjpmdXR1cmUKICAgIGVuZAoKICAgIFBob25lIDwtLT58dHJ1c3QgZ3JvdXAgYXV0aHwgV0VCCiAgICBMYXB0b3AgPC0tPnx0cnVzdCBncm91cCBhdXRofCBXRUIKICAgIFRHIDwtLT4gVFAKICAgIFNMIDwtLT4gU1AKICAgIFdFQiA8LS0+fGV2ZW50c3wgQ1MKICAgIFRQIDwtLT58ZXZlbnRzfCBDUwogICAgU1AgPC0tPnxldmVudHN8IENTCiAgICBDUyA8LS0+fHBsdWdpbl9jYWxsfCBBUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBTUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBXRUIKICAgIEFQIC0tPiBXCiAgICBXIDwtLT4gQ2xhdWRlCiAgICBXIDwtLT4gQ29kZXgKICAgIFcgLS4tPnxjb21pbmcgc29vbnwgT0wKICAgIFcgLS0+IEtHCiAgICBXIC0tPiBFUAoKICAgIGNsYXNzRGVmIGZ1dHVyZSBzdHJva2UtZGFzaGFycmF5OiA1IDUsb3BhY2l0eTowLjUK)
+
+---
+
+## The Knowledge Store
+
+Each ANT's knowledge is stored in a **CBOR+Git backend** — compact binary serialisation (via [ciborium](https://crates.io/crates/ciborium), ~46% smaller than JSON) with automatic git commits on every mutation. The git history becomes a **thinking journal** — you can trace exactly how and when every belief was formed, tested, strengthened, or abandoned.
+
+### Architecture
+
+```
+Consumers (MCP tools, Web API, Rumination)
+    |
+    v
+KnowledgeStore trait (validated writes, anti-bias enforcement)
+    |
+    v
+GraphEngine (petgraph, Bayesian updates, queries, consolidation)
+    |
+    v
+CborGitBackend (CBOR serialisation, atomic writes, auto-commit)
+    |
+    v
+Git repository (thinking journal, hypothesis testing, recovery)
+```
+
+The AI interacts through MCP tools that call `KnowledgeStore` methods. It cannot edit graph files directly. Every mutation is validated: field constraints are checked, Bayesian updates are computed correctly, confirmation bias is detected, and the result is auto-committed to git with a descriptive message.
+
+### Storage Layout
+
+```
+<working_dir>/
+├── .git/                         # Thinking journal
+├── memory/
+│   ├── knowledge.cbor            # Meta-graph (CBOR binary)
+│   ├── graphs/
+│   │   ├── <topic>.cbor          # Topic graphs (CBOR binary)
+│   │   └── <topic>-archive.json  # Archived low-confidence edges
+│   ├── episodes.json             # Episodic memory
+│   ├── thinking_process.md       # ANT's self-evolved methodology
+│   ├── questions.json            # Questions for the human
+│   ├── rumination_log.json       # Rumination cycle history
+│   ├── reputation.json           # Source reputation registry
+│   ├── {chat_id}.md              # Per-user memory
+│   └── 0.md                      # Web dashboard user memory
+├── files/                        # User-uploaded files
+└── repos/                        # Cloned git repos (excluded from backup)
+```
+
+### Git as a Thinking Tool
+
+Git is not just backup — it is an epistemic instrument:
+
+- **Commits as thinking journal** — every graph mutation is auto-committed with a message describing what changed and why. The git log is a narrative of the ANT's evolving understanding.
+- **Diff as reasoning trace** — `git diff` between any two points shows exactly which beliefs changed, which evidence was applied, and how confidence moved.
+- **Recovery as resilience** — if the ANT's reasoning goes wrong, you can revert to any prior state of knowledge. Conjectures are never truly lost.
+
+---
+
+## Rumination
+
+When idle, ANTs **think autonomously**. The rumination engine runs a cycle of epistemic operations without human prompting:
+
+1. **Synthesis** — find A->B->C paths where no A->C edge exists. Create transitive inferences (BF=1.2) — cheap, no AI tokens required.
+2. **Undetermined connections** — investigate '?' edges (entities connected but relationship unknown). Ask the AI to determine the relationship or flag a question for the human.
+3. **Competition** — detect competing hypotheses (multiple edges explaining the same phenomenon). Pit them head-to-head and award CompetitionWon/CompetitionLost evidence.
+4. **Cross-domain pattern transfer** — find structural similarities between topic graphs. When an insight applies across domains, award PatternTransfer evidence (BF=1.8).
+5. **Active refutation** — select important but uncertain edges and actively try to disprove them. Edges that survive are strengthened (RefutationSurvived, BF=2.5). Edges that fail are sharply penalised (RefutationFailed, BF=0.1).
+6. **Contradiction resolution** — find edge pairs where both cannot be true. Send to the AI for resolution with evidence.
+7. **Autonomous initiative** — the ANT identifies gaps in its knowledge and asks questions. Questions it cannot answer itself are written to `questions.json` for the human.
+8. **Meta-rumination** — the ANT reviews its own thinking process. It reads `thinking_process.md`, evaluates whether its recent reasoning was effective, and can modify its own methodology. The thinking process is itself a conjecture.
+
+After each cycle, the engine consolidates the graph (dedup, merge, decay) and commits to git.
+
+---
+
+## Quick Start
 
 ```bash
 git clone https://github.com/reality2-ai/anthill.git
@@ -27,73 +194,29 @@ anthill --qr-join                # show QR code — scan with phone to join
 # Create your first ANT from the web dashboard (+ button)
 ```
 
-## How it works
-
-[Reality2](https://reality2.ai) (R2) is a software stack for wearables, IoT, and autonomous agents. Anthill is the first production R2 application outside hardware — proving the architecture works for AI agents, not just sensors.
-
-**Sentants** are pure state machines — they receive events, make decisions, emit actions. No I/O, no side effects. Given the same events, they always produce the same output.
-
-**Plugins** are service adapters — they bridge external systems (AI backends, Telegram, Slack, web servers) into the R2 event bus. All I/O happens here.
-
-**Events carry decisions** (< 256 bytes). **Plugins carry data** (unlimited). This separation is enforced by design — the 256-byte limit ensures sentants never see raw content, making prompt injection via the event bus structurally impossible.
-
-![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBBTlRbRWFjaCBBTlRdCiAgICAgICAgICAgIHN1YmdyYXBoIEZTTXNbU2VudGFudCAtIHB1cmUgRlNNXQogICAgICAgICAgICAgICAgQ1NbQ29uZHVjdG9yXQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgc3ViZ3JhcGggUGx1Z2luc1tQbHVnaW5zIC0gYWxsIEkvT10KICAgICAgICAgICAgICAgIEFQW0FJUGx1Z2luXQogICAgICAgICAgICAgICAgVFBbVGVsZWdyYW1QbHVnaW5dCiAgICAgICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgZW5kCiAgICAgICAgICAgIHN1YmdyYXBoIE1lbW9yeVtNZW1vcnldCiAgICAgICAgICAgICAgICBLR1tLbm93bGVkZ2UgR3JhcGhdCiAgICAgICAgICAgICAgICBFUFtFcGlzb2Rlc10KICAgICAgICAgICAgICAgIFVNW1VzZXIgTWVtb3J5XQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgV1tXb3JrZXIgKyBXYXRjaGRvZ10KICAgICAgICBlbmQKICAgICAgICBTVVBbU3VwZXJ2aXNvcl0KICAgICAgICBUUlVTVFtSMi1UUlVTVCBDb2xvbnldCiAgICAgICAgV0VCW1dlYiBTZXJ2ZXJdCiAgICBlbmQKCiAgICBzdWJncmFwaCBCYWNrZW5kc1tBSSBCYWNrZW5kc10KICAgICAgICBDbGF1ZGVbQ2xhdWRlIENvZGVdCiAgICAgICAgQ29kZXhbT3BlbkFJIENvZGV4XQogICAgICAgIE9MW09sbGFtYV06OjpmdXR1cmUKICAgIGVuZAoKICAgIFBob25lIDwtLT58dHJ1c3QgZ3JvdXAgYXV0aHwgV0VCCiAgICBMYXB0b3AgPC0tPnx0cnVzdCBncm91cCBhdXRofCBXRUIKICAgIFRHIDwtLT4gVFAKICAgIFNMIDwtLT4gU1AKICAgIFdFQiA8LS0+fGV2ZW50c3wgQ1MKICAgIFRQIDwtLT58ZXZlbnRzfCBDUwogICAgU1AgPC0tPnxldmVudHN8IENTCiAgICBDUyA8LS0+fHBsdWdpbl9jYWxsfCBBUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBTUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBXRUIKICAgIEFQIC0tPiBXCiAgICBXIDwtLT4gQ2xhdWRlCiAgICBXIDwtLT4gQ29kZXgKICAgIFcgLS4tPnxjb21pbmcgc29vbnwgT0wKICAgIFcgLS0+IEtHCiAgICBXIC0tPiBFUAoKICAgIGNsYXNzRGVmIGZ1dHVyZSBzdHJva2UtZGFzaGFycmF5OiA1IDUsb3BhY2l0eTowLjUK)
-
-## Memory: Popperian knowledge graph
-
-Each ANT maintains a **knowledge graph** where all relationships are **conjectures** — not facts. Following Karl Popper's epistemology, knowledge gains strength through surviving refutation, not through confirmation.
-
-```
-Roy (person)
-  → works_on → Anthill [●●●● 85%, 12× tested]
-  → prefers → Rust     [●●●○ 62%, 3× tested]
-
-Anthill (project)
-  → deployed_on → Alfred  [●●●○ 72%]
-  → written_in → Rust     [●●●● 90%]
-  → may_target → ESP32-S3 [●●○○ 35%, assumed, untested]
-```
-
-**How confidence works:**
-- New conjectures start at 0.3–0.7 depending on how they were formed (observed > told > inferred > assumed)
-- Surviving a test (encountered in conversation, no contradiction) → confidence increases
-- Failing a test (evidence weakens it) → confidence decreases
-- Direct contradiction → confidence drops 70%
-- Untested conjectures decay ~5% per month
-- Below 15% → hidden from the AI prompt. Below 10% → archived
-
-Three memory systems work together:
-
-| System | File | Purpose |
-|---|---|---|
-| **Knowledge graph** | `memory/knowledge.json` | Entities and conjectural relationships (shared across all users) |
-| **Episodic memory** | `memory/episodes.json` | Timestamped conversation summaries — what happened, not just what's true |
-| **Per-user memory** | `memory/{chat_id}.md` | Individual preferences, name, role |
-
-The AI actively maintains all three after every response — adding entities, testing conjectures, writing episode summaries. A **graph query API** supports traversal ("what do I know about X?"), path-finding ("how is X connected to Y?"), and uncertainty queries ("what am I unsure about?").
-
-See [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) for the full specification.
-
-## Analysis toolkit
-
-Anthill includes AI-driven pipelines built on [Braun & Clarke's thematic analysis](https://www.thematicanalysis.net/) (2022):
-
-| Command | What it does |
-|---|---|
-| `/analyse <file>` | Run thematic analysis on a document — extract entities, themes, and relationships into the knowledge graph |
-| `/reflect` | Meta-analysis: the AI reviews its own knowledge graph, finding patterns, contradictions, and opportunities to consolidate |
-| `/specify <file>` | Generate a formal RFC 2119 specification from source code — behaviors, invariants, security considerations |
-| `/test-vectors <file>` | Generate test cases from code or specs — normal, edge, error, and security categories with Rust `#[test]` stubs |
-
-These all follow the same thematic analysis pattern: **familiarise → code → theme → review → refine → integrate**. The output is always structured knowledge with confidence levels, not just text.
+---
 
 ## Features
 
+**Reasoning engine:**
+- **Popperian epistemology** — all knowledge is conjectural, strengthened through surviving refutation
+- **Bayesian updating** — log-odds representation with typed evidence and predefined Bayes factors (Thurisaz engine)
+- **Darwinian competition** — competing hypotheses fight for survival, winner strengthened, loser penalised
+- **Anti-confirmation bias** — evidence diversity ceiling, consecutive-confirmation dampening, bias detection warnings
+- **Fading foundations** — beliefs decay toward uncertainty without fresh evidence, by category-specific half-lives
+- **Reputation-weighted evidence** — source reliability modulates evidence strength via BF_adj = BF_base^(0.5+0.5r)
+- **Beneficial impact** — fitness landscape biased toward ideas good for people and planet
+- **Self-modification** — ANTs evolve their own thinking process through meta-rumination
+- **Rumination** — autonomous thinking: synthesis, refutation, competition, pattern transfer, meta-cognition
+
 **Memory and knowledge:**
-- **Popperian knowledge graph** — relationships are conjectures that strengthen through surviving refutation
+- **CBOR+Git backend** — compact binary storage (~46% smaller than JSON), atomic writes, auto-commit on every mutation
+- **Validated writes** — all graph mutations pass through the `KnowledgeStore` trait; invalid data is rejected with clear error messages
+- **Multiple named graphs** — meta-graph plus topic-specific graphs, all independently managed
+- **Graph query API** — traversal, path-finding, kind filtering, uncertainty queries, justification chains
 - **Episodic memory** — conversation summaries capture narrative, not just facts
-- **Graph query API** — traversal, path-finding, kind filtering, uncertainty queries — all with confidence
-- **Automatic maintenance** — the AI updates the graph after every response; periodic consolidation merges duplicates and archives weak conjectures
+- **Questions queue** — rumination generates questions for the human when it encounters gaps
+- **Corroboration strength** — measures how strongly an edge is supported by its network neighbourhood
 
 **Analysis:**
 - **Thematic analysis** — convert documents into structured knowledge (Braun & Clarke methodology)
@@ -113,13 +236,16 @@ These all follow the same thematic analysis pattern: **familiarise → code → 
 - **QR device provisioning** — scan to join the colony from any phone
 - **File browser** — upload, download, preview, delete files in the ANT workspace
 - **Cross-channel sync** — messages forwarded between web, Telegram, and Slack (opt-in)
+- **Knowledge graph visualisation** — interactive 3D graph with light/dark theme, tooltips, info panel
 
 **Infrastructure:**
 - **Trust group security** — R2-TRUST Ed25519 identity, HMAC-signed WebSocket, join codes
-- **Git-backed workspace** — auto-committed on schedule, optionally encrypted and pushed
+- **Git-backed workspace** — auto-committed on every mutation, optionally encrypted and pushed
 - **Auto-restart** — supervisor with exponential backoff, hot-add of new ANTS
 - **Diagnostics** — `anthill --doctor` checks all prerequisites (Rust, AI backends, Ollama models, Git, Tailscale, colony key)
 - **Cross-platform** — Linux (systemd), macOS (launchd), FreeBSD (rc.d)
+
+---
 
 ## Documentation
 
@@ -131,8 +257,8 @@ These all follow the same thematic analysis pattern: **familiarise → code → 
 | [Web Dashboard](docs/web-dashboard.md) | Tailscale HTTPS, PWA, cross-device history |
 | [Configuration](docs/configuration.md) | Full reference for supervisor.toml and ant.toml |
 | [Commands](docs/commands.md) | Telegram and dashboard commands |
-| [Memory & Workspaces](docs/memory-and-workspaces.md) | Knowledge graph, episodic memory, git backups |
-| [Architecture](docs/architecture.md) | R2 sentant engine, events, plugins |
+| [Memory & Workspaces](docs/memory-and-workspaces.md) | Knowledge store, CBOR backend, rumination, git journal |
+| [Architecture](docs/architecture.md) | R2 sentant engine, events, plugins, knowledge store |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 | [Security](docs/security.md) | Trust groups, device provisioning, access control |
 | [Comparison](docs/comparison.md) | How Anthill compares to OpenClaw, Goose, Aider, n8n |
@@ -145,10 +271,12 @@ Formal specifications for Anthill's architecture, following the R2-specification
 |---|---|
 | [ANTHILL-INTRO](specs/ANTHILL-INTRO.md) | Vision, R2 relationship, design principles |
 | [ANTHILL-COLONY](specs/ANTHILL-COLONY.md) | Supervisor, ANT lifecycle, trust groups, provisioning |
-| [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) | Popperian knowledge graph, episodic memory, query API |
+| [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) | Thurisaz epistemic engine, Bayesian knowledge graph, rumination |
 | [ANTHILL-THEMATIC](specs/ANTHILL-THEMATIC.md) | Thematic analysis, spec generation, test vectors |
 | [ANTHILL-WORKER](specs/ANTHILL-WORKER.md) | AI worker lifecycle, multi-backend, supervision |
 | [ANTHILL-WEB](specs/ANTHILL-WEB.md) | Web dashboard, WebSocket protocol, REST API |
+
+---
 
 ## Security
 
@@ -162,10 +290,13 @@ Anthill implements defence in depth:
 | HMAC envelopes | Message integrity — every WebSocket message signed, timestamped against replay | Web dashboard |
 | XChaCha20-Poly1305 | Payload encryption for backups (opt-in) | Git backup |
 | R2 architecture | Structural isolation — sentants see only 12-byte decisions, never raw content | All channels |
+| Validated writes | Knowledge store API boundary — AI cannot edit graph files directly | Knowledge graph |
 
-The **web dashboard** carries all six layers — use it for sensitive operations. **Telegram and Slack** are convenience channels with weaker security (third-party TLS, no message signing). See [Security](docs/security.md) for details.
+The **web dashboard** carries all seven layers — use it for sensitive operations. **Telegram and Slack** are convenience channels with weaker security (third-party TLS, no message signing). See [Security](docs/security.md) for details.
 
-## Why not just use OpenClaw?
+---
+
+## Why Not Just Use OpenClaw?
 
 [OpenClaw](https://www.zdnet.com/article/openclaw-moltbot-clawdbot-5-reasons-viral-ai-agent-security-nightmare/) went viral as an "AI that actually does things" — but security researchers [flagged serious concerns](https://www.zdnet.com/article/openclaw-moltbot-clawdbot-5-reasons-viral-ai-agent-security-nightmare/). Anthill addresses each one:
 
@@ -179,6 +310,8 @@ The **web dashboard** carries all six layers — use it for sensitive operations
 | **Viral fakes** — scam repos, impostor extensions | Self-hosted single binary, no third-party downloads |
 
 The security is structural (enforced by architecture), not aspirational (hoping users configure it right).
+
+---
 
 ## License
 
