@@ -941,9 +941,100 @@ fn run_meta_rumination(
 
 // ── Existing maintenance functions ──────────────────────────────────
 
+/// Move stray graph files into graphs/ and clean up .corrupted/.tmp files.
+fn run_file_housekeeping(config: &MaintenanceConfig) {
+    let memory_dir = &config.memory_dir;
+    let graphs_dir = memory_dir.join("graphs");
+    let _ = std::fs::create_dir_all(&graphs_dir);
+
+    // Files that belong in memory/ root — don't move these.
+    let root_files = [
+        "knowledge.json", "knowledge-archive.json",
+        "episodes.json", "embeddings.json",
+        "reputation.json", "questions.json",
+        "rumination_log.json", "rumination.md",
+        "thinking_process.md",
+    ];
+
+    let entries = match std::fs::read_dir(memory_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut moved = 0u32;
+    let mut cleaned = 0u32;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() { continue; }
+
+        let filename = path.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // Clean up .corrupted and .tmp files.
+        if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") {
+            let _ = std::fs::remove_file(&path);
+            cleaned += 1;
+            continue;
+        }
+
+        // Skip non-JSON files and known root files.
+        if !filename.ends_with(".json") { continue; }
+        if root_files.iter().any(|&f| filename == f) { continue; }
+        // Skip per-user memory files (numeric chat IDs like "123456.md" — but these are .md not .json).
+        // Skip any file that starts with a digit (user memory like "-1.json").
+        if filename.starts_with('-') || filename.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            continue;
+        }
+
+        // Check if it looks like a knowledge graph (has "nodes" and "edges" keys).
+        let is_graph = std::fs::read_to_string(&path)
+            .map(|c| c.contains("\"nodes\"") && c.contains("\"edges\""))
+            .unwrap_or(false);
+        if !is_graph { continue; }
+
+        // Move to graphs/.
+        let dest = graphs_dir.join(&filename);
+        if dest.exists() {
+            // Merge: load both, combine nodes/edges, save.
+            log::info!("[{}] Stray graph '{}' already exists in graphs/ — skipping (manual merge needed)",
+                config.ant_name, filename);
+            continue;
+        }
+
+        if std::fs::rename(&path, &dest).is_ok() {
+            moved += 1;
+            log::info!("[{}] Moved stray graph '{}' → graphs/", config.ant_name, filename);
+        }
+    }
+
+    // Also clean up .corrupted and .tmp files inside graphs/.
+    if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let filename = path.file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") {
+                let _ = std::fs::remove_file(&path);
+                cleaned += 1;
+            }
+        }
+    }
+
+    if moved > 0 || cleaned > 0 {
+        log::info!("[{}] Housekeeping: moved {} stray graphs, cleaned {} temp files",
+            config.ant_name, moved, cleaned);
+    }
+}
+
 fn run_consolidation(config: &MaintenanceConfig) {
     let graphs_dir = config.memory_dir.join("graphs");
     let meta_path = config.memory_dir.join("knowledge.json");
+
+    // Housekeeping: move stray graph files into graphs/ and clean up corrupted files.
+    run_file_housekeeping(config);
 
     // Consolidate meta-graph.
     if meta_path.exists() {
