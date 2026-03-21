@@ -330,7 +330,7 @@ The **web dashboard** carries all seven layers — use it for sensitive operatio
 | **Validated writes** — AI can't write invalid data | KnowledgeStore trait, MCP only | No validation | N/A | N/A | N/A |
 | **Trust group security** — Ed25519 + HMAC + XChaCha20 | 7-layer defence in depth | Exposed credentials | N/A | N/A | API keys |
 | **Self-hosted** — single binary, no cloud dependency | Yes — runs on your hardware | Cloud-dependent | Local | Local | Self-hosted |
-| **Open source** | MIT / Apache-2.0 | Partially open | Open | Open | Open |
+| **Open source** | AGPL-3.0 + Commercial | Partially open | Open | Open | Open |
 
 Most AI agent systems are sophisticated chat bots that accumulate knowledge by confirmation. Anthill is a reasoning engine where ideas earn their confidence through surviving genuine challenges.
 
