@@ -92,6 +92,9 @@ pub enum EvidenceType {
     /// Absence of evidence is NOT evidence of absence. Only active, failed refutation
     /// strengthens a belief — merely not finding anything proves nothing.
     InconsequentialSearch,
+    /// Catch-all for unknown evidence types. BF = 1.0 (no change).
+    #[serde(other)]
+    Unknown,
 }
 
 impl EvidenceType {
@@ -110,7 +113,7 @@ impl EvidenceType {
             Self::CompetitionWon => 2.0,
             Self::CompetitionLost => 0.3,
             Self::PatternTransfer => 1.8,
-            Self::InconsequentialSearch => 1.0, // No change — absence proves nothing
+            Self::InconsequentialSearch | Self::Unknown => 1.0, // No change
         }
     }
 
@@ -152,6 +155,7 @@ impl EvidenceType {
             Self::CompetitionLost => "Lost competition against a rival hypothesis",
             Self::PatternTransfer => "Cross-domain pattern transfer strengthened this idea",
             Self::InconsequentialSearch => "Searched for counter-evidence but found nothing relevant",
+            Self::Unknown => "Unknown evidence type",
         }
     }
 }
@@ -197,13 +201,17 @@ pub enum DecayCategory {
     Inference,
     /// Assumptions: "The user probably wants X". Half-life: 1 day.
     Assumed,
+    /// Catch-all for unknown decay categories the AI might write.
+    /// Treated as Fact (30-day half-life) — safest default.
+    #[serde(other)]
+    Other,
 }
 
 impl DecayCategory {
     /// Half-life in seconds.
     pub fn half_life_secs(&self) -> f64 {
         match self {
-            Self::Fact => 30.0 * 86400.0,        // 30 days
+            Self::Fact | Self::Other => 30.0 * 86400.0,  // 30 days
             Self::Decision => 14.0 * 86400.0,     // 14 days
             Self::Observation => 7.0 * 86400.0,   // 7 days
             Self::Inference => 3.0 * 86400.0,     // 3 days

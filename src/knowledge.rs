@@ -122,6 +122,9 @@ pub enum Basis {
     /// Assumed without evidence.
     #[default]
     Assumed,
+    /// Catch-all for unknown basis values the AI might write.
+    #[serde(other)]
+    Other,
 }
 
 #[allow(dead_code)]
@@ -132,7 +135,7 @@ impl Basis {
             Self::Observed => 0.7,
             Self::Told => 0.6,
             Self::Inferred => 0.4,
-            Self::Assumed => 0.3,
+            Self::Assumed | Self::Other => 0.3,
         }
     }
 }
@@ -151,6 +154,9 @@ pub enum EdgeView {
     /// Which entities are involved, structural connections.
     #[default]
     Entity,
+    /// Catch-all for unknown view types the AI might write.
+    #[serde(other)]
+    Other,
 }
 
 /// An edge in the knowledge graph — a conjecture with confidence.
@@ -417,7 +423,7 @@ impl KnowledgeEdge {
             EvidenceType::RefutationFailed => "contradicted",
             EvidenceType::Contradiction | EvidenceType::Inconsistency |
             EvidenceType::CompetitionLost => "weakened",
-            EvidenceType::InconsequentialSearch => "inconsequential",
+            EvidenceType::InconsequentialSearch | EvidenceType::Unknown => "inconsequential",
         };
         self.refutation_log.push(RefutationEntry {
             date: date.into(),
