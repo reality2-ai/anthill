@@ -1222,18 +1222,22 @@ pub async fn ai_worker_loop(
                 }
             }
 
-            // Skip broadcasting and forwarding for rumination — it's internal.
-            if req_source != "rumination" {
-                // Broadcast to WebSocket clients.
-                if let Some(ref tx) = etx {
-                    let _ = tx.send(crate::registry::WsEvent::Message {
-                        bot: bname.to_string(),
-                        chat_id,
-                        text: response_text.clone(),
-                        task_id,
-                    });
-                }
+            // Broadcast results to WebSocket (always — including rumination).
+            // Rumination summaries appear in the chat so the human can see what
+            // the ANT was thinking, whether they were watching or not.
+            if let Some(ref tx) = etx {
+                // For background rumination, use chat_id 0 so it appears as a
+                // system message rather than being tied to a specific user.
+                let broadcast_chat_id = if req_source == "rumination" && chat_id < 0 { 0 } else { chat_id };
+                let _ = tx.send(crate::registry::WsEvent::Message {
+                    bot: bname.to_string(),
+                    chat_id: broadcast_chat_id,
+                    text: response_text.clone(),
+                    task_id,
+                });
+            }
 
+            if req_source != "rumination" {
                 // Forward response to Telegram if from another channel and sync is enabled.
                 if cfg.sync_channels && req_source != "telegram" && tg_chat != 0 {
                     let _ = ttx.send((tg_chat, response_text.clone()));
