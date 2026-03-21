@@ -2915,6 +2915,13 @@ impl CachedGraph {
         archived
     }
 
+    /// Force reload from disk on next access.
+    pub fn invalidate(&self) {
+        if let Ok(mut mtime) = self.last_mtime.lock() {
+            *mtime = None;
+        }
+    }
+
     /// Run graph consolidation: dedup nodes, merge edges, collapse chains.
     /// Returns a report of what was done.
     pub fn consolidate(&self) -> ConsolidationReport {

@@ -20,6 +20,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::ai_worker::{CliRequest, TaskMap};
+use crate::store::KnowledgeStore;
+use crate::store::live::LiveKnowledgeStore;
 use crate::config::RuminationConfig;
 use crate::registry::WsEvent;
 
@@ -181,44 +183,54 @@ async fn run_rumination(
 ) {
     log::info!("[{}] Rumination cycle starting", config.ant_name);
     let mut log = RuminationLog::load(&config.memory_dir);
+    let store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
 
     // 0. Compute corroboration strength across all topic graphs.
-    run_corroboration_update(config);
+    if let Ok(graphs) = store.list_graphs() {
+        for g in &graphs {
+            if g.node_count >= 2 {
+                let _ = store.compute_corroboration_strength(&g.name);
+            }
+        }
+    }
 
     // 1. Synthesis first — cheap, no AI tokens.
     if config.rumination.synthesis_enabled {
-        let count = run_synthesis(config, &mut log);
+        let count = run_synthesis(config, &store, &mut log);
         if count > 0 {
             log::info!("[{}] Synthesis created {} new edges", config.ant_name, count);
         }
     }
 
     // 1b. Investigate undetermined connections ('?' edges).
-    run_undetermined_connections(config, request_tx, &mut log);
+    run_undetermined_connections(config, &store, request_tx, &mut log);
 
     // 2. Competition — pit similar ideas against each other.
-    run_competition(config, request_tx, &mut log);
+    run_competition(config, &store, request_tx, &mut log);
 
     // 3. Cross-domain pattern transfer — find insights across topics.
-    run_pattern_transfer(config, request_tx, &mut log);
+    run_pattern_transfer(config, &store, request_tx, &mut log);
 
     // 4. Active refutation — core capability.
     if config.rumination.refutation_enabled {
-        run_refutation(config, request_tx, &mut log);
+        run_refutation(config, &store, request_tx, &mut log);
     }
 
     // 5. Contradiction resolution.
     if config.rumination.contradiction_resolution {
-        run_contradiction_resolution(config, request_tx, &mut log);
+        run_contradiction_resolution(config, &store, request_tx, &mut log);
     }
 
     // 6. Autonomous initiative (most expensive, opt-in).
     if config.rumination.initiative_enabled {
-        run_initiative(config, request_tx, &mut log);
+        run_initiative(config, &store, request_tx, &mut log);
     }
 
     // 7. Meta-rumination — review and evolve the thinking process itself.
-    run_meta_rumination(config, request_tx, &mut log);
+    run_meta_rumination(config, &store, request_tx, &mut log);
+
+    // Drop the store to release locks before consolidation.
+    drop(store);
 
     // Post a short summary to the chat history so the human can see what happened.
     let summary = build_rumination_summary(&log);
@@ -258,32 +270,17 @@ fn run_corroboration_update(config: &MaintenanceConfig) {
 /// Find '?' edges (undetermined connections) and ask the AI to investigate them.
 fn run_undetermined_connections(
     config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
-
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
     let mut sent = 0u32;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let kg = crate::knowledge::KnowledgeGraph::load(&path);
-        let undetermined = kg.undetermined_connections(3);
+    for topic in filtered_topics(config, store) {
+        let undetermined = match store.undetermined_connections(&topic, 3) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
 
         for (from, to) in &undetermined {
             let prompt = format!(
@@ -333,36 +330,19 @@ fn run_undetermined_connections(
 // ── Darwinian Competition ───────────────────────────────────────────
 
 /// Find competing hypotheses and send research prompts to evaluate them.
-/// Ideas that explain the same thing compete; the stronger is reinforced,
-/// the weaker is penalised. Source quality and beneficial impact matter.
 fn run_competition(
     config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
-
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
     let mut sent = 0u32;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let kg = crate::knowledge::KnowledgeGraph::load(&path);
-        let groups = kg.find_competitors();
+    for topic in filtered_topics(config, store) {
+        let groups = match store.find_competitors(&topic) {
+            Ok(g) => g,
+            Err(_) => continue,
+        };
 
         for group in groups.iter().take(1) {
             let competitors_desc: Vec<String> = group.competitors.iter()
@@ -427,52 +407,23 @@ fn run_competition(
 /// the insight can strengthen both.
 fn run_pattern_transfer(
     config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
-
-    // Load all topic graphs.
-    let mut topic_graphs: Vec<(String, crate::knowledge::KnowledgeGraph)> = Vec::new();
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let kg = crate::knowledge::KnowledgeGraph::load(&path);
-        if kg.node_count() >= 3 {
-            topic_graphs.push((topic, kg));
-        }
-    }
-
-    if topic_graphs.len() < 2 { return; }
+    let topics = filtered_topics(config, store);
+    if topics.len() < 2 { return; }
 
     // Compare each pair of topic graphs for patterns.
     let mut best_match: Option<(String, String, crate::knowledge::PatternMatch)> = None;
 
-    for i in 0..topic_graphs.len() {
-        for j in (i + 1)..topic_graphs.len() {
-            let patterns = topic_graphs[i].1.find_cross_domain_patterns(&topic_graphs[j].1, 1);
-            if let Some(pattern) = patterns.into_iter().next() {
-                // Only pick the best match (first found).
-                if best_match.is_none() {
-                    best_match = Some((
-                        topic_graphs[i].0.clone(),
-                        topic_graphs[j].0.clone(),
-                        pattern,
-                    ));
+    for i in 0..topics.len() {
+        for j in (i + 1)..topics.len() {
+            if let Ok(patterns) = store.cross_domain_patterns(&topics[i], &topics[j], 1) {
+                if let Some(pattern) = patterns.into_iter().next() {
+                    if best_match.is_none() {
+                        best_match = Some((topics[i].clone(), topics[j].clone(), pattern));
+                    }
                 }
             }
         }
@@ -531,38 +482,19 @@ fn run_pattern_transfer(
 // ── Synthesis (Phase 2) ─────────────────────────────────────────────
 
 /// Run idea synthesis on all topic graphs. Returns number of edges created.
-fn run_synthesis(config: &MaintenanceConfig, log: &mut RuminationLog) -> u32 {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return 0; }
-
+fn run_synthesis(config: &MaintenanceConfig, store: &LiveKnowledgeStore, log: &mut RuminationLog) -> u32 {
     let mut total_created = 0;
 
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return 0,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
-        if kg.node_count() < 3 { continue; }
-
-        let candidates = kg.synthesis_candidates(5);
-        if candidates.is_empty() { continue; }
+    for topic in filtered_topics(config, store) {
+        let candidates = match store.synthesis_candidates(&topic, 5) {
+            Ok(c) if !c.is_empty() => c,
+            _ => continue,
+        };
 
         let now = chrono_now();
         let mut created = 0u32;
 
-        for (a_idx, c_idx, b_label, r1, r2) in &candidates {
+        for (a_id, c_id, b_label, r1, r2) in &candidates {
             let relation = format!("{} (via {})", r1, b_label);
             let context = format!(
                 "Synthesised: {} → {} and {} → {} imply this transitive link",
@@ -574,12 +506,11 @@ fn run_synthesis(config: &MaintenanceConfig, log: &mut RuminationLog) -> u32 {
                 &now,
                 crate::knowledge::Basis::Inferred,
             );
-            kg.add_edge(*a_idx, *c_idx, edge);
+            let _ = store.add_edge_by_id(&topic, *a_id, *c_id, edge);
             created += 1;
         }
 
         if created > 0 {
-            kg.save();
             broadcast_graph_update(config, &topic, "rumination");
             total_created += created;
 
@@ -606,33 +537,17 @@ fn run_synthesis(config: &MaintenanceConfig, log: &mut RuminationLog) -> u32 {
 /// Pick beliefs to challenge and send refutation prompts to the AI.
 fn run_refutation(
     config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
-
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
     let mut all_candidates: Vec<(String, String, String, String, f64, f64)> = Vec::new();
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let kg = crate::knowledge::KnowledgeGraph::load(&path);
-        for (from, to, relation, confidence, importance) in kg.refutation_candidates(3) {
-            all_candidates.push((topic.clone(), from, to, relation, confidence, importance));
+    for topic in filtered_topics(config, store) {
+        if let Ok(candidates) = store.refutation_candidates(&topic, 3) {
+            for (from, to, relation, confidence, importance) in candidates {
+                all_candidates.push((topic.clone(), from, to, relation, confidence, importance));
+            }
         }
     }
 
@@ -698,32 +613,17 @@ fn run_refutation(
 /// Find contradictions and send resolution prompts to the AI.
 fn run_contradiction_resolution(
     config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
-
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
     let mut sent = 0u32;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let kg = crate::knowledge::KnowledgeGraph::load(&path);
-        let pairs = kg.contradiction_pairs();
+    for topic in filtered_topics(config, store) {
+        let pairs = match store.contradiction_pairs(&topic) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
 
         for pair in pairs.iter().take(1) {
             let prompt = format!(
@@ -782,40 +682,21 @@ fn run_contradiction_resolution(
 /// Find weak spots in the knowledge and send improvement prompts.
 fn run_initiative(
     config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
-
     // Find the topic graph with the most uncertain edges.
     let mut weakest_topic: Option<(String, f64, usize)> = None;
 
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let topic = topic_name(&path);
-        if !config.rumination.topics.is_empty()
-            && !config.rumination.topics.iter().any(|t| t == &topic)
-        {
-            continue;
-        }
-
-        let kg = crate::knowledge::KnowledgeGraph::load(&path);
-        let stats = kg.uncertainty_stats();
-
-        // Score: more uncertain edges and lower average confidence = weaker.
-        if stats.edge_count > 0 {
-            let weakness_score = stats.uncertain_edge_count as f64 / stats.edge_count as f64;
-            match &weakest_topic {
-                Some((_, best_score, _)) if weakness_score <= *best_score => {}
-                _ => weakest_topic = Some((topic, weakness_score, stats.uncertain_edge_count)),
+    for topic in filtered_topics(config, store) {
+        if let Ok(stats) = store.uncertainty_stats(&topic) {
+            if stats.edge_count > 0 {
+                let weakness_score = stats.uncertain_edge_count as f64 / stats.edge_count as f64;
+                match &weakest_topic {
+                    Some((_, best_score, _)) if weakness_score <= *best_score => {}
+                    _ => weakest_topic = Some((topic, weakness_score, stats.uncertain_edge_count)),
+                }
             }
         }
     }
@@ -865,6 +746,7 @@ fn run_initiative(
 /// The thinking process itself is a conjecture — open to improvement.
 fn run_meta_rumination(
     config: &MaintenanceConfig,
+    _store: &LiveKnowledgeStore,
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
@@ -1098,27 +980,18 @@ fn run_consolidation(config: &MaintenanceConfig) {
 /// Cross-link topic graphs: find entities that appear in multiple topics
 /// and add cross-reference edges in the meta-graph.
 fn run_cross_linking(config: &MaintenanceConfig) {
-    let graphs_dir = config.memory_dir.join("graphs");
     let meta_path = config.memory_dir.join("knowledge.json");
-
-    if !graphs_dir.exists() { return; }
+    let store = LiveKnowledgeStore::new(config.memory_dir.clone());
 
     // Collect all entity labels per topic.
     let mut topic_entities: Vec<(String, Vec<String>)> = Vec::new();
 
-    if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map(|e| e == "json").unwrap_or(false)
-                && !path.to_string_lossy().contains("-archive")
-            {
-                let topic = path.file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let kg = crate::knowledge::KnowledgeGraph::load(&path);
-                let labels: Vec<String> = kg.all_node_labels();
+    if let Ok(graphs) = store.list_graphs() {
+        for g in &graphs {
+            if g.name == "meta" { continue; }
+            if let Ok(labels) = store.list_nodes(&g.name) {
                 if !labels.is_empty() {
-                    topic_entities.push((topic, labels));
+                    topic_entities.push((g.name.clone(), labels));
                 }
             }
         }
@@ -1286,6 +1159,22 @@ fn git_commit_memory(config: &MaintenanceConfig, message: &str) {
         .args(["commit", "-m", &commit_msg])
         .current_dir(working_dir)
         .output();
+}
+
+/// Get filtered topic graph names from the store.
+fn filtered_topics(config: &MaintenanceConfig, store: &LiveKnowledgeStore) -> Vec<String> {
+    let graphs = match store.list_graphs() {
+        Ok(g) => g,
+        Err(_) => return Vec::new(),
+    };
+    graphs.into_iter()
+        .filter(|g| g.name != "meta")
+        .filter(|g| {
+            config.rumination.topics.is_empty()
+                || config.rumination.topics.iter().any(|t| t == &g.name)
+        })
+        .map(|g| g.name)
+        .collect()
 }
 
 fn is_topic_graph(path: &std::path::Path) -> bool {

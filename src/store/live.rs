@@ -86,6 +86,14 @@ impl LiveKnowledgeStore {
         &self.memory_dir
     }
 
+    /// Add an edge by NodeId (for synthesis and other internal operations).
+    pub fn add_edge_by_id(&self, graph: &str, from: NodeId, to: NodeId, edge: crate::knowledge::KnowledgeEdge) -> StoreResult<EdgeId> {
+        self.with_graph_mut(graph, |kg| {
+            let eid = kg.graph.add_edge(from.0, to.0, edge);
+            Ok(EdgeId(eid))
+        })
+    }
+
     /// Render a query result using the graph's render method.
     /// This is a convenience for MCP/web consumers that need formatted output.
     pub fn with_graph_render(&self, graph: &str, result: &QueryResult) -> Option<String> {

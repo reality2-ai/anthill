@@ -741,8 +741,11 @@ pub async fn ai_worker_loop(
         log::warn!("Could not create memory dir {:?}: {}", config.memory_dir, e);
     }
 
-    // Knowledge graph — cached in memory, reloads when file changes on disk.
+    // Knowledge graph — accessed through the validated store.
     let knowledge_file = config.memory_dir.join("knowledge.json");
+    let knowledge_store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
+    // Keep CachedGraph for semantic rendering (uses Ollama embeddings).
+    // TODO: Move semantic rendering into the store.
     let knowledge_cache = crate::knowledge::CachedGraph::new(&knowledge_file);
 
     // Ollama client for embeddings and as an AI backend.
@@ -815,11 +818,18 @@ pub async fn ai_worker_loop(
             }
         }
 
-        // Periodic maintenance.
+        // Periodic maintenance via the store.
         request_count += 1;
         if request_count.is_multiple_of(50) {
-            // Consolidate: merge duplicate nodes, parallel edges, collapse chains.
-            knowledge_cache.consolidate();
+            use crate::store::KnowledgeStore;
+            // Consolidate all graphs.
+            if let Ok(graphs) = knowledge_store.list_graphs() {
+                for g in &graphs {
+                    let _ = knowledge_store.consolidate(&g.name);
+                }
+            }
+            // Invalidate the CachedGraph so it picks up changes.
+            knowledge_cache.invalidate();
         }
         if request_count.is_multiple_of(100) {
             // Archive low-confidence edges to separate file.
@@ -828,8 +838,14 @@ pub async fn ai_worker_loop(
         // Time-based confidence decay — runs on first request after 24h idle.
         let since_decay = last_decay.elapsed().as_secs();
         if since_decay > 86400 { // 24 hours
+            use crate::store::KnowledgeStore;
             let days = (since_decay / 86400) as u32;
-            knowledge_cache.apply_decay(days);
+            if let Ok(graphs) = knowledge_store.list_graphs() {
+                for g in &graphs {
+                    let _ = knowledge_store.apply_decay(&g.name, days);
+                }
+            }
+            knowledge_cache.invalidate();
             last_decay = Instant::now();
         }
 
