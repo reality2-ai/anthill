@@ -648,24 +648,51 @@ impl KnowledgeGraph {
                             "Knowledge graph corrupted at {}: {}",
                             path.display(), e
                         );
-                        // Preserve corrupted file for manual recovery.
+
+                        // Preserve corrupted file for investigation.
                         let corrupted = path.with_extension("json.corrupted");
                         let _ = std::fs::copy(path, &corrupted);
-                        log::warn!("Corrupted graph saved to {}", corrupted.display());
 
-                        // Try loading the archive as fallback.
-                        let archive = path.with_file_name("knowledge-archive.json");
-                        if archive.exists() {
-                            if let Ok(arc_contents) = std::fs::read_to_string(&archive) {
-                                if let Ok(data) = serde_json::from_str::<GraphData>(&arc_contents) {
+                        // Recovery strategy 1: git checkout (most reliable).
+                        // The working directory is a git repo — restore the last committed version.
+                        let git_recovered = std::process::Command::new("git")
+                            .args(["checkout", "HEAD", "--"])
+                            .arg(path.as_os_str())
+                            .current_dir(path.parent().and_then(|p| p.parent()).unwrap_or(Path::new(".")))
+                            .output()
+                            .ok()
+                            .map(|o| o.status.success())
+                            .unwrap_or(false);
+
+                        if git_recovered {
+                            // Re-read the restored file.
+                            if let Ok(restored) = std::fs::read_to_string(path) {
+                                if let Ok(data) = serde_json::from_str::<GraphData>(&restored) {
                                     kg.load_graph_data(&data);
                                     log::warn!(
-                                        "Recovered {} nodes from archive {}",
-                                        kg.graph.node_count(), archive.display()
+                                        "Recovered {} nodes via git checkout: {}",
+                                        kg.graph.node_count(), path.display()
                                     );
                                 }
                             }
                         }
+
+                        // Recovery strategy 2: archive fallback.
+                        if kg.graph.node_count() == 0 {
+                            let archive = path.with_file_name("knowledge-archive.json");
+                            if archive.exists() {
+                                if let Ok(arc_contents) = std::fs::read_to_string(&archive) {
+                                    if let Ok(data) = serde_json::from_str::<GraphData>(&arc_contents) {
+                                        kg.load_graph_data(&data);
+                                        log::warn!(
+                                            "Recovered {} nodes from archive {}",
+                                            kg.graph.node_count(), archive.display()
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
                         if kg.graph.node_count() == 0 {
                             log::error!("No recovery possible — starting with empty graph");
                         }
@@ -851,7 +878,16 @@ impl KnowledgeGraph {
         let data = self.to_serializable();
         if let Ok(json) = serde_json::to_string_pretty(&data) {
             let tmp = self.file_path.with_extension("json.tmp");
-            if std::fs::write(&tmp, &json).is_ok() {
+            // Write + fsync to ensure data hits disk before rename.
+            // Prevents corruption from process kill between write and flush.
+            let write_ok = (|| -> std::io::Result<()> {
+                use std::io::Write;
+                let mut f = std::fs::File::create(&tmp)?;
+                f.write_all(json.as_bytes())?;
+                f.sync_all()?; // fsync — data is on disk
+                Ok(())
+            })();
+            if write_ok.is_ok() {
                 let _ = std::fs::rename(&tmp, &self.file_path);
             }
         }

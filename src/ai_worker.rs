@@ -317,8 +317,44 @@ Your working directory has the following structure:\
 \n- repos/ — for cloning git repositories (NOT backed up, repos have their own git history)\
 \n\
 \nWhen cloning repositories, ALWAYS clone into the repos/ subdirectory.\
-\nThe working directory is a git repo that is automatically committed on a schedule. \
-The repos/ folder is excluded from these backups via .gitignore since cloned repos \
+\nThe working directory is a LOCAL GIT REPO. Use git actively as a thinking tool:\
+\n\
+\nGIT AS A REASONING TOOL:\
+\n  Your working directory is version-controlled. Use this deliberately:\
+\n\
+\n  BEFORE modifying knowledge graphs:\
+\n    git add -A && git commit -m 'pre-rumination: <what you plan to test>'\
+\n    This creates a restore point. If your changes make things worse, revert.\
+\n\
+\n  AFTER modifying knowledge graphs:\
+\n    git add -A && git commit -m 'rumination: <what you changed and why>'\
+\n    Commit messages are your thinking journal — be specific about what you\
+\n    tested, what survived, what was weakened, and why.\
+\n\
+\n  TO REVIEW KNOWLEDGE EVOLUTION:\
+\n    git log --oneline memory/graphs/  — see how your understanding evolved\
+\n    git diff HEAD~1 memory/graphs/topic.json  — see what changed last time\
+\n    git log -p --follow memory/graphs/topic.json  — full history of a topic\
+\n    Use this during meta-rumination to evaluate whether your process is improving.\
+\n\
+\n  TO RECOVER FROM BAD CHANGES:\
+\n    git checkout HEAD -- memory/graphs/topic.json  — restore last committed version\
+\n    git diff  — see uncommitted changes before deciding to keep or revert\
+\n    If a rumination cycle made things worse (lowered overall confidence without\
+\n    good reason, or introduced spurious edges), revert and try a different approach.\
+\n\
+\n  TO EXPERIMENT SAFELY:\
+\n    git stash  — save current state, experiment freely\
+\n    git stash pop  — restore if the experiment didn't work\
+\n    Use this when you want to try a radical reinterpretation without risk.\
+\n\
+\n  Good commit messages look like:\
+\n    'refutation: tested A→B edge, survived (found X but it didn't disprove)'\
+\n    'synthesis: added 3 transitive edges in infrastructure topic'\
+\n    'revert: competition cycle weakened well-supported edges, rolling back'\
+\n    'meta: updated thinking_process.md — focused refutation strategy v2'\
+\n\
+\n  The repos/ folder is excluded from these backups via .gitignore since cloned repos \
 already have their own version control.";
 
 // ── Questions for Human ─────────────────────────────────────────────

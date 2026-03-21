@@ -226,6 +226,9 @@ async fn run_rumination(
         post_to_chat_history(config, &summary);
     }
 
+    // Git commit after rumination — creates a meaningful restore point.
+    git_commit_memory(config, "rumination cycle complete");
+
     log::info!("[{}] Rumination cycle complete", config.ant_name);
 }
 
@@ -1009,24 +1012,43 @@ fn run_file_housekeeping(config: &MaintenanceConfig) {
         }
     }
 
-    // Also clean up .corrupted and .tmp files inside graphs/.
-    if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let filename = path.file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") {
-                let _ = std::fs::remove_file(&path);
-                cleaned += 1;
-            }
-        }
-    }
+    // Recursively clean up .corrupted and .tmp files in memory/ and all subdirectories.
+    cleaned += clean_temp_files_recursive(&config.memory_dir);
 
     if moved > 0 || cleaned > 0 {
         log::info!("[{}] Housekeeping: moved {} stray graphs, cleaned {} temp files",
             config.ant_name, moved, cleaned);
     }
+}
+
+/// Recursively clean .corrupted and .tmp files from a directory and all subdirectories.
+fn clean_temp_files_recursive(dir: &std::path::Path) -> u32 {
+    let mut cleaned = 0u32;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Recurse into subdirectories.
+            cleaned += clean_temp_files_recursive(&path);
+        } else if path.is_file() {
+            let filename = path.file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp")
+                || filename.ends_with(".tmp")
+            {
+                if std::fs::remove_file(&path).is_ok() {
+                    cleaned += 1;
+                    log::debug!("Cleaned up: {}", path.display());
+                }
+            }
+        }
+    }
+    cleaned
 }
 
 fn run_consolidation(config: &MaintenanceConfig) {
@@ -1247,6 +1269,40 @@ fn broadcast_graph_update(config: &MaintenanceConfig, graph_name: &str, source: 
             source: source.into(),
         });
     }
+}
+
+/// Commit memory changes to local git with a descriptive message.
+fn git_commit_memory(config: &MaintenanceConfig, message: &str) {
+    // The working directory (parent of memory/) is the git repo root.
+    let working_dir = config.memory_dir.parent().unwrap_or(&config.memory_dir);
+
+    // Stage all memory changes.
+    let add_result = std::process::Command::new("git")
+        .args(["add", "memory/"])
+        .current_dir(working_dir)
+        .output();
+
+    if let Ok(output) = add_result {
+        if !output.status.success() { return; }
+    } else {
+        return;
+    }
+
+    // Check if there's anything to commit.
+    let status = std::process::Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .current_dir(working_dir)
+        .output();
+
+    let has_changes = status.map(|o| !o.status.success()).unwrap_or(false);
+    if !has_changes { return; }
+
+    // Commit with descriptive message.
+    let commit_msg = format!("[{}] {}", config.ant_name, message);
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", &commit_msg])
+        .current_dir(working_dir)
+        .output();
 }
 
 fn is_topic_graph(path: &std::path::Path) -> bool {
