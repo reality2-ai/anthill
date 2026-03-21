@@ -10,6 +10,7 @@ mod ai_worker;
 mod config;
 mod dateutil;
 mod epistemic;
+mod export;
 mod events;
 mod history;
 mod knowledge;
@@ -115,6 +116,19 @@ struct Args {
     /// Reads JSON, writes .cbor files, keeps JSON as backup.
     #[arg(long)]
     migrate_to_cbor: Option<PathBuf>,
+
+    /// Export an ANT's knowledge graphs as a self-contained HTML file.
+    /// Opens in any browser — 3D graph, search, click-to-explore. No server needed.
+    #[arg(long)]
+    export_graph: bool,
+
+    /// ANT name for --export-graph.
+    #[arg(long)]
+    ant: Option<String>,
+
+    /// Output file for --export-graph (default: <ant>-knowledge.html).
+    #[arg(long, short)]
+    output: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -257,6 +271,45 @@ async fn main() -> anyhow::Result<()> {
     // Migrate graphs — fix invalid values, clean up.
     if let Some(ref dir) = args.migrate_graphs {
         store::migration::migrate_all(dir);
+        return Ok(());
+    }
+
+    // Export graph as self-contained HTML.
+    if args.export_graph {
+        let ant_name = args.ant.as_deref().unwrap_or_else(|| {
+            eprintln!("Error: --ant <name> is required for --export-graph");
+            std::process::exit(1);
+        });
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let ants_dir = PathBuf::from(&home).join(".config/anthill/ants");
+
+        // Read ant.toml to find memory dir.
+        let ant_dir = ants_dir.join(ant_name);
+        let config_path = ant_dir.join("ant.toml");
+        let memory_dir = if config_path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&config_path) {
+                if let Ok(cfg) = toml::from_str::<config::Config>(&contents) {
+                    if let Some(wd) = &cfg.claude.working_dir {
+                        PathBuf::from(wd).join(&cfg.claude.memory_dir)
+                    } else {
+                        ant_dir.join("working").join("memory")
+                    }
+                } else {
+                    ant_dir.join("working").join("memory")
+                }
+            } else {
+                ant_dir.join("working").join("memory")
+            }
+        } else {
+            ant_dir.join("working").join("memory")
+        };
+
+        let output = args.output.unwrap_or_else(|| PathBuf::from(format!("{}-knowledge.html", ant_name)));
+
+        if let Err(e) = export::export_ant_graphs(&memory_dir, ant_name, &output) {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
