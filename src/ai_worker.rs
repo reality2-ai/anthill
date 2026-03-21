@@ -1085,6 +1085,14 @@ pub async fn ai_worker_loop(
             } else {
                 log::info!("[{}] Rumination task #{} complete ({} chars)",
                     bname, task_id, response_text.len());
+                // Broadcast graph update — the AI likely modified graph files.
+                if let Some(ref tx) = etx {
+                    let _ = tx.send(crate::registry::WsEvent::GraphUpdated {
+                        bot: bname.to_string(),
+                        graph: "all".into(),
+                        source: "rumination".into(),
+                    });
+                }
             }
 
             // Remove from running tasks and broadcast completion.

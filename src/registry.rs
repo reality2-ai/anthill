@@ -66,6 +66,15 @@ pub enum WsEvent {
     /// Bot status changed.
     #[serde(rename = "bot_status")]
     BotStatus { bot: String, status: String },
+    /// Knowledge graph was updated (triggers live graph refresh in dashboard).
+    #[serde(rename = "graph_updated")]
+    GraphUpdated {
+        bot: String,
+        /// Which graph changed: "meta", or a topic name like "anthill".
+        graph: String,
+        /// What caused the update: "rumination", "consolidation", "user".
+        source: String,
+    },
 }
 
 /// Status of a bot.

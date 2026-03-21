@@ -947,6 +947,19 @@ function handleEvent(msg) {
       renderBotList();
       break;
 
+    case 'graph_updated':
+      // Live graph refresh — reload the graph if we're viewing it for this bot.
+      if (currentTab === 'graph' && state.activeBot === msg.bot) {
+        const selector = document.getElementById('graph-selector');
+        const currentGraph = selector ? selector.value : '';
+        // Refresh if the updated graph matches what we're viewing, or if 'all' changed.
+        if (msg.graph === 'all' || msg.graph === currentGraph || currentGraph === '') {
+          console.log('Live graph refresh:', msg.graph, 'source:', msg.source);
+          loadGraph(currentGraph);
+        }
+      }
+      break;
+
     case 'lag_warning':
       // Server detected that this client fell behind — some events were dropped.
       console.warn('WebSocket lag: ' + msg.dropped + ' events dropped');

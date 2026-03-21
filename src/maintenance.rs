@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 
 use crate::ai_worker::{CliRequest, TaskMap};
 use crate::config::RuminationConfig;
+use crate::registry::WsEvent;
 
 /// System chat_id for rumination requests — negative to avoid collision with real users.
 const RUMINATION_CHAT_ID: i64 = -1;
@@ -41,6 +42,8 @@ pub struct MaintenanceConfig {
     pub tasks: Option<TaskMap>,
     /// Rumination engine configuration.
     pub rumination: RuminationConfig,
+    /// Event broadcast channel for live graph updates in the dashboard.
+    pub event_tx: Option<tokio::sync::broadcast::Sender<WsEvent>>,
 }
 
 /// A single entry in the rumination log.
@@ -231,6 +234,7 @@ fn run_corroboration_update(config: &MaintenanceConfig) {
 
         kg.compute_corroboration_strength();
         kg.save();
+        broadcast_graph_update(config, &topic_name(&path), "rumination");
     }
 }
 
@@ -483,6 +487,7 @@ fn run_synthesis(config: &MaintenanceConfig, log: &mut RuminationLog) -> u32 {
 
         if created > 0 {
             kg.save();
+            broadcast_graph_update(config, &topic, "rumination");
             total_created += created;
 
             let a_labels: Vec<String> = candidates.iter()
@@ -771,6 +776,7 @@ fn run_consolidation(config: &MaintenanceConfig) {
             let report = kg.consolidate();
             if report.nodes_merged > 0 || report.edges_merged > 0 || report.chains_collapsed > 0 {
                 kg.save();
+                broadcast_graph_update(config, "meta", "consolidation");
                 log::info!("[{}] Meta-graph consolidated: {} merged, {} edges merged, {} collapsed",
                     config.ant_name, report.nodes_merged, report.edges_merged, report.chains_collapsed);
             }
@@ -807,6 +813,7 @@ fn run_consolidation(config: &MaintenanceConfig) {
                             config.ant_name, topic, report.nodes_merged, report.edges_merged);
                     }
                     kg.save();
+                    broadcast_graph_update(config, &topic, "consolidation");
                     for warning in &report.contradictions {
                         log::warn!("[{}] Topic '{}' contradiction: {}", config.ant_name, topic, warning);
                     }
@@ -890,6 +897,7 @@ fn run_cross_linking(config: &MaintenanceConfig) {
     if added > 0 {
         meta.rebuild_index();
         meta.save();
+        broadcast_graph_update(config, "meta", "consolidation");
         log::info!("[{}] Cross-linked {} topic pairs in meta-graph", config.ant_name, added);
     }
 }
@@ -960,6 +968,17 @@ fn post_to_chat_history(config: &MaintenanceConfig, summary: &str) {
         {
             let _ = writeln!(f, "{}", json);
         }
+    }
+}
+
+/// Broadcast a graph update event so the dashboard refreshes in real time.
+fn broadcast_graph_update(config: &MaintenanceConfig, graph_name: &str, source: &str) {
+    if let Some(ref tx) = config.event_tx {
+        let _ = tx.send(WsEvent::GraphUpdated {
+            bot: config.ant_name.clone(),
+            graph: graph_name.into(),
+            source: source.into(),
+        });
     }
 }
 

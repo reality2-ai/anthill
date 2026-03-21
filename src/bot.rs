@@ -131,6 +131,7 @@ pub async fn run_bot(
     // Clone channels for the maintenance daemon before they're moved to the worker.
     let maintenance_tasks = Arc::clone(&tasks);
     let maintenance_request_tx = request_tx.clone();
+    let maintenance_event_tx = global_event_tx.clone().or_else(|| Some(event_tx.clone()));
 
     tokio::spawn(ai_worker::ai_worker_loop(
         request_rx,
@@ -169,6 +170,7 @@ pub async fn run_bot(
         request_tx: Some(maintenance_request_tx),
         tasks: Some(maintenance_tasks),
         rumination: cfg.claude.rumination.clone(),
+        event_tx: maintenance_event_tx,
     }));
 
     bus.init_all();
