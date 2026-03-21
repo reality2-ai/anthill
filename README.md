@@ -24,8 +24,8 @@ Anthill runs AI agents on a server and lets you interact with them from any devi
 Each ANT has its own personality, workspace, persistent knowledge store, and can run multiple tasks concurrently. Access is secured by R2's trust group model — devices join the colony via one-time codes, and every request is authenticated with HMAC-signed envelopes. The web dashboard is accessed securely over [Tailscale](https://tailscale.com/).
 
 <p align="center">
-  <img src="docs/screenshots/graph-vocabulary-dark.png" alt="3D Knowledge Graph — Sven's vocabulary" width="800">
-  <br><em>3D knowledge graph visualisation — Sven's te reo Māori vocabulary with confidence-weighted edges</em>
+  <img src="docs/screenshots/graph-vocabulary-dark.png" alt="3D Knowledge Graph" width="800">
+  <br><em>3D knowledge graph visualisation — Alfred's meta-graph with confidence-weighted edges</em>
 </p>
 
 <p align="center">
@@ -119,8 +119,6 @@ Decay rates depend on the category of knowledge:
 **Events carry decisions** (< 256 bytes). **Plugins carry data** (unlimited). This separation is enforced by design — the 256-byte limit ensures sentants never see raw content, making prompt injection via the event bus structurally impossible.
 
 **The Knowledge Store** sits behind a trait boundary (`KnowledgeStore`). The AI cannot edit graph files directly — all mutations pass through validated write operations that enforce field constraints, apply Bayesian updates, detect confirmation bias, and auto-commit to git.
-
-![Anthill Architecture](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFZpZXdlcnMKICAgICAgICBQaG9uZVtQaG9uZSBicm93c2VyXQogICAgICAgIExhcHRvcFtMYXB0b3AgYnJvd3Nlcl0KICAgICAgICBUR1tUZWxlZ3JhbSBhcHBdCiAgICAgICAgU0xbU2xhY2sgYXBwXQogICAgZW5kCgogICAgc3ViZ3JhcGggU2VydmVyW1NlcnZlciAtIHRoZSBRdWVlbl0KICAgICAgICBzdWJncmFwaCBBTlRbRWFjaCBBTlRdCiAgICAgICAgICAgIHN1YmdyYXBoIEZTTXNbU2VudGFudCAtIHB1cmUgRlNNXQogICAgICAgICAgICAgICAgQ1NbQ29uZHVjdG9yXQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgc3ViZ3JhcGggUGx1Z2luc1tQbHVnaW5zIC0gYWxsIEkvT10KICAgICAgICAgICAgICAgIEFQW0FJUGx1Z2luXQogICAgICAgICAgICAgICAgVFBbVGVsZWdyYW1QbHVnaW5dCiAgICAgICAgICAgICAgICBTUFtTbGFja1BsdWdpbl0KICAgICAgICAgICAgZW5kCiAgICAgICAgICAgIHN1YmdyYXBoIE1lbW9yeVtNZW1vcnldCiAgICAgICAgICAgICAgICBLR1tLbm93bGVkZ2UgR3JhcGhdCiAgICAgICAgICAgICAgICBFUFtFcGlzb2Rlc10KICAgICAgICAgICAgICAgIFVNW1VzZXIgTWVtb3J5XQogICAgICAgICAgICBlbmQKICAgICAgICAgICAgV1tXb3JrZXIgKyBXYXRjaGRvZ10KICAgICAgICBlbmQKICAgICAgICBTVVBbU3VwZXJ2aXNvcl0KICAgICAgICBUUlVTVFtSMi1UUlVTVCBDb2xvbnldCiAgICAgICAgV0VCW1dlYiBTZXJ2ZXJdCiAgICBlbmQKCiAgICBzdWJncmFwaCBCYWNrZW5kc1tBSSBCYWNrZW5kc10KICAgICAgICBDbGF1ZGVbQ2xhdWRlIENvZGVdCiAgICAgICAgQ29kZXhbT3BlbkFJIENvZGV4XQogICAgICAgIE9MW09sbGFtYV06OjpmdXR1cmUKICAgIGVuZAoKICAgIFBob25lIDwtLT58dHJ1c3QgZ3JvdXAgYXV0aHwgV0VCCiAgICBMYXB0b3AgPC0tPnx0cnVzdCBncm91cCBhdXRofCBXRUIKICAgIFRHIDwtLT4gVFAKICAgIFNMIDwtLT4gU1AKICAgIFdFQiA8LS0+fGV2ZW50c3wgQ1MKICAgIFRQIDwtLT58ZXZlbnRzfCBDUwogICAgU1AgPC0tPnxldmVudHN8IENTCiAgICBDUyA8LS0+fHBsdWdpbl9jYWxsfCBBUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBUUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBTUAogICAgQVAgPC0tPnxkYXRhIHBsYW5lfCBXRUIKICAgIEFQIC0tPiBXCiAgICBXIDwtLT4gQ2xhdWRlCiAgICBXIDwtLT4gQ29kZXgKICAgIFcgLS4tPnxjb21pbmcgc29vbnwgT0wKICAgIFcgLS0+IEtHCiAgICBXIC0tPiBFUAoKICAgIGNsYXNzRGVmIGZ1dHVyZSBzdHJva2UtZGFzaGFycmF5OiA1IDUsb3BhY2l0eTowLjUK)
 
 ---
 
