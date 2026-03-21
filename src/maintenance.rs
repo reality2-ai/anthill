@@ -217,6 +217,9 @@ async fn run_rumination(
         run_initiative(config, request_tx, &mut log);
     }
 
+    // 7. Meta-rumination — review and evolve the thinking process itself.
+    run_meta_rumination(config, request_tx, &mut log);
+
     // Post a short summary to the chat history so the human can see what happened.
     let summary = build_rumination_summary(&log);
     if !summary.is_empty() {
@@ -858,6 +861,86 @@ fn run_initiative(
 // ── Existing maintenance functions ──────────────────────────────────
 
 /// Consolidate all topic graphs and the meta-graph.
+// ── Meta-Rumination (Self-Modification) ─────────────────────────────
+
+/// Review and evolve the ANT's own thinking process.
+/// The thinking process itself is a conjecture — open to improvement.
+fn run_meta_rumination(
+    config: &MaintenanceConfig,
+    request_tx: &mpsc::UnboundedSender<CliRequest>,
+    log: &mut RuminationLog,
+) {
+    // Only run meta-rumination occasionally — every ~5 cycles.
+    // Check if the rumination log has enough entries to warrant self-review.
+    let rumination_count = log.entries.len();
+    if rumination_count < 10 || rumination_count % 5 != 0 {
+        return;
+    }
+
+    // Gather recent rumination stats for the prompt.
+    let recent = &log.entries[log.entries.len().saturating_sub(20)..];
+    let inconsequential = recent.iter().filter(|e| e.description.contains("inconsequential")).count();
+    let total_recent = recent.len();
+
+    let thinking_process_file = config.memory_dir.join("thinking_process.md");
+    let has_process = thinking_process_file.exists();
+
+    let prompt = format!(
+        "RUMINATION — META-COGNITION (self-review)\n\n\
+         Review your own thinking process and consider whether it can be improved.\n\n\
+         Recent rumination stats ({} entries in last batch):\n\
+         - {} resulted in 'inconsequential_search' (found nothing)\n\
+         - That's {:.0}% inconsequential rate\n\n\
+         Your thinking process file: memory/thinking_process.md {}\n\
+         Your meta-cognition graph: memory/graphs/meta-cognition.json\n\n\
+         Consider:\n\
+         1. Are your refutation attempts actually rigorous, or are you just searching\n\
+            broadly and finding nothing? If many are inconsequential, your strategy\n\
+            needs improvement.\n\
+         2. Are you selecting the RIGHT beliefs to test? Maybe you should focus on\n\
+            beliefs that are more central, or more recent, or more likely to be wrong.\n\
+         3. Is your evidence evaluation honest? Are you inflating confidence because\n\
+            ideas 'seem right'? Or being too harsh?\n\
+         4. What worked well? What didn't? Record observations in the meta-cognition\n\
+            topic graph.\n\
+         5. If you identify an improvement to your process, update thinking_process.md.\n\
+            Include: what you changed, why, and what you expect to improve.\n\
+         6. Every change to your thinking process is itself a CONJECTURE — it should be\n\
+            tested and refined, not assumed to be better.\n\n\
+         The goal: evolve a thinking process that grows STRONGER ideas — ideas that\n\
+         survive genuine scrutiny, are well-sourced, well-corroborated, and beneficial\n\
+         for people and the planet.{}",
+        total_recent,
+        inconsequential,
+        if total_recent > 0 { inconsequential as f64 / total_recent as f64 * 100.0 } else { 0.0 },
+        if has_process { "(exists — review and improve)" } else { "(doesn't exist yet — create it)" },
+        RUMINATION_STOP_DIRECTIVE,
+    );
+
+    let _ = request_tx.send(CliRequest {
+        chat_id: RUMINATION_CHAT_ID,
+        message: prompt,
+        new_session: true,
+        task_id: 0,
+        source: "rumination".into(),
+    });
+
+    log.append(RuminationEntry {
+        timestamp: chrono_now(),
+        kind: "meta".into(),
+        topic: "meta-cognition".into(),
+        description: format!(
+            "Self-review: {}/{} recent ruminations inconsequential ({:.0}%)",
+            inconsequential, total_recent,
+            if total_recent > 0 { inconsequential as f64 / total_recent as f64 * 100.0 } else { 0.0 },
+        ),
+        edges_created: 0,
+        edges_updated: 0,
+    }, &config.memory_dir);
+}
+
+// ── Existing maintenance functions ──────────────────────────────────
+
 fn run_consolidation(config: &MaintenanceConfig) {
     let graphs_dir = config.memory_dir.join("graphs");
     let meta_path = config.memory_dir.join("knowledge.json");

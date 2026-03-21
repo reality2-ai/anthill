@@ -243,6 +243,27 @@ ALL knowledge MUST go into topic graphs in memory/graphs/<topic>.json — NOT in
 - WHEN TO UPDATE THE META-GRAPH: after creating a new topic graph, add a node for it in\n\
   knowledge.json (kind: 'concept', tags: ['graph', 'topic']) with edges to related topics.\n\
 - NEVER put domain-specific nodes (people, tools, decisions) in knowledge.json — always in a topic graph.\n\n\
+SELF-MODIFICATION — memory/thinking_process.md:\n\
+Your thinking process itself is a conjecture, open to refutation and improvement.\n\
+The file memory/thinking_process.md contains YOUR OWN evolved methodology — refinements\n\
+to how you reason, refute, synthesise, and evaluate ideas. You wrote it. You can change it.\n\n\
+Rules for self-modification:\n\
+  1. Any change must result in STRONGER ideas — not just different ones\n\
+  2. Changes are conjectures: record WHY you changed your process and WHAT you expect\n\
+     to improve. If the change doesn't help, revert it.\n\
+  3. You can modify: how you select beliefs to test, what counts as evidence,\n\
+     how you evaluate competing hypotheses, your refutation strategies\n\
+  4. You CANNOT modify: the Bayesian math (log-odds, Bayes factors), the evidence_log\n\
+     format, the graph JSON structure — these are architectural invariants\n\
+  5. Keep a changelog at the top of the file so you can track what you tried\n\
+  6. The meta-cognition topic graph (memory/graphs/meta-cognition.json) is where you\n\
+     record observations about your OWN thinking process as conjectures\n\n\
+Example thinking_process.md entry:\n\
+  ## Refutation Strategy (v3, 2026-03-22)\n\
+  When refuting, I now start by identifying the STRONGEST possible counter-argument\n\
+  before looking for evidence. Previously I searched broadly, which led to\n\
+  inconsequential searches. Focused attack is more productive.\n\
+  Changed because: 8/10 refutation attempts were inconsequential_search.\n\n\
 QUESTIONS FOR HUMAN — memory/questions.json:\n\
 When ruminating or analysing, if you encounter something that needs human input —\n\
 a decision, a clarification, an opinion on competing hypotheses — write it to\n\
@@ -1395,6 +1416,18 @@ fn build_system_prompt(
         knowledge_file.display(),
         user_memory_file.display()
     ));
+
+    // Self-evolved thinking process — the ANT's own methodology refinements.
+    // This file is a conjecture itself: the ANT can modify it to improve how it thinks.
+    let thinking_process_file = knowledge_file.parent()
+        .map(|p| p.join("thinking_process.md"))
+        .unwrap_or_default();
+    let thinking_process = std::fs::read_to_string(&thinking_process_file).unwrap_or_default();
+    if !thinking_process.trim().is_empty() {
+        prompt.push_str("\n[THINKING PROCESS — self-evolved methodology]\n");
+        prompt.push_str(slice_safe(&thinking_process, 2048));
+        prompt.push_str("\n[/THINKING PROCESS]\n");
+    }
 
     // Dynamic sections — fit within remaining budget.
     // Knowledge graph gets the lion's share since it drives reasoning quality.
