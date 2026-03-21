@@ -28,6 +28,10 @@ const RUMINATION_CHAT_ID: i64 = -1;
 
 /// Appended to every rumination prompt to prevent the AI from asking "what next?"
 const RUMINATION_STOP_DIRECTIVE: &str = "\n\n\
+If you have questions that need human input (decisions, opinions, clarifications), \
+write them to memory/questions.json — the human will see them next time they come \
+online. Format: {\"questions\": [{\"timestamp\": \"YYYY-MM-DD\", \"topic\": \"...\", \
+\"question\": \"...\", \"context\": \"...\"}]}. Append to existing questions, don't overwrite.\n\n\
 IMPORTANT: This is an autonomous rumination task. Complete the work above, \
 update the graph files, then STOP. Do not ask follow-up questions. \
 Do not ask what to do next. Do not wait for input. \

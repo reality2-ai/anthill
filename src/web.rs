@@ -1255,6 +1255,7 @@ async fn handle_web_command(
             /analyse <file> — thematic analysis → knowledge graph\n\
             /reflect — review and consolidate knowledge graph\n\
             /ruminate — trigger a rumination cycle now\n\
+            /questions — show pending questions from rumination\n\
             /specify <file> — generate spec from code\n\
             /test-vectors <file> — generate test cases\n\n\
             Everything else is sent as a prompt to the AI.".into()
@@ -1504,6 +1505,25 @@ async fn handle_web_command(
                 out.push_str("**All required items present.**");
             }
             Some(out)
+        },
+        "/questions" => {
+            let memory_dir = handle.working_dir.join("memory");
+            drop(bots);
+            let questions_file = memory_dir.join("questions.json");
+            let queue = crate::ai_worker::QuestionsQueue::load(&questions_file);
+            if queue.questions.is_empty() {
+                Some("No pending questions from rumination.".into())
+            } else {
+                let mut text = format!("**{} pending question(s) from rumination:**\n\n", queue.questions.len());
+                for (i, q) in queue.questions.iter().enumerate() {
+                    text.push_str(&format!("{}. **{}**: {}\n", i + 1, q.topic, q.question));
+                    if !q.context.is_empty() {
+                        text.push_str(&format!("   _(context: {})_\n", q.context));
+                    }
+                }
+                text.push_str("\nAnswer these naturally in conversation. They'll be cleared when you next send a message.");
+                Some(text)
+            }
         },
         "/ruminate" => {
             drop(bots);

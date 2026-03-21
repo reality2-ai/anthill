@@ -32,6 +32,8 @@ pub const CMD_FOLLOWUP: u8 = 0x0A;  // Queue follow-up for a running task
 pub const CMD_ANALYSE: u8 = 0x0B;   // Thematic analysis of a file
 pub const CMD_REFLECT: u8 = 0x0C;   // Meta-analysis / reflect on knowledge graph
 pub const CMD_RUMINATE: u8 = 0x0F;  // Trigger rumination cycle manually
+#[allow(dead_code)]
+pub const CMD_QUESTIONS: u8 = 0x10; // Show pending questions from rumination
 pub const CMD_SPECIFY: u8 = 0x0D;   // Generate spec from code
 pub const CMD_TEST_VECTORS: u8 = 0x0E; // Generate test vectors from code/spec
 
@@ -48,6 +50,7 @@ const HELP_TEXT: &str = "\
 /analyse <file> — thematic analysis on a file → knowledge graph
 /reflect — review and consolidate the knowledge graph
 /ruminate — trigger a rumination cycle now (refute, synthesise, compete)
+/questions — show pending questions from rumination
 /specify <file> — generate a specification from code
 /test-vectors <file> — generate test vectors from code
 

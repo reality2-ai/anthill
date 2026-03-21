@@ -243,6 +243,15 @@ ALL knowledge MUST go into topic graphs in memory/graphs/<topic>.json — NOT in
 - WHEN TO UPDATE THE META-GRAPH: after creating a new topic graph, add a node for it in\n\
   knowledge.json (kind: 'concept', tags: ['graph', 'topic']) with edges to related topics.\n\
 - NEVER put domain-specific nodes (people, tools, decisions) in knowledge.json — always in a topic graph.\n\n\
+QUESTIONS FOR HUMAN — memory/questions.json:\n\
+When ruminating or analysing, if you encounter something that needs human input —\n\
+a decision, a clarification, an opinion on competing hypotheses — write it to\n\
+memory/questions.json. Format:\n\
+  {\"questions\": [{\"timestamp\": \"YYYY-MM-DD\", \"topic\": \"graph-name\",\n\
+    \"question\": \"Your question here\", \"context\": \"Why you're asking\"}]}\n\
+The human will see these questions next time they come online.\n\
+Keep questions specific and actionable — not vague. Good: 'Should we prioritise\n\
+performance or readability for the parser rewrite?' Bad: 'What do you think?'\n\n\
 REMINDER — RESIST CONFIRMATION BIAS:\n\
   Your instinct is to agree, confirm, and make ideas sound good. FIGHT THIS.\n\
   Strong ideas are built by trying to BREAK them, not by nodding along.\n\
@@ -290,6 +299,67 @@ Your working directory has the following structure:\
 \nThe working directory is a git repo that is automatically committed on a schedule. \
 The repos/ folder is excluded from these backups via .gitignore since cloned repos \
 already have their own version control.";
+
+// ── Questions for Human ─────────────────────────────────────────────
+
+/// A question the ANT wants to ask a human.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QuestionForHuman {
+    pub timestamp: String,
+    pub topic: String,
+    pub question: String,
+    /// What prompted this question (edge label, rumination context).
+    pub context: String,
+}
+
+/// Persistent questions queue.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct QuestionsQueue {
+    pub questions: Vec<QuestionForHuman>,
+}
+
+impl QuestionsQueue {
+    pub fn load(path: &std::path::Path) -> Self {
+        if path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                if let Ok(q) = serde_json::from_str(&contents) {
+                    return q;
+                }
+            }
+        }
+        Self::default()
+    }
+
+    pub fn save(&self, path: &std::path::Path) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, &json).is_ok() {
+                let _ = std::fs::rename(&tmp, path);
+            }
+        }
+    }
+}
+
+/// Load pending questions and clear the file. Returns formatted text if any exist.
+fn load_and_clear_questions(path: &std::path::Path) -> Option<String> {
+    let queue = QuestionsQueue::load(path);
+    if queue.questions.is_empty() { return None; }
+
+    let mut text = String::from("**Questions from rumination** — I was thinking while you were away and had some questions:\n\n");
+    for (i, q) in queue.questions.iter().enumerate() {
+        text.push_str(&format!("{}. **{}**: {}\n", i + 1, q.topic, q.question));
+        if !q.context.is_empty() {
+            text.push_str(&format!("   _(context: {})_\n", q.context));
+        }
+    }
+    text.push_str("\nYou can answer these naturally in conversation, or ignore them.\n");
+
+    // Clear the queue.
+    let empty = QuestionsQueue::default();
+    empty.save(path);
+
+    Some(text)
+}
 
 /// Detect which AI backends are installed on this system.
 pub fn detect_backends() -> Vec<(String, bool)> {
@@ -577,6 +647,9 @@ pub async fn ai_worker_loop(
     let mut request_count: u32 = 0;
     let mut last_decay = Instant::now();
 
+    // Track whether we've shown pending questions to this user in this session.
+    let mut questions_shown_to: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
     while let Some(req) = rx.recv().await {
         let is_rumination = req.source == "rumination";
 
@@ -600,6 +673,36 @@ pub async fn ai_worker_loop(
                 format!("# Memory — user {}\n\n", req.chat_id)
             };
             let _ = std::fs::write(&user_memory_file, header);
+        }
+
+        // Present pending questions from rumination on first human interaction.
+        if !is_rumination && req.chat_id > 0 && !questions_shown_to.contains(&req.chat_id) {
+            questions_shown_to.insert(req.chat_id);
+            let questions_file = config.memory_dir.join("questions.json");
+            if let Some(questions_text) = load_and_clear_questions(&questions_file) {
+                // Send as a bot message before processing the user's request.
+                if let Some(ref tx) = event_tx {
+                    let _ = tx.send(crate::registry::WsEvent::Message {
+                        bot: bot_name.to_string(),
+                        chat_id: req.chat_id,
+                        text: questions_text.clone(),
+                        task_id: 0,
+                    });
+                }
+                // Also send to Telegram if applicable.
+                let tg_chat = source_chat_ids.get("telegram").copied().unwrap_or(0);
+                if tg_chat != 0 {
+                    let _ = telegram_tx.send((tg_chat, questions_text.clone()));
+                }
+                // Push to response queue for R2 bus.
+                if let Ok(mut q) = response_queue.lock() {
+                    q.push_back(CliResponse {
+                        chat_id: req.chat_id,
+                        text: questions_text,
+                        task_id: 0,
+                    });
+                }
+            }
         }
 
         // Periodic maintenance.
