@@ -497,6 +497,15 @@ async fn get_graph(
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    let name = path.file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    // Skip archive, corrupted, and tmp files.
+                    if name.contains("-archive") || name.ends_with(".corrupted")
+                        || name.ends_with(".tmp")
+                    {
+                        continue;
+                    }
                     if let Some(stem) = path.file_stem() {
                         available.push(stem.to_string_lossy().to_string());
                     }

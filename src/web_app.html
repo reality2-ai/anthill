@@ -1598,7 +1598,11 @@ function switchTab(tab) {
   document.getElementById('graph-panel').style.display = tab === 'graph' ? 'flex' : 'none';
   if (tab === 'files' && state.activeBot) loadFiles('');
   if (tab === 'workers') renderWorkers();
-  if (tab === 'graph' && state.activeBot) loadGraph();
+  if (tab === 'graph' && state.activeBot) {
+    const selector = document.getElementById('graph-selector');
+    const current = selector && selector.value ? selector.value : '';
+    loadGraph(current);
+  }
 }
 
 // --- Workers view ---
