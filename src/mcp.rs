@@ -697,7 +697,7 @@ fn chrono_today() -> String {
     let mut m = 0;
     let mut d = remaining;
     for (i, &md) in month_days.iter().enumerate() {
-        let md = if i == 1 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) { 29 } else { md };
+        let md = if i == 1 && (y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400))) { 29 } else { md };
         if d < md { m = i + 1; break; }
         d -= md;
     }

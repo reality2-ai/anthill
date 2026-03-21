@@ -714,7 +714,7 @@ impl KnowledgeGraph {
                                             edge_count += 1;
                                         }
                                     }
-                                    log::info!(
+                                    log::debug!(
                                         "Loaded topic graph '{}': {} nodes, {} edges",
                                         topic, data.nodes.len(), edge_count
                                     );
@@ -984,8 +984,8 @@ impl KnowledgeGraph {
     /// Find competing hypotheses: edges between the same pair of nodes
     /// that offer alternative explanations (different relations).
     pub fn find_competitors(&self) -> Vec<CompetitorGroup> {
-        let mut pair_edges: HashMap<(usize, usize), Vec<(petgraph::graph::EdgeIndex, String, f64, String)>> =
-            HashMap::new();
+        type EdgeInfo = (petgraph::graph::EdgeIndex, String, f64, String);
+        let mut pair_edges: HashMap<(usize, usize), Vec<EdgeInfo>> = HashMap::new();
 
         for edge_idx in self.graph.edge_indices() {
             let edge = &self.graph[edge_idx];

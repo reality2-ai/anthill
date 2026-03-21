@@ -138,7 +138,7 @@ impl ReputationRegistry {
         if let Some(entry) = self.sources.get_mut(source_id) {
             entry.contradictions += 1;
             // Penalty: move 15% of the distance toward 0.0
-            entry.score = entry.score * 0.85;
+            entry.score *= 0.85;
             entry.score = entry.score.clamp(0.01, 0.99);
             entry.last_updated = current_timestamp();
         }
