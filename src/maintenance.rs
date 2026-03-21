@@ -832,7 +832,7 @@ fn run_file_housekeeping(config: &MaintenanceConfig) {
             .unwrap_or_default();
 
         // Clean up .corrupted and .tmp files.
-        if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") {
+        if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") || filename.ends_with(".cbor.tmp") {
             let _ = std::fs::remove_file(&path);
             cleaned += 1;
             continue;

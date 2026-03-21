@@ -694,9 +694,9 @@ impl KnowledgeGraph {
         self.rebuild_index();
     }
 
-    /// Load from JSON file, or create empty.
-    /// On parse failure, tries the archive as fallback and preserves the
-    /// corrupted file for manual recovery.
+    /// Load from JSON or CBOR file, or create empty.
+    /// Detects format by extension (.cbor = CBOR, everything else = JSON).
+    /// On parse failure, tries recovery strategies.
     pub fn load(path: &Path) -> Self {
         let mut kg = Self {
             graph: StableGraph::new(),
@@ -705,6 +705,31 @@ impl KnowledgeGraph {
         };
 
         if path.exists() {
+            // CBOR files — binary format.
+            if path.extension().and_then(|e| e.to_str()) == Some("cbor") {
+                if let Ok(bytes) = std::fs::read(path) {
+                    match ciborium::de::from_reader::<GraphData, _>(&bytes[..]) {
+                        Ok(data) => {
+                            kg.load_graph_data(&data);
+                            kg.rebuild_index();
+                            return kg;
+                        }
+                        Err(e) => {
+                            log::error!("CBOR parse failed for {}: {}", path.display(), e);
+                            // Fall through to try JSON fallback at same location.
+                            let json_path = path.with_extension("json");
+                            if json_path.exists() {
+                                log::info!("Falling back to JSON: {}", json_path.display());
+                                return Self::load(&json_path);
+                            }
+                        }
+                    }
+                }
+                kg.rebuild_index();
+                return kg;
+            }
+
+            // JSON files — text format.
             if let Ok(contents) = std::fs::read_to_string(path) {
                 match serde_json::from_str::<GraphData>(&contents) {
                     Ok(data) => {
@@ -2782,7 +2807,10 @@ impl CachedGraph {
                     let mut topic_context = String::new();
                     let mut cache = self.topic_cache.lock().unwrap_or_else(|e| e.into_inner());
                     for topic_name in &relevant_topics {
-                        let path = dir.join(format!("{}.json", topic_name));
+                        // Try CBOR first, fall back to JSON.
+                        let cbor_path = dir.join(format!("{}.cbor", topic_name));
+                        let json_path = dir.join(format!("{}.json", topic_name));
+                        let path = if cbor_path.exists() { cbor_path } else { json_path };
                         if !path.exists() { continue; }
 
                         let current_mtime = std::fs::metadata(&path)
@@ -2868,7 +2896,10 @@ impl CachedGraph {
 
     /// Reload from disk if the file's mtime has changed.
     fn maybe_reload(&self) {
-        let current_mtime = std::fs::metadata(&self.file_path)
+        // Check for both .json and .cbor versions of the meta-graph.
+        let cbor_path = self.file_path.with_extension("cbor");
+        let current_mtime = std::fs::metadata(&cbor_path)
+            .or_else(|_| std::fs::metadata(&self.file_path))
             .ok()
             .and_then(|m| m.modified().ok());
 
@@ -2879,7 +2910,10 @@ impl CachedGraph {
             .and_then(|d| {
                 std::fs::read_dir(d).ok().and_then(|entries| {
                     entries.flatten()
-                        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+                        .filter(|e| {
+                            let ext = e.path().extension().and_then(|x| x.to_str()).map(String::from);
+                            ext.as_deref() == Some("json") || ext.as_deref() == Some("cbor")
+                        })
                         .filter_map(|e| std::fs::metadata(e.path()).ok()?.modified().ok())
                         .max()
                 })
@@ -2900,8 +2934,11 @@ impl CachedGraph {
         };
 
         if needs_reload {
-            let new_graph = KnowledgeGraph::load(&self.file_path);
-            log::debug!("Knowledge graph reloaded: {} nodes", new_graph.node_count());
+            // Load CBOR if available, otherwise JSON.
+            let cbor_path = self.file_path.with_extension("cbor");
+            let load_path = if cbor_path.exists() { &cbor_path } else { &self.file_path };
+            let new_graph = KnowledgeGraph::load(load_path);
+            log::debug!("Knowledge graph reloaded: {} nodes from {}", new_graph.node_count(), load_path.display());
             if let Ok(mut g) = self.graph.lock() {
                 *g = new_graph;
             }
