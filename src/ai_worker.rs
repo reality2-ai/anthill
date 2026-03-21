@@ -1612,7 +1612,86 @@ fn build_system_prompt(
         );
     }
 
+    // Colony directory — pre-populated list of peer ANTs.
+    // This saves the AI from having to call list_colony_ants every time.
+    let colony_dir = build_colony_directory(working_dir);
+    if !colony_dir.is_empty() {
+        prompt.push_str("\n[COLONY — your peer ANTs]\n");
+        prompt.push_str(&colony_dir);
+        prompt.push_str("[/COLONY]\n");
+    }
+
     prompt
+}
+
+/// Build a colony directory listing for the system prompt.
+/// Scans the ants directory for peers and their topic graphs.
+fn build_colony_directory(working_dir: &str) -> String {
+    let working_path = std::path::Path::new(working_dir);
+    let ants_dir = working_path.parent() // <ant>/working
+        .and_then(|p| p.parent()); // <ant>
+
+    let ants_parent = match ants_dir.and_then(|p| p.parent()) { // ants/
+        Some(d) => d,
+        None => return String::new(),
+    };
+
+    let self_name = ants_dir
+        .and_then(|p| p.file_name())
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let entries = match std::fs::read_dir(ants_parent) {
+        Ok(e) => e,
+        Err(_) => return String::new(),
+    };
+
+    let mut listing = String::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() { continue; }
+        let name = path.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let is_self = name == self_name;
+        let memory = path.join("working").join("memory");
+        if !memory.exists() { continue; }
+
+        // Quick scan of topic graphs.
+        let mut topics = Vec::new();
+        let graphs_dir = memory.join("graphs");
+        if graphs_dir.exists() {
+            if let Ok(files) = std::fs::read_dir(&graphs_dir) {
+                for f in files.flatten() {
+                    let fname = f.path();
+                    let ext = fname.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    if ext == "cbor" || ext == "json" {
+                        let stem = fname.file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        if !stem.contains("-archive") && !stem.contains(".corrupted") {
+                            topics.push(stem);
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_self {
+            listing.push_str(&format!("- {} (you): {}\n", name,
+                if topics.is_empty() { "no topic graphs".into() } else { topics.join(", ") }));
+        } else {
+            listing.push_str(&format!("- {}: {}\n", name,
+                if topics.is_empty() { "no topic graphs yet".into() } else { topics.join(", ") }));
+        }
+    }
+
+    if listing.is_empty() { return String::new(); }
+
+    format!("You can consult these ANTs using query_ant or /ask:\n{}\n\
+             Use query_ant for quick knowledge lookup. Use /ask (via the user) for \
+             a real conversation where the other ANT thinks about your question.\n", listing)
 }
 
 /// Read a document, handling PDFs by extracting text via pdftotext.
