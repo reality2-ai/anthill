@@ -12,6 +12,7 @@ mod epistemic;
 mod events;
 mod history;
 mod knowledge;
+mod store;
 mod thematic;
 mod maintenance;
 mod mcp;

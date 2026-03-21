@@ -616,9 +616,9 @@ pub const MAX_ACTIVE_NODES: usize = 500;
 /// Serializable graph format (petgraph's serde format).
 /// Tolerates extra top-level fields (e.g. "meta") from topic-specific graphs.
 #[derive(Serialize, Deserialize)]
-struct GraphData {
-    nodes: Vec<Option<KnowledgeNode>>,
-    edges: Vec<(usize, usize, KnowledgeEdge)>,
+pub struct GraphData {
+    pub nodes: Vec<Option<KnowledgeNode>>,
+    pub edges: Vec<(usize, usize, KnowledgeEdge)>,
     /// Catch-all for extra fields (e.g. "meta" in topic graphs).
     #[serde(flatten)]
     _extra: serde_json::Map<String, serde_json::Value>,
@@ -1015,6 +1015,11 @@ impl KnowledgeGraph {
                 let _ = std::fs::rename(&tmp, &self.file_path);
             }
         }
+    }
+
+    /// Convert the in-memory graph to the serializable format.
+    pub fn to_graph_data(&self) -> GraphData {
+        self.to_serializable()
     }
 
     fn to_serializable(&self) -> GraphData {
