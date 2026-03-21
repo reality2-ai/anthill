@@ -1562,6 +1562,21 @@ fn build_system_prompt(
         ));
     }
 
+    // Strict restriction on graph files — MCP tools only.
+    prompt.push_str(
+        "CRITICAL RESTRICTION — KNOWLEDGE GRAPH FILES ARE READ-ONLY:\n\
+        You MUST NOT directly create, edit, or write to any file matching:\n\
+          memory/knowledge.json, memory/knowledge.cbor\n\
+          memory/graphs/*.json, memory/graphs/*.cbor\n\
+        ALL knowledge graph modifications MUST go through the MCP tools:\n\
+          graph_add_node, graph_add_edge, graph_update_evidence,\n\
+          graph_strengthen, graph_weaken, graph_contradict\n\
+        If you edit graph files directly, your changes will be overwritten\n\
+        by the CBOR backend and you will lose your work.\n\
+        The MCP tools validate your input and maintain the Bayesian integrity\n\
+        of the knowledge store. Direct file editing bypasses all of this.\n\n"
+    );
+
     // Fixed sections always included.
     if let Some(custom) = custom {
         prompt.push_str(custom);

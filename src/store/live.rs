@@ -93,6 +93,31 @@ impl LiveKnowledgeStore {
                 KnowledgeGraph::empty(cbor_path)
             };
 
+            // If we loaded from JSON (not CBOR), auto-save as CBOR to keep formats in sync.
+            // This handles the case where the AI edited JSON directly.
+            if !use_cbor && json_exists && kg.node_count() > 0 {
+                let data = kg.to_graph_data();
+                let cbor_path_for_save = if name == "meta" || name.is_empty() {
+                    memory_dir.join("knowledge.cbor")
+                } else {
+                    memory_dir.join("graphs").join(format!("{}.cbor", name))
+                };
+                if let Some(parent) = cbor_path_for_save.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let mut buf = Vec::new();
+                if ciborium::ser::into_writer(&data, &mut buf).is_ok() {
+                    use std::io::Write;
+                    let tmp = cbor_path_for_save.with_extension("cbor.tmp");
+                    if let Ok(mut f) = std::fs::File::create(&tmp) {
+                        if f.write_all(&buf).is_ok() && f.sync_all().is_ok() {
+                            let _ = std::fs::rename(&tmp, &cbor_path_for_save);
+                            log::info!("Auto-converted {} JSON → CBOR ({} nodes)", name, kg.node_count());
+                        }
+                    }
+                }
+            }
+
             graphs.insert(name.to_string(), kg);
         }
         Ok(())
