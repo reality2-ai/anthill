@@ -10,7 +10,7 @@
 //! Run: anthill --migrate-graphs <memory-dir>
 //! Or:  anthill --migrate-graphs ~/.config/anthill/ants/<name>/working/memory
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Migrate all graphs in a directory tree.
 /// If given an ants/ parent directory, recurse into each ANT's memory.
@@ -20,19 +20,20 @@ pub fn migrate_all(dir: &Path) {
     // Check if this is the ants/ parent directory.
     let ants_dir = dir.join("ants");
     if ants_dir.exists() {
-        // Recurse into each ANT.
+        // Recurse into each ANT, reading ant.toml for the actual working_dir.
         if let Ok(entries) = std::fs::read_dir(&ants_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
-                    let memory_dir = path.join("working").join("memory");
-                    if memory_dir.exists() {
-                        let name = path.file_name()
-                            .map(|f| f.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        println!("\n=== ANT: {} ===", name);
-                        migrate_memory_dir(&memory_dir);
-                    }
+                if !path.is_dir() { continue; }
+                let name = path.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                // Read ant.toml to find the actual working_dir.
+                let memory_dir = resolve_memory_dir(&path);
+                if memory_dir.exists() {
+                    println!("\n=== ANT: {} ===", name);
+                    migrate_memory_dir(&memory_dir);
                 }
             }
         }
@@ -57,6 +58,23 @@ pub fn migrate_all(dir: &Path) {
 }
 
 /// Migrate a single ANT's memory directory.
+/// Resolve an ANT's actual memory directory by reading ant.toml.
+/// Falls back to the default <ant_dir>/working/memory if no config found.
+fn resolve_memory_dir(ant_dir: &Path) -> PathBuf {
+    let config_path = ant_dir.join("ant.toml");
+    if let Ok(contents) = std::fs::read_to_string(&config_path) {
+        // Parse working_dir from the TOML config.
+        if let Ok(config) = toml::from_str::<crate::config::Config>(&contents) {
+            if let Some(working_dir) = &config.claude.working_dir {
+                let memory_name = &config.claude.memory_dir;
+                return PathBuf::from(working_dir).join(memory_name);
+            }
+        }
+    }
+    // Default: <ant_dir>/working/memory
+    ant_dir.join("working").join("memory")
+}
+
 fn migrate_memory_dir(memory_dir: &Path) {
     let graphs_dir = memory_dir.join("graphs");
     let _ = std::fs::create_dir_all(&graphs_dir);
@@ -368,15 +386,15 @@ pub fn migrate_to_cbor(dir: &Path) {
         if let Ok(entries) = std::fs::read_dir(&ants_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
-                    let memory_dir = path.join("working").join("memory");
-                    if memory_dir.exists() {
-                        let name = path.file_name()
-                            .map(|f| f.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        println!("\n=== ANT: {} ===", name);
-                        convert_memory_dir_to_cbor(&memory_dir);
-                    }
+                if !path.is_dir() { continue; }
+                let name = path.file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let memory_dir = resolve_memory_dir(&path);
+                if memory_dir.exists() {
+                    println!("\n=== ANT: {} ===", name);
+                    convert_memory_dir_to_cbor(&memory_dir);
                 }
             }
         }
