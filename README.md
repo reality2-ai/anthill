@@ -23,6 +23,21 @@ Anthill runs AI agents on a server and lets you interact with them from any devi
 
 Each ANT has its own personality, workspace, persistent knowledge store, and can run multiple tasks concurrently. Access is secured by R2's trust group model — devices join the colony via one-time codes, and every request is authenticated with HMAC-signed envelopes. The web dashboard is accessed securely over [Tailscale](https://tailscale.com/).
 
+<p align="center">
+  <img src="docs/screenshots/graph-vocabulary-dark.png" alt="3D Knowledge Graph — Sven's vocabulary" width="800">
+  <br><em>3D knowledge graph visualisation — Sven's te reo Māori vocabulary with confidence-weighted edges</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/chat-knowledge-summary.png" alt="Knowledge Base Summary" width="800">
+  <br><em>Alfred summarising his knowledge base — topic graphs with node counts and confidence levels</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/chat-hine-maori.png" alt="Hine teaching te reo Māori" width="800">
+  <br><em>Hine — a Māori language teacher ANT with locative exercises and corrections</em>
+</p>
+
 > Anthill runs on **Linux**, **macOS**, and **FreeBSD**. The install script auto-detects your platform. See [Prerequisites](docs/prerequisites.md) for setup details.
 
 ---
