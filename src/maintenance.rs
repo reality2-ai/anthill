@@ -185,7 +185,10 @@ async fn run_rumination(
     let mut log = RuminationLog::load(&config.memory_dir);
     let store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
 
-    // 0. Compute corroboration strength across all topic graphs.
+    // Each rumination phase is an atomic "thought" — one commit per phase.
+
+    // 0. Compute corroboration strength.
+    store.begin_thought();
     if let Ok(graphs) = store.list_graphs() {
         for g in &graphs {
             if g.node_count >= 2 {
@@ -193,12 +196,17 @@ async fn run_rumination(
             }
         }
     }
+    let _ = store.end_thought(&format!("[{}] corroboration strength updated", config.ant_name));
 
-    // 1. Synthesis first — cheap, no AI tokens.
+    // 1. Synthesis — cheap, no AI tokens.
     if config.rumination.synthesis_enabled {
+        store.begin_thought();
         let count = run_synthesis(config, &store, &mut log);
         if count > 0 {
+            let _ = store.end_thought(&format!("[{}] synthesis: created {} transitive edges", config.ant_name, count));
             log::info!("[{}] Synthesis created {} new edges", config.ant_name, count);
+        } else {
+            let _ = store.end_thought(&format!("[{}] synthesis: no candidates", config.ant_name));
         }
     }
 
@@ -208,10 +216,10 @@ async fn run_rumination(
     // 2. Competition — pit similar ideas against each other.
     run_competition(config, &store, request_tx, &mut log);
 
-    // 3. Cross-domain pattern transfer — find insights across topics.
+    // 3. Cross-domain pattern transfer.
     run_pattern_transfer(config, &store, request_tx, &mut log);
 
-    // 4. Active refutation — core capability.
+    // 4. Active refutation.
     if config.rumination.refutation_enabled {
         run_refutation(config, &store, request_tx, &mut log);
     }
@@ -221,12 +229,12 @@ async fn run_rumination(
         run_contradiction_resolution(config, &store, request_tx, &mut log);
     }
 
-    // 6. Autonomous initiative (most expensive, opt-in).
+    // 6. Autonomous initiative.
     if config.rumination.initiative_enabled {
         run_initiative(config, &store, request_tx, &mut log);
     }
 
-    // 7. Meta-rumination — review and evolve the thinking process itself.
+    // 7. Meta-rumination.
     run_meta_rumination(config, &store, request_tx, &mut log);
 
     // Drop the store to release locks before consolidation.

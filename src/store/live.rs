@@ -490,6 +490,14 @@ impl KnowledgeStore for LiveKnowledgeStore {
 
     // ── Thought branches ──
 
+    fn begin_thought(&self) {
+        self.backend.begin_thought();
+    }
+
+    fn end_thought(&self, message: &str) -> StoreResult<String> {
+        self.backend.end_thought(message)
+    }
+
     fn create_thought_branch(&self, name: &str) -> StoreResult<String> {
         // Invalidate all cached graphs — we're switching branches.
         self.invalidate_all();

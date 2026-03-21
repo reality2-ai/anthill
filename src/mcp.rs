@@ -292,6 +292,30 @@ fn tool_definitions() -> Vec<serde_json::Value> {
             "description": "List all ANTs in the colony with their areas of expertise (topic graphs). Use this to discover which ANT to ask about a topic.",
             "inputSchema": { "type": "object", "properties": {} }
         }),
+        // Git cognitive tools — thought history and branches.
+        serde_json::json!({
+            "name": "thought_history",
+            "description": "Search your thinking history. Each commit represents an atomic thought. Use this to recall what you thought about a topic, when you changed your mind, or what rumination cycles explored.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "graph": { "type": "string", "description": "Graph name (optional — default: all)" },
+                    "limit": { "type": "integer", "description": "Max entries to return (default: 10)", "default": 10 }
+                }
+            }
+        }),
+        serde_json::json!({
+            "name": "thought_branch",
+            "description": "Create a thought branch for speculative exploration. Work freely on the branch without affecting your main knowledge. Merge if the ideas survive evaluation, abandon if they don't.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["create", "merge", "abandon", "list", "current"], "description": "What to do" },
+                    "name": { "type": "string", "description": "Branch name (for create/merge/abandon)" }
+                },
+                "required": ["action"]
+            }
+        }),
     ]
 }
 
@@ -602,6 +626,73 @@ fn handle_tool_call(
 
             listing.push_str("\nUse query_ant(ant='<name>', entity='<topic>') to consult a peer.");
             listing
+        }
+        "thought_history" => {
+            let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
+            match store.history(graph, limit) {
+                Ok(commits) if commits.is_empty() => "No thought history yet.".into(),
+                Ok(commits) => {
+                    let mut text = String::from("Thought history:\n\n");
+                    for c in &commits {
+                        text.push_str(&format!("{} | {} | {}\n", c.hash, c.timestamp, c.message));
+                    }
+                    text
+                }
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "thought_branch" => {
+            let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("");
+            let name = args.get("name").and_then(|n| n.as_str()).unwrap_or("");
+
+            match action {
+                "create" => {
+                    if name.is_empty() { return "Error: branch name required".into(); }
+                    match store.create_thought_branch(name) {
+                        Ok(branch) => format!("Created thought branch: {}. Explore freely — merge or abandon when done.", branch),
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "merge" => {
+                    if name.is_empty() { return "Error: branch name required".into(); }
+                    let branch = if name.starts_with("thought/") { name.to_string() } else { format!("thought/{}", name) };
+                    match store.merge_thought_branch(&branch) {
+                        Ok(true) => format!("Merged {} — ideas adopted into main knowledge.", branch),
+                        Ok(false) => format!("Merge conflict on {} — resolve manually or abandon.", branch),
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "abandon" => {
+                    if name.is_empty() { return "Error: branch name required".into(); }
+                    let branch = if name.starts_with("thought/") { name.to_string() } else { format!("thought/{}", name) };
+                    match store.abandon_thought_branch(&branch) {
+                        Ok(()) => format!("Abandoned {} — dead-end exploration preserved in git history.", branch),
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "list" => {
+                    match store.list_thought_branches() {
+                        Ok(branches) if branches.is_empty() => "No active thought branches.".into(),
+                        Ok(branches) => {
+                            let current = store.current_branch().unwrap_or_default();
+                            let mut text = String::from("Thought branches:\n\n");
+                            for b in &branches {
+                                let marker = if *b == current { " ← current" } else { "" };
+                                text.push_str(&format!("  {}{}\n", b, marker));
+                            }
+                            text
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                "current" => {
+                    match store.current_branch() {
+                        Ok(branch) => format!("Current branch: {}", branch),
+                        Err(e) => format!("Error: {}", e),
+                    }
+                }
+                _ => "Error: action must be create, merge, abandon, list, or current".into(),
+            }
         }
         _ => format!("Unknown tool: {}", tool),
     }

@@ -18,6 +18,9 @@ pub struct CborGitBackend {
     memory_dir: PathBuf,
     /// Whether to auto-commit after each save.
     auto_commit: bool,
+    /// When true, commits are deferred until end_thought() is called.
+    /// This batches multiple changes into one atomic "thought" commit.
+    in_thought: std::sync::atomic::AtomicBool,
 }
 
 impl CborGitBackend {
@@ -25,6 +28,7 @@ impl CborGitBackend {
         Self {
             memory_dir,
             auto_commit: true,
+            in_thought: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -34,7 +38,26 @@ impl CborGitBackend {
         Self {
             memory_dir,
             auto_commit: false,
+            in_thought: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Begin a thought — subsequent saves are batched until end_thought().
+    /// Use this to group related changes into one atomic commit.
+    pub fn begin_thought(&self) {
+        self.in_thought.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// End a thought — commit all batched changes with a descriptive message.
+    /// The message should describe what was thought about, not what changed.
+    pub fn end_thought(&self, message: &str) -> StoreResult<String> {
+        self.in_thought.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.git_commit(message)
+    }
+
+    /// Check if we're inside a thought transaction.
+    pub fn is_in_thought(&self) -> bool {
+        self.in_thought.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn cbor_path(&self, name: &str) -> PathBuf {
@@ -288,9 +311,11 @@ impl StorageBackend for CborGitBackend {
         std::fs::rename(&tmp, &path)
             .map_err(|e| StoreError::Storage(e.to_string()))?;
 
-        // Auto-commit to git.
-        let msg = format!("knowledge: update {}", name);
-        let _ = self.git_commit(&msg);
+        // Auto-commit to git (unless inside a thought transaction).
+        if !self.is_in_thought() {
+            let msg = format!("knowledge: update {}", name);
+            let _ = self.git_commit(&msg);
+        }
 
         Ok(())
     }
