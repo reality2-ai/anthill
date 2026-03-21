@@ -1354,30 +1354,62 @@ async fn handle_web_command(
             let _ = std::fs::create_dir_all(&graphs_dir);
 
             // Move stray graph files from memory/ into memory/graphs/.
-            // Only moves files that look like knowledge graphs (have "nodes" and "edges" keys).
-            let skip = ["knowledge.json", "episodes.json", "embeddings.json",
-                         "knowledge-archive.json"];
+            // Clean up .corrupted and .tmp files.
+            let skip = ["knowledge.json", "knowledge-archive.json",
+                         "episodes.json", "embeddings.json",
+                         "reputation.json", "questions.json",
+                         "rumination_log.json"];
+            let mut moved_count = 0u32;
+            let mut cleaned_count = 0u32;
             if let Ok(entries) = std::fs::read_dir(&memory_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file()
-                        && path.extension().map(|e| e == "json").unwrap_or(false)
-                        && !skip.iter().any(|s| path.file_name().map(|f| f == *s).unwrap_or(false))
-                    {
-                        // Check if it's actually a knowledge graph by looking for "nodes" key.
-                        let is_graph = std::fs::read_to_string(&path)
-                            .map(|c| c.contains("\"nodes\"") && c.contains("\"edges\""))
-                            .unwrap_or(false);
-                        if !is_graph { continue; }
+                    if !path.is_file() { continue; }
+                    let filename = path.file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
 
-                        let dest = graphs_dir.join(path.file_name().unwrap());
-                        if !dest.exists() {
-                            if let Err(e) = std::fs::rename(&path, &dest) {
-                                log::warn!("Failed to move {} to graphs/: {}", path.display(), e);
-                            } else {
-                                log::info!("Moved {} → graphs/", path.file_name().unwrap().to_string_lossy());
-                            }
+                    // Clean up corrupted and tmp files.
+                    if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") {
+                        let _ = std::fs::remove_file(&path);
+                        cleaned_count += 1;
+                        continue;
+                    }
+
+                    // Skip non-JSON, known root files, and user memory files.
+                    if !filename.ends_with(".json") { continue; }
+                    if skip.iter().any(|&s| filename == s) { continue; }
+                    if filename.starts_with('-') || filename.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        continue; // user memory like "123456.json" or "-1.json"
+                    }
+
+                    // Check if it's a knowledge graph.
+                    let is_graph = std::fs::read_to_string(&path)
+                        .map(|c| c.contains("\"nodes\"") && c.contains("\"edges\""))
+                        .unwrap_or(false);
+                    if !is_graph { continue; }
+
+                    let dest = graphs_dir.join(&filename);
+                    if !dest.exists() {
+                        if let Err(e) = std::fs::rename(&path, &dest) {
+                            log::warn!("Failed to move {} to graphs/: {}", path.display(), e);
+                        } else {
+                            log::info!("Moved {} → graphs/", filename);
+                            moved_count += 1;
                         }
+                    }
+                }
+            }
+            // Also clean up inside graphs/.
+            if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let filename = path.file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if filename.ends_with(".corrupted") || filename.ends_with(".json.tmp") {
+                        let _ = std::fs::remove_file(&path);
+                        cleaned_count += 1;
                     }
                 }
             }
@@ -1446,7 +1478,14 @@ async fn handle_web_command(
                     meta.save();
                 }
             }
-            Some(format!("Reprocessed {} graph(s): backfilled refutation logs, consolidated, orphans linked.", processed))
+            let mut summary = format!("Reprocessed {} graph(s): backfilled refutation logs, consolidated, orphans linked.", processed);
+            if moved_count > 0 {
+                summary.push_str(&format!("\nMoved {} stray graph file(s) into graphs/.", moved_count));
+            }
+            if cleaned_count > 0 {
+                summary.push_str(&format!("\nCleaned up {} corrupted/temp file(s).", cleaned_count));
+            }
+            Some(summary)
         },
         "/new" => {
             drop(bots);
