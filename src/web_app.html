@@ -997,18 +997,28 @@ async function loadGraph(graphName) {
       return;
     }
     const data = await resp.json();
-    if (!data.nodes || data.nodes.length === 0) {
-      container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px">Knowledge graph is empty. Chat with the ANT to populate it.</div>';
-      return;
-    }
 
-    // Populate the graph selector dropdown.
+    // Populate the graph selector dropdown first (always, even if current graph is empty).
     const selector = document.getElementById('graph-selector');
     if (data.available_graphs) {
       const currentVal = data.current_graph || 'meta';
       selector.innerHTML = data.available_graphs.map(g =>
         `<option value="${g}" ${g === currentVal ? 'selected' : ''}>${g === 'meta' ? 'Meta-graph (index)' : g}</option>`
       ).join('');
+    }
+
+    if (!data.nodes || data.nodes.length === 0) {
+      // If the meta-graph is empty but topic graphs exist, auto-load the first one.
+      if (data.available_graphs && data.available_graphs.length > 1 && (name === '' || name === 'meta')) {
+        const firstTopic = data.available_graphs.find(g => g !== 'meta');
+        if (firstTopic) {
+          selector.value = firstTopic;
+          loadGraph(firstTopic);
+          return;
+        }
+      }
+      container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px">Knowledge graph is empty. Chat with the ANT to populate it.</div>';
+      return;
     }
 
     // Clean up previous instance.
