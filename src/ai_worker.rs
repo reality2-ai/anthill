@@ -641,6 +641,23 @@ pub async fn ai_worker_loop(
             req.message.clone()
         };
 
+        // For rumination requests: append a clear termination directive.
+        // AI backends tend to ask "what next?" — rumination must be self-contained.
+        let actual_message = if is_rumination {
+            format!(
+                "{}\n\n\
+                 IMPORTANT: This is an autonomous rumination task. \
+                 Complete the work described above, update the graph files, \
+                 and then STOP. Do not ask follow-up questions. Do not ask \
+                 what to do next. Do not wait for input. \
+                 When you have finished updating the graph, output a brief \
+                 summary of what you changed and stop.",
+                actual_message
+            )
+        } else {
+            actual_message
+        };
+
         // Build the command for the selected backend.
         // Knowledge graph + episodes + user memory pre-loaded into the prompt.
         // Try semantic search (Ollama embeddings) first, fall back to keyword-based.

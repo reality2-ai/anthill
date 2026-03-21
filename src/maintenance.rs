@@ -26,6 +26,13 @@ use crate::registry::WsEvent;
 /// System chat_id for rumination requests — negative to avoid collision with real users.
 const RUMINATION_CHAT_ID: i64 = -1;
 
+/// Appended to every rumination prompt to prevent the AI from asking "what next?"
+const RUMINATION_STOP_DIRECTIVE: &str = "\n\n\
+IMPORTANT: This is an autonomous rumination task. Complete the work above, \
+update the graph files, then STOP. Do not ask follow-up questions. \
+Do not ask what to do next. Do not wait for input. \
+Output a brief summary of what you changed and stop.";
+
 /// Configuration for the maintenance daemon.
 pub struct MaintenanceConfig {
     /// Root memory directory (contains knowledge.json and graphs/).
@@ -294,9 +301,9 @@ fn run_competition(
                  6. Weaken the losers: update with evidence_type 'competition_lost'\n\
                  7. If ideas can coexist (not truly competing), explain why and keep both\n\n\
                  The goal is survival of the fittest idea — but fitness includes \
-                 being beneficial, well-sourced, and well-corroborated.",
+                 being beneficial, well-sourced, and well-corroborated.{}",
                 group.node_a_label, group.node_b_label, topic,
-                competitors_desc.join("\n"),
+                competitors_desc.join("\n"), RUMINATION_STOP_DIRECTIVE,
             );
 
             let _ = request_tx.send(CliRequest {
@@ -405,12 +412,13 @@ fn run_pattern_transfer(
          4. Consider whether this reveals a deeper underlying principle — if so, \
             add it as a new 'principle' or 'concept' node\n\
          5. Update the relevant topic graph files\n\n\
-         Cross-pollination of ideas across domains is how breakthroughs happen.",
+         Cross-pollination of ideas across domains is how breakthroughs happen.{}",
         pattern.source_from, pattern.source_relation, pattern.source_to,
         pattern.source_confidence * 100.0,
         pattern.target_from, pattern.target_relation, pattern.target_to,
         pattern.target_confidence * 100.0,
         pattern.similarity_reason,
+        RUMINATION_STOP_DIRECTIVE,
     );
 
     let _ = request_tx.send(CliRequest {
@@ -574,8 +582,8 @@ fn run_refutation(
              CRITICAL: Do NOT use 'refutation_survived' just because you didn't find \
              anything wrong. That would be confirmation bias. Only use it when you found \
              specific evidence that COULD HAVE refuted the idea but FAILED TO.\n\n\
-             Update the topic graph file with your findings.",
-            from, relation, to, confidence * 100.0, topic
+             Update the topic graph file with your findings.{}",
+            from, relation, to, confidence * 100.0, topic, RUMINATION_STOP_DIRECTIVE
         );
 
         let _ = request_tx.send(CliRequest {
@@ -646,12 +654,13 @@ fn run_contradiction_resolution(
                  3. Weaken the loser with 'contradiction' evidence\n\
                  4. If both can coexist (apparent contradiction), add context explaining how\n\
                  5. Update the topic graph file\n\n\
-                 Let the stronger idea survive.",
+                 Let the stronger idea survive.{}",
                 topic,
                 pair.node_a_label, pair.node_b_label, pair.edge_a_relation,
                 pair.edge_a_confidence * 100.0, pair.edge_a_context,
                 pair.node_a_label, pair.node_b_label, pair.edge_b_relation,
                 pair.edge_b_confidence * 100.0, pair.edge_b_context,
+                RUMINATION_STOP_DIRECTIVE,
             );
 
             let _ = request_tx.send(CliRequest {
@@ -740,8 +749,8 @@ fn run_initiative(
          5. Are there nodes that need better summaries or are miscategorised?\n\
          6. Strengthen well-supported edges with 'consistency' evidence\n\
          7. Weaken poorly-supported ones with 'inconsistency' evidence\n\n\
-         Focus on quality over quantity. Every change should be a testable conjecture.",
-        topic, uncertain_count
+         Focus on quality over quantity. Every change should be a testable conjecture.{}",
+        topic, uncertain_count, RUMINATION_STOP_DIRECTIVE
     );
 
     let _ = request_tx.send(CliRequest {
