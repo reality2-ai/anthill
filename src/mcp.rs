@@ -275,8 +275,20 @@ fn tool_definitions() -> Vec<serde_json::Value> {
         }),
         // Colony tools — inter-ANT communication.
         serde_json::json!({
+            "name": "talk_to_ant",
+            "description": "Send a message to another ANT that fires up their AI worker to think and respond. Use this to have a real conversation — the other ANT reasons with their own knowledge and expertise. The response arrives as a follow-up in your conversation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ant": { "type": "string", "description": "Name of the ANT to talk to" },
+                    "message": { "type": "string", "description": "Your message — what you want to discuss or ask" }
+                },
+                "required": ["ant", "message"]
+            }
+        }),
+        serde_json::json!({
             "name": "query_ant",
-            "description": "Ask another ANT in the colony about a topic. This sends a real message that fires up the other ANT's AI to THINK about your question — it doesn't just read their files. The response will appear in your chat when ready. Use list_colony_ants first to discover peers.",
+            "description": "Quick read-only peek at another ANT's existing knowledge. For a real conversation where they THINK about your question, use talk_to_ant instead.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -531,6 +543,54 @@ fn handle_tool_call(
                     None => format!("Source '{}' not tracked yet.", source_id),
                 }
             }
+        }
+        "talk_to_ant" => {
+            let ant_name = args.get("ant").and_then(|a| a.as_str()).unwrap_or("");
+            let message = args.get("message").and_then(|m| m.as_str()).unwrap_or("");
+
+            if ant_name.is_empty() || message.is_empty() {
+                return "Error: 'ant' and 'message' are required.".into();
+            }
+
+            // Derive self name and ants directory.
+            let self_name = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.file_name())
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".into());
+
+            let ants_dir = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent());
+
+            let exists = ants_dir
+                .map(|d| d.join(ant_name).join("working").join("memory").exists())
+                .unwrap_or(false);
+
+            if !exists {
+                return format!("ANT '{}' not found. Check the [COLONY] section in your prompt for available peers.", ant_name);
+            }
+
+            // Write a colony request file that the supervisor/worker picks up.
+            // Format: JSON file in memory/colony_outbox/<target>.json
+            let outbox = memory_dir.join("colony_outbox");
+            let _ = std::fs::create_dir_all(&outbox);
+            let request = serde_json::json!({
+                "from": self_name,
+                "to": ant_name,
+                "message": message,
+                "timestamp": crate::dateutil::datetime_now(),
+            });
+            let filename = format!("{}-{}.json", ant_name,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis());
+            let _ = std::fs::write(outbox.join(&filename), serde_json::to_string_pretty(&request).unwrap_or_default());
+
+            format!("Message sent to {}. Their response will arrive in your conversation when they've thought about it.\n\n\
+                     (Message: '{}')", ant_name,
+                     if message.len() > 100 { &message[..100] } else { message })
         }
         "query_ant" => {
             let ant_name = args.get("ant").and_then(|a| a.as_str()).unwrap_or("");

@@ -268,6 +268,13 @@ COMMUNITY OF PRACTICE — you are not alone:\n\
 You are part of a colony of ANTs, each with different areas of expertise.\n\
 Use 'list_colony_ants' to discover your peers and their topic graphs.\n\
 Use 'query_ant' to ask a peer about their area of expertise.\n\n\
+HOW TO COMMUNICATE WITH PEERS:\n\
+  Use the 'talk_to_ant' tool to send a message to another ANT. This fires up\n\
+  their AI worker to THINK about your message and respond. The response will\n\
+  arrive as a follow-up message in your conversation.\n\
+  Use 'query_ant' for a quick read-only peek at their existing knowledge.\n\
+  Do NOT create files, markdown documents, or other indirect methods to\n\
+  communicate. Use the tools directly.\n\n\
 WHEN TO CONSULT A PEER:\n\
   - When you encounter a topic OUTSIDE your own expertise\n\
   - When you want to CROSS-REFERENCE your knowledge with another domain\n\
@@ -873,6 +880,97 @@ pub async fn ai_worker_loop(
             }
             knowledge_cache.invalidate();
             last_decay = Instant::now();
+        }
+
+        // Process colony outbox — send pending messages to other ANTs.
+        let outbox_dir = config.memory_dir.join("colony_outbox");
+        if outbox_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&outbox_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.extension().map(|e| e == "json").unwrap_or(false) { continue; }
+                    if let Ok(contents) = std::fs::read_to_string(&path) {
+                        if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&contents) {
+                            let to = msg.get("to").and_then(|t| t.as_str()).unwrap_or("");
+                            let from = msg.get("from").and_then(|f| f.as_str()).unwrap_or("");
+                            let message = msg.get("message").and_then(|m| m.as_str()).unwrap_or("");
+
+                            if !to.is_empty() && !message.is_empty() {
+                                // Find the target ANT's working directory and send via their request_tx.
+                                let ants_dir = config.memory_dir.parent()
+                                    .and_then(|p| std::path::Path::new(p).parent())
+                                    .and_then(|p| p.parent());
+                                if let Some(dir) = ants_dir {
+                                    let target_memory = dir.join(to).join("working").join("memory");
+                                    if target_memory.exists() {
+                                        // Send as a colony query through the request channel.
+                                        let colony_msg = format!(
+                                            "COLONY MESSAGE from {}\n\n{}\n\n\
+                                             Respond with your knowledge and reasoning. \
+                                             Your response will be forwarded back to {}.\n\n\
+                                             IMPORTANT: Complete your response and STOP.",
+                                            from, message, from
+                                        );
+                                        // We need to send to the TARGET ant's request_tx.
+                                        // But we only have our own. Write to their inbox instead.
+                                        let target_inbox = target_memory.join("colony_inbox");
+                                        let _ = std::fs::create_dir_all(&target_inbox);
+                                        let inbox_msg = serde_json::json!({
+                                            "from": from,
+                                            "message": colony_msg,
+                                            "chat_id": req.chat_id,
+                                            "timestamp": crate::dateutil::datetime_now(),
+                                        });
+                                        let inbox_file = format!("{}-{}.json", from,
+                                            std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_millis());
+                                        let _ = std::fs::write(
+                                            target_inbox.join(&inbox_file),
+                                            serde_json::to_string_pretty(&inbox_msg).unwrap_or_default()
+                                        );
+                                        log::info!("[{}] Colony message forwarded to {} inbox", bot_name, to);
+                                    }
+                                }
+                            }
+                            // Remove the processed outbox file.
+                            let _ = std::fs::remove_file(&path);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Process colony inbox — messages from other ANTs.
+        let inbox_dir = config.memory_dir.join("colony_inbox");
+        if inbox_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&inbox_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.extension().map(|e| e == "json").unwrap_or(false) { continue; }
+                    if let Ok(contents) = std::fs::read_to_string(&path) {
+                        if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&contents) {
+                            let from = msg.get("from").and_then(|f| f.as_str()).unwrap_or("unknown");
+                            let message = msg.get("message").and_then(|m| m.as_str()).unwrap_or("");
+                            let orig_chat_id = msg.get("chat_id").and_then(|c| c.as_i64()).unwrap_or(0);
+
+                            if !message.is_empty() {
+                                // Inject as a colony request into our own worker.
+                                let _ = request_tx.send(CliRequest {
+                                    chat_id: -2, // Colony
+                                    message: message.to_string(),
+                                    new_session: true,
+                                    task_id: 0,
+                                    source: format!("colony:{}:{}", from, orig_chat_id),
+                                });
+                                log::info!("[{}] Processing colony message from {}", bot_name, from);
+                            }
+                            let _ = std::fs::remove_file(&path);
+                        }
+                    }
+                }
+            }
         }
 
         // --- Special commands ---
