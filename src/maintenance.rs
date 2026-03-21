@@ -226,6 +226,9 @@ async fn run_rumination(
         post_to_chat_history(config, &summary);
     }
 
+    // Consolidate after rumination — link orphans, dedup, keep things tidy.
+    run_consolidation(config);
+
     // Git commit after rumination — creates a meaningful restore point.
     git_commit_memory(config, "rumination cycle complete");
 
@@ -1062,7 +1065,10 @@ fn run_consolidation(config: &MaintenanceConfig) {
     if meta_path.exists() {
         let mut kg = crate::knowledge::KnowledgeGraph::load(&meta_path);
         if kg.node_count() > 0 {
+            kg.backfill_refutation_logs();
+            kg.backfill_to_thurisaz();
             let report = kg.consolidate();
+            kg.link_orphans("meta");
             if report.nodes_merged > 0 || report.edges_merged > 0 || report.chains_collapsed > 0 {
                 kg.save();
                 broadcast_graph_update(config, "meta", "consolidation");
@@ -1094,8 +1100,9 @@ fn run_consolidation(config: &MaintenanceConfig) {
                     let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
                     if kg.node_count() == 0 { continue; }
 
+                    kg.backfill_refutation_logs();
+                    kg.backfill_to_thurisaz();
                     let report = kg.consolidate();
-                    // Link orphan nodes to the graph's hub.
                     kg.link_orphans(&topic);
                     if report.nodes_merged > 0 || report.edges_merged > 0 {
                         log::info!("[{}] Topic '{}' consolidated: {} merged, {} edges merged",
