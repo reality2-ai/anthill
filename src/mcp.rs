@@ -560,19 +560,44 @@ fn handle_tool_call(
             if !exists {
                 format!("ANT '{}' not found. Use list_colony_ants to see available ANTs.", ant_name)
             } else {
-                // We can't send async messages from MCP (it's synchronous stdio).
-                // Tell the AI to use the chat channel instead.
-                format!(
-                    "To ask {} about '{}', send this message in the chat:\n\n\
-                     /ask {} {}\n\n\
-                     This will fire up {}'s AI worker to think about your question \
-                     using their own knowledge and expertise. The response will \
-                     appear in your chat when ready.\n\n\
-                     Note: Direct memory reading is disabled — ANTs must COMMUNICATE, \
-                     not just read each other's files. This ensures each ANT reasons \
-                     with its own perspective.",
-                    ant_name, question, ant_name, question, ant_name
-                )
+                // Quick peek at the other ANT's knowledge for immediate context.
+                // This is a READ-ONLY look at their graph — they haven't reasoned about
+                // this question. For a real conversation, tell the user to use /ask.
+                let other_memory = ants_dir.unwrap().join(ant_name).join("working").join("memory");
+                let other_store = LiveKnowledgeStore::new(other_memory);
+                let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
+
+                let mut response = String::new();
+                if let Ok(graphs) = other_store.list_graphs() {
+                    for g in &graphs {
+                        if let Ok(result) = other_store.query_about(&g.name, question, depth) {
+                            if !result.nodes.is_empty() {
+                                if let Some(rendered) = other_store.with_graph_render(&g.name, &result) {
+                                    if !rendered.trim().is_empty() {
+                                        response.push_str(&format!("### {} (from {})\n", g.name, ant_name));
+                                        response.push_str(&rendered);
+                                        response.push('\n');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if response.is_empty() {
+                    format!("{} has no knowledge about '{}' in their graphs.\n\n\
+                            For a real conversation where {} THINKS about your question, \
+                            tell the user to type: /ask {} {}",
+                            ant_name, question, ant_name, ant_name, question)
+                } else {
+                    format!("READ-ONLY peek at {}'s existing knowledge about '{}' \
+                            (source_id: 'ant:{}'):\n\n{}\n\
+                            NOTE: This is what {} already knows — they haven't reasoned \
+                            about your specific question. For a real conversation where \
+                            they THINK about it, suggest the user type: /ask {} {}",
+                            ant_name, question, ant_name, response,
+                            ant_name, ant_name, question)
+                }
             }
         }
         "list_colony_ants" => {
