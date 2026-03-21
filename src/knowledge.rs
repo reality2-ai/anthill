@@ -2103,18 +2103,35 @@ impl KnowledgeGraph {
             edge.ensure_log_odds();
             if let Some((kept_idx, kept_edge)) = seen.get_mut(&key) {
                 kept_edge.ensure_log_odds();
-                // Bayesian merge: use max log_odds (conservative, non-compounding).
-                if edge.log_odds.abs() > kept_edge.log_odds.abs() {
-                    kept_edge.log_odds = edge.log_odds;
-                }
+                // Bayesian merge: evidence-weighted average of log-odds.
+                let k_weight = kept_edge.evidence_log.len().max(1) as f64;
+                let e_weight = edge.evidence_log.len().max(1) as f64;
+                kept_edge.log_odds = (kept_edge.log_odds * k_weight + edge.log_odds * e_weight)
+                    / (k_weight + e_weight);
                 kept_edge.confidence = to_probability(kept_edge.log_odds).clamp(0.01, 0.95);
                 kept_edge.tests += edge.tests;
                 kept_edge.survived += edge.survived;
                 kept_edge.references += edge.references;
                 kept_edge.importance = kept_edge.importance.max(edge.importance);
-                // Combine evidence logs
-                kept_edge.evidence_log.extend(edge.evidence_log.iter().cloned());
-                kept_edge.refutation_log.extend(edge.refutation_log.iter().cloned());
+                // Combine evidence logs (deduplicate by date+test to avoid double-counting).
+                let existing_keys: HashSet<(String, String)> = kept_edge.evidence_log.iter()
+                    .map(|e| (e.date.clone(), e.test.clone()))
+                    .collect();
+                for entry in &edge.evidence_log {
+                    let key = (entry.date.clone(), entry.test.clone());
+                    if !existing_keys.contains(&key) {
+                        kept_edge.evidence_log.push(entry.clone());
+                    }
+                }
+                let existing_refutation_keys: HashSet<(String, String)> = kept_edge.refutation_log.iter()
+                    .map(|e| (e.date.clone(), e.test.clone()))
+                    .collect();
+                for entry in &edge.refutation_log {
+                    let key = (entry.date.clone(), entry.test.clone());
+                    if !existing_refutation_keys.contains(&key) {
+                        kept_edge.refutation_log.push(entry.clone());
+                    }
+                }
                 // Combine context from both sources.
                 if !edge.context.is_empty() && edge.context != kept_edge.context {
                     if kept_edge.context.is_empty() {
@@ -2190,8 +2207,8 @@ impl KnowledgeGraph {
                 context: format!("{} (via {})", in_w.context, self.graph[mid].label),
                 since: in_w.since.clone(),
                 confidence: combined_conf,
-                tests: in_w.tests.min(out_w.tests),
-                survived: in_w.survived.min(out_w.survived),
+                tests: in_w.tests + out_w.tests,
+                survived: in_w.survived + out_w.survived,
                 basis: in_w.basis.clone(),
                 last_tested: in_w.last_tested.clone(),
                 importance: in_w.importance.max(out_w.importance),
@@ -3471,10 +3488,12 @@ mod tests {
         let report = kg.consolidate();
         assert_eq!(report.edges_merged, 1);
 
-        // Remaining edge should have max confidence of the two.
+        // Remaining edge should have evidence-weighted average confidence.
         let remaining = kg.graph.edges(a).next().unwrap();
         let edge = remaining.weight();
-        assert!((edge.confidence - 0.6).abs() < 0.01, "Expected ~0.6 (max), got {}", edge.confidence);
+        // With log-odds weighted average, result is between the two inputs.
+        assert!(edge.confidence > 0.4 && edge.confidence < 0.7,
+            "Expected merged confidence between inputs, got {}", edge.confidence);
         assert_eq!(edge.tests, 8); // 3 + 5
         assert_eq!(edge.survived, 6); // 2 + 4
         // Context should combine both sources.
@@ -3840,10 +3859,10 @@ mod tests {
         let merged = kg.merge_parallel_edges();
         assert_eq!(merged, 1);
 
-        // Merged edge should use MAX confidence (0.8), not OR (0.9).
+        // Merged edge uses evidence-weighted log-odds average.
         let edge = kg.graph.edges(a).next().unwrap();
-        assert!((edge.weight().confidence - 0.8).abs() < 0.01,
-            "Expected 0.8, got {}", edge.weight().confidence);
+        assert!(edge.weight().confidence > 0.5 && edge.weight().confidence < 0.85,
+            "Expected merged confidence between inputs, got {}", edge.weight().confidence);
         // Context should combine both.
         assert!(edge.weight().context.contains("ctx1"));
         assert!(edge.weight().context.contains("ctx2"));
