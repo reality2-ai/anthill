@@ -295,12 +295,13 @@ fn tool_definitions() -> Vec<serde_json::Value> {
         // Git cognitive tools — thought history and branches.
         serde_json::json!({
             "name": "thought_history",
-            "description": "Search your thinking history. Each commit represents an atomic thought. Use this to recall what you thought about a topic, when you changed your mind, or what rumination cycles explored.",
+            "description": "Search your thinking history. Each commit is an atomic thought. Use 'since' to see what changed since a specific commit hash.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "graph": { "type": "string", "description": "Graph name (optional — default: all)" },
-                    "limit": { "type": "integer", "description": "Max entries to return (default: 10)", "default": 10 }
+                    "limit": { "type": "integer", "description": "Max entries to return (default: 10)", "default": 10 },
+                    "since": { "type": "string", "description": "Commit hash — show what changed since then" }
                 }
             }
         }),
@@ -654,16 +655,27 @@ fn handle_tool_call(
         }
         "thought_history" => {
             let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
-            match store.history(graph, limit) {
-                Ok(commits) if commits.is_empty() => "No thought history yet.".into(),
-                Ok(commits) => {
-                    let mut text = String::from("Thought history:\n\n");
-                    for c in &commits {
-                        text.push_str(&format!("{} | {} | {}\n", c.hash, c.timestamp, c.message));
-                    }
-                    text
+            let since = args.get("since").and_then(|s| s.as_str()).unwrap_or("");
+
+            if !since.is_empty() {
+                // Show what changed since a specific commit.
+                match store.diff_since(since) {
+                    Ok(diff) => diff,
+                    Err(e) => format!("Error: {}", e),
                 }
-                Err(e) => format!("Error: {}", e),
+            } else {
+                match store.history(graph, limit) {
+                    Ok(commits) if commits.is_empty() => "No thought history yet.".into(),
+                    Ok(commits) => {
+                        let mut text = String::from("Thought history:\n\n");
+                        for c in &commits {
+                            text.push_str(&format!("{} | {} | {}\n", c.hash, c.timestamp, c.message));
+                        }
+                        text.push_str("\nUse thought_history with 'since' parameter to see what changed since a specific commit.");
+                        text
+                    }
+                    Err(e) => format!("Error: {}", e),
+                }
             }
         }
         "thought_branch" => {

@@ -278,6 +278,12 @@ pub trait KnowledgeStore: Send + Sync {
     /// End a thought — commit all batched changes with a descriptive message.
     fn end_thought(&self, message: &str) -> StoreResult<String>;
 
+    /// Show what changed since a specific commit.
+    fn diff_since(&self, commit: &str) -> StoreResult<String>;
+
+    /// Show what's different on the current branch vs main.
+    fn diff_from_main(&self) -> StoreResult<String>;
+
     /// Create a thought branch for speculative exploration.
     fn create_thought_branch(&self, name: &str) -> StoreResult<String>;
 

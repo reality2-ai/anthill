@@ -498,6 +498,14 @@ impl KnowledgeStore for LiveKnowledgeStore {
         self.backend.end_thought(message)
     }
 
+    fn diff_since(&self, commit: &str) -> StoreResult<String> {
+        self.backend.diff_since(commit)
+    }
+
+    fn diff_from_main(&self) -> StoreResult<String> {
+        self.backend.diff_from_main()
+    }
+
     fn create_thought_branch(&self, name: &str) -> StoreResult<String> {
         // Invalidate all cached graphs — we're switching branches.
         self.invalidate_all();

@@ -239,6 +239,72 @@ impl CborGitBackend {
         Ok(branches)
     }
 
+    /// Get a diff summary between the current state and a commit.
+    /// Shows what changed in the knowledge graphs since that commit.
+    pub fn diff_since(&self, commit: &str) -> StoreResult<String> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        // Get commit messages between then and now.
+        let output = std::process::Command::new("git")
+            .args(["log", "--oneline", &format!("{}..HEAD", commit), "--", "memory/"])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        let log_text = String::from_utf8_lossy(&output.stdout).to_string();
+
+        // Get a stat summary of file changes.
+        let stat_output = std::process::Command::new("git")
+            .args(["diff", "--stat", commit, "HEAD", "--", "memory/"])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        let stat_text = String::from_utf8_lossy(&stat_output.stdout).to_string();
+
+        let mut result = String::new();
+        if !log_text.is_empty() {
+            result.push_str("Thoughts since then:\n");
+            result.push_str(&log_text);
+            result.push('\n');
+        }
+        if !stat_text.is_empty() {
+            result.push_str("Files changed:\n");
+            result.push_str(&stat_text);
+        }
+        if result.is_empty() {
+            result = "No changes since that commit.".into();
+        }
+
+        Ok(result)
+    }
+
+    /// Compare current branch with main — what's different on this thought branch.
+    pub fn diff_from_main(&self) -> StoreResult<String> {
+        let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
+
+        let main_ref = if std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "main"])
+            .current_dir(working_dir)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        { "main" } else { "master" };
+
+        let output = std::process::Command::new("git")
+            .args(["log", "--oneline", &format!("{}..HEAD", main_ref), "--", "memory/"])
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| StoreError::Git(e.to_string()))?;
+
+        let log_text = String::from_utf8_lossy(&output.stdout).to_string();
+        if log_text.is_empty() {
+            Ok("No changes on this branch relative to main.".into())
+        } else {
+            Ok(format!("Thoughts on this branch:\n{}", log_text))
+        }
+    }
+
     /// Get the current branch name.
     pub fn current_branch(&self) -> StoreResult<String> {
         let working_dir = self.memory_dir.parent().unwrap_or(&self.memory_dir);
