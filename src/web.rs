@@ -483,46 +483,26 @@ async fn get_graph(
     drop(bots);
 
     let graph_name = params.get("name").map(|s| s.as_str()).unwrap_or("");
-    let kg_path = if graph_name.is_empty() || graph_name == "meta" {
-        memory_dir.join("knowledge.json")
-    } else {
-        memory_dir.join("graphs").join(format!("{}.json", graph_name))
+    let graph_key = if graph_name.is_empty() { "meta" } else { graph_name };
+
+    let store = crate::store::live::LiveKnowledgeStore::new(memory_dir);
+
+    // List available graphs.
+    let available = match store.list_graphs() {
+        Ok(graphs) => graphs.into_iter().map(|g| g.name).collect::<Vec<_>>(),
+        Err(_) => vec!["meta".into()],
     };
 
-    // List available graphs for the selector.
-    let mut available = vec!["meta".to_string()];
-    let graphs_dir = memory_dir.join("graphs");
-    if graphs_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "json").unwrap_or(false) {
-                    let name = path.file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    // Skip archive, corrupted, and tmp files.
-                    if name.contains("-archive") || name.ends_with(".corrupted")
-                        || name.ends_with(".tmp")
-                    {
-                        continue;
-                    }
-                    if let Some(stem) = path.file_stem() {
-                        available.push(stem.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-    }
-    available.sort();
+    // Get visualization.
+    use crate::store::KnowledgeStore;
+    let mut viz = match store.to_visualization(graph_key) {
+        Ok(v) => v,
+        Err(_) => serde_json::json!({"nodes": [], "links": []}),
+    };
 
-    let kg = crate::knowledge::KnowledgeGraph::load(&kg_path);
-    let mut viz = kg.to_visualization();
-    // Attach the list of available graphs and the current selection.
     if let Some(obj) = viz.as_object_mut() {
         obj.insert("available_graphs".into(), serde_json::json!(available));
-        obj.insert("current_graph".into(), serde_json::json!(
-            if graph_name.is_empty() { "meta" } else { graph_name }
-        ));
+        obj.insert("current_graph".into(), serde_json::json!(graph_key));
     }
     Json(viz).into_response()
 }
@@ -1423,71 +1403,26 @@ async fn handle_web_command(
                 }
             }
 
+            // Use the store to consolidate all graphs.
+            use crate::store::KnowledgeStore;
+            let store = crate::store::live::LiveKnowledgeStore::new(memory_dir.clone());
             let mut processed = 0;
-            if graphs_dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "json").unwrap_or(false)
-                            && !path.to_string_lossy().contains("-archive")
-                        {
-                            let topic = path.file_stem()
-                                .map(|s| s.to_string_lossy().to_string())
-                                .unwrap_or_default();
-                            let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
-                            if kg.node_count() > 0 {
-                                kg.backfill_refutation_logs();
-                                kg.backfill_to_thurisaz();
-                                kg.consolidate();
-                                kg.link_orphans(&topic);
-                                kg.save();
-                                processed += 1;
-                            }
+
+            if let Ok(graphs) = store.list_graphs() {
+                for g in &graphs {
+                    if let Ok(report) = store.consolidate(&g.name) {
+                        let _ = store.backfill_thurisaz(&g.name);
+                        let _ = store.link_orphans(&g.name);
+                        if report.nodes_merged > 0 || report.edges_merged > 0 {
+                            log::info!("Reprocessed '{}': {} merged, {} edges merged",
+                                g.name, report.nodes_merged, report.edges_merged);
                         }
+                        processed += 1;
                     }
                 }
             }
-            // Also do the meta-graph.
-            let meta_path = memory_dir.join("knowledge.json");
-            if meta_path.exists() {
-                let mut meta = crate::knowledge::KnowledgeGraph::load(&meta_path);
-                if meta.node_count() > 0 {
-                    meta.backfill_refutation_logs();
-                    meta.backfill_to_thurisaz();
-                    meta.consolidate();
-                    meta.link_orphans("meta");
-                    meta.save();
-                    processed += 1;
-                }
-            }
-            // Ensure every topic graph has a node in the meta-graph.
-            if meta_path.exists() && graphs_dir.exists() {
-                let mut meta = crate::knowledge::KnowledgeGraph::load(&meta_path);
-                let mut linked = 0;
-                if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "json").unwrap_or(false)
-                            && !path.to_string_lossy().contains("-archive")
-                        {
-                            let topic = path.file_stem()
-                                .map(|s| s.to_string_lossy().to_string())
-                                .unwrap_or_default();
-                            if meta.find_by_label(&topic).is_none() {
-                                let kg = crate::knowledge::KnowledgeGraph::load(&path);
-                                meta.add_topic_node(&topic);
-                                log::info!("Linked unregistered topic graph '{}' ({} nodes) into meta-graph",
-                                    topic, kg.node_count());
-                                linked += 1;
-                            }
-                        }
-                    }
-                }
-                if linked > 0 {
-                    meta.save();
-                }
-            }
-            let mut summary = format!("Reprocessed {} graph(s): backfilled refutation logs, consolidated, orphans linked.", processed);
+
+            let mut summary = format!("Reprocessed {} graph(s): backfilled, consolidated, orphans linked.", processed);
             if moved_count > 0 {
                 summary.push_str(&format!("\nMoved {} stray graph file(s) into graphs/.", moved_count));
             }

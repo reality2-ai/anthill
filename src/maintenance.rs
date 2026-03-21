@@ -240,24 +240,16 @@ async fn run_rumination(
 /// Recompute corroboration_strength for all edges in all topic graphs.
 /// This gives ideas that are well-connected to other strong ideas a fitness boost.
 fn run_corroboration_update(config: &MaintenanceConfig) {
-    let graphs_dir = config.memory_dir.join("graphs");
-    if !graphs_dir.exists() { return; }
+    use crate::store::KnowledgeStore;
+    let store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
 
-    let entries = match std::fs::read_dir(&graphs_dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_topic_graph(&path) { continue; }
-
-        let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
-        if kg.node_count() < 2 { continue; }
-
-        kg.compute_corroboration_strength();
-        kg.save();
-        broadcast_graph_update(config, &topic_name(&path), "rumination");
+    if let Ok(graphs) = store.list_graphs() {
+        for g in &graphs {
+            if g.node_count < 2 { continue; }
+            if store.compute_corroboration_strength(&g.name).is_ok() {
+                broadcast_graph_update(config, &g.name, "rumination");
+            }
+        }
     }
 }
 
@@ -1056,63 +1048,47 @@ fn clean_temp_files_recursive(dir: &std::path::Path) -> u32 {
 
 fn run_consolidation(config: &MaintenanceConfig) {
     let graphs_dir = config.memory_dir.join("graphs");
-    let meta_path = config.memory_dir.join("knowledge.json");
 
     // Housekeeping: move stray graph files into graphs/ and clean up corrupted files.
     run_file_housekeeping(config);
 
+    // Use the store for consolidation.
+    use crate::store::KnowledgeStore;
+    let store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
+
     // Consolidate meta-graph.
-    if meta_path.exists() {
-        let mut kg = crate::knowledge::KnowledgeGraph::load(&meta_path);
-        if kg.node_count() > 0 {
-            kg.backfill_refutation_logs();
-            kg.backfill_to_thurisaz();
-            let report = kg.consolidate();
-            kg.link_orphans("meta");
-            if report.nodes_merged > 0 || report.edges_merged > 0 || report.chains_collapsed > 0 {
-                kg.save();
-                broadcast_graph_update(config, "meta", "consolidation");
-                log::info!("[{}] Meta-graph consolidated: {} merged, {} edges merged, {} collapsed",
-                    config.ant_name, report.nodes_merged, report.edges_merged, report.chains_collapsed);
-            }
-            for warning in &report.contradictions {
-                log::warn!("[{}] Meta-graph contradiction: {}", config.ant_name, warning);
-            }
-            for cluster in &report.clusters {
-                if cluster.len() >= 3 {
-                    log::info!("[{}] Meta-graph cluster: {}", config.ant_name, cluster.join(", "));
-                }
+    if let Ok(report) = store.consolidate("meta") {
+        let _ = store.backfill_thurisaz("meta");
+        let _ = store.link_orphans("meta");
+        if report.nodes_merged > 0 || report.edges_merged > 0 || report.chains_collapsed > 0 {
+            broadcast_graph_update(config, "meta", "consolidation");
+            log::info!("[{}] Meta-graph consolidated: {} merged, {} edges merged, {} collapsed",
+                config.ant_name, report.nodes_merged, report.edges_merged, report.chains_collapsed);
+        }
+        for warning in &report.contradictions {
+            log::warn!("[{}] Meta-graph contradiction: {}", config.ant_name, warning);
+        }
+        for cluster in &report.clusters {
+            if cluster.len() >= 3 {
+                log::info!("[{}] Meta-graph cluster: {}", config.ant_name, cluster.join(", "));
             }
         }
     }
 
     // Consolidate each topic graph.
-    if graphs_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "json").unwrap_or(false)
-                    && !path.to_string_lossy().contains("-archive")
-                {
-                    let topic = path.file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    let mut kg = crate::knowledge::KnowledgeGraph::load(&path);
-                    if kg.node_count() == 0 { continue; }
-
-                    kg.backfill_refutation_logs();
-                    kg.backfill_to_thurisaz();
-                    let report = kg.consolidate();
-                    kg.link_orphans(&topic);
-                    if report.nodes_merged > 0 || report.edges_merged > 0 {
-                        log::info!("[{}] Topic '{}' consolidated: {} merged, {} edges merged",
-                            config.ant_name, topic, report.nodes_merged, report.edges_merged);
-                    }
-                    kg.save();
-                    broadcast_graph_update(config, &topic, "consolidation");
-                    for warning in &report.contradictions {
-                        log::warn!("[{}] Topic '{}' contradiction: {}", config.ant_name, topic, warning);
-                    }
+    if let Ok(graphs) = store.list_graphs() {
+        for g in &graphs {
+            if g.name == "meta" { continue; } // already done
+            if let Ok(report) = store.consolidate(&g.name) {
+                let _ = store.backfill_thurisaz(&g.name);
+                let _ = store.link_orphans(&g.name);
+                if report.nodes_merged > 0 || report.edges_merged > 0 {
+                    log::info!("[{}] Topic '{}' consolidated: {} merged, {} edges merged",
+                        config.ant_name, g.name, report.nodes_merged, report.edges_merged);
+                }
+                broadcast_graph_update(config, &g.name, "consolidation");
+                for warning in &report.contradictions {
+                    log::warn!("[{}] Topic '{}' contradiction: {}", config.ant_name, g.name, warning);
                 }
             }
         }
