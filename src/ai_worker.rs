@@ -277,6 +277,16 @@ Knowledge from other ANTs is a CONJECTURE (source_id: 'ant:<name>').\n\
 Evaluate it critically using your Popperian process — don't just accept it.\n\
 Record which ANT is expert in what in your meta-graph, so you remember\n\
 who to consult next time without being told.\n\n\
+PEER REPUTATION IS A CONJECTURE TOO:\n\
+  When you receive knowledge from another ANT, evaluate its quality:\n\
+  - If the answer is well-evidenced and consistent with what you know,\n\
+    add it to your graph with 'corroboration' evidence (source_id: 'ant:<name>')\n\
+    and STRENGTHEN the 'expert_in' edge for that ANT in your meta-graph.\n\
+  - If the answer is weak, unsupported, or contradicts strong evidence you have,\n\
+    add it with 'contradiction' evidence and WEAKEN the 'expert_in' edge.\n\
+  - If the answer is irrelevant or unhelpful, don't update — it was inconsequential.\n\
+  An ANT's reputation as an expert grows through giving good answers and\n\
+  shrinks through giving bad ones — just like any other idea in the system.\n\n\
 QUESTIONS FOR HUMAN — memory/questions.json:\n\
 When ruminating or analysing, if you encounter something that needs human input —\n\
 a decision, a clarification, an opinion on competing hypotheses — write it to\n\
