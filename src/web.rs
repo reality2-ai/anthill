@@ -63,6 +63,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/restart", post(restart_ant))
         .route("/api/ants/{id}/compact-history", post(compact_history))
         .route("/api/ants/{id}/graph", get(get_graph))
+        .route("/api/ants/{id}/rumination", get(get_rumination_log))
         .route("/api/backends", get(list_backends))
         .route("/api/doctor", get(doctor_check))
         .route("/api/auth/devices", get(auth_list_devices))
@@ -279,6 +280,16 @@ async fn get_config(
                     "backup_remote": cfg.claude.backup_remote,
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
                     "backends": cfg.claude.backends,
+                    "rumination": {
+                        "enabled": cfg.claude.rumination.enabled,
+                        "interval_secs": cfg.claude.rumination.interval_secs,
+                        "refutation_enabled": cfg.claude.rumination.refutation_enabled,
+                        "synthesis_enabled": cfg.claude.rumination.synthesis_enabled,
+                        "contradiction_resolution": cfg.claude.rumination.contradiction_resolution,
+                        "initiative_enabled": cfg.claude.rumination.initiative_enabled,
+                        "min_idle_secs": cfg.claude.rumination.min_idle_secs,
+                        "topics": cfg.claude.rumination.topics,
+                    },
                 })).into_response(),
                 Err(_) => {
                     (StatusCode::OK, content).into_response()
@@ -308,6 +319,7 @@ struct ConfigUpdate {
     backup_interval_hours: Option<u32>,
     backup_remote: Option<String>,
     system_prompt: Option<String>,
+    rumination: Option<crate::config::RuminationConfig>,
 }
 
 async fn put_config(
@@ -335,6 +347,7 @@ async fn put_config(
             allow_base_code_changes: req.allow_base_code_changes.unwrap_or(false),
             backup_interval_hours: req.backup_interval_hours.unwrap_or(0),
             backup_remote: req.backup_remote.clone().unwrap_or_default(),
+            rumination: req.rumination.clone().unwrap_or_default(),
             ..Default::default()
         },
     };
@@ -503,6 +516,26 @@ async fn get_graph(
         ));
     }
     Json(viz).into_response()
+}
+
+/// GET /api/ants/:id/rumination — get the rumination log.
+async fn get_rumination_log(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let bots = state.registry.bots.read().await;
+    let handle = match bots.get(&id) {
+        Some(h) => h,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let memory_dir = handle.working_dir.join("memory");
+    drop(bots);
+
+    let log = crate::maintenance::RuminationLog::load(&memory_dir);
+    Json(serde_json::json!({
+        "entries": log.entries,
+        "count": log.entries.len(),
+    })).into_response()
 }
 
 /// POST /api/ants/:id/compact-history — trim chat history to last 4 messages.

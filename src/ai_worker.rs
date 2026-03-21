@@ -132,14 +132,37 @@ THE KNOWLEDGE GRAPH IS THURISAZ-COMPLIANT — it uses sequential Bayesian updati
 - Fading foundations (beliefs decay toward uncertainty without fresh evidence)\n\
 - Active falsification (claims must survive disproof)\n\
 - Justificatory chains (every belief traces back through its reasoning)\n\n\
+CORE PRINCIPLE — CONJECTURE AND REFUTATION (Popper):\n\
+  WARNING: Your training makes you want to CONFIRM ideas and be agreeable.\n\
+  This system requires the OPPOSITE. You must actively try to BREAK ideas.\n\n\
+  All knowledge begins as CONJECTURE. To test an idea, you ATTEMPT TO REFUTE IT.\n\
+  - If you find specific evidence that COULD disprove it but FAILS to → STRENGTHENED (refutation_survived)\n\
+  - If you find evidence that DOES disprove it → WEAKENED (refutation_failed)\n\
+  - If you search and find NOTHING relevant → NO CHANGE (inconsequential_search)\n\n\
+  CRITICAL ANTI-CONFIRMATION-BIAS RULES:\n\
+  1. Absence of counter-evidence is NOT evidence of truth\n\
+  2. Simply not finding anything wrong does NOT make an idea stronger\n\
+  3. Only evidence that ACTIVELY TRIED TO DISPROVE and FAILED counts as strengthening\n\
+  4. DO NOT use 'refutation_survived' just because an idea 'seems right' or you 'agree'\n\
+  5. DO NOT inflate confidence because the idea aligns with your training\n\
+  6. PREFER finding flaws over confirming — a disproved idea is more valuable than\n\
+     10 confirmations, because it tells you where your model of reality is WRONG\n\
+  7. An idea that has survived 10 genuine refutation attempts is far stronger than one\n\
+     that has simply never been challenged\n\
+  8. When in doubt, leave confidence UNCHANGED — the burden of proof is on the idea\n\n\
 AFTER EVERY RESPONSE, silently review and update the knowledge graph:\n\
   1. New entity? → add a node\n\
   2. New relationship? → add an edge as a CONJECTURE with basis, evidence_type, and source_id\n\
-  3. Does this conversation CONFIRM an existing edge? → use evidence type 'corroboration' or 'refutation_survived'\n\
-  4. Does this conversation CONTRADICT an existing edge? → use 'contradiction' or 'refutation_failed'\n\
-  5. Is this consistent/inconsistent with existing knowledge? → use 'consistency' or 'inconsistency'\n\
-  6. User confirms something? → use 'human_attestation'\n\
-  7. User-specific fact? → append to user memory file\n\n\
+  3. Does this conversation provide evidence that TRIED to contradict an edge but FAILED?\n\
+     → use 'refutation_survived' (BF=2.5 — this genuinely strengthens the idea)\n\
+  4. Does this conversation provide evidence that SUCCESSFULLY contradicts an edge?\n\
+     → use 'refutation_failed' (BF=0.1 — the idea failed the test)\n\
+  5. Does this conversation provide INDEPENDENT supporting evidence from a different source?\n\
+     → use 'corroboration' (BF=2.0×r — multiple independent sources matter)\n\
+  6. Is this merely consistent without new evidence? → use 'consistency' (BF=1.5 — mild)\n\
+  7. Did you search for counter-evidence and find nothing? → use 'inconsequential_search' (BF=1.0 — no change)\n\
+  8. User confirms something? → use 'human_attestation'\n\
+  9. User-specific fact? → append to user memory file\n\n\
 EVIDENCE TYPES (Bayes Factors):\n\
   corroboration: BF=2.0×r — supporting evidence from another source\n\
   contradiction: BF=0.3/r — contradicting evidence\n\
@@ -147,7 +170,25 @@ EVIDENCE TYPES (Bayes Factors):\n\
   refutation_failed: BF=0.1 — actively tried to disprove, claim failed\n\
   human_attestation: BF=1.5×r — user confirms or corrects\n\
   consistency: BF=1.5 — consistent with existing graph\n\
-  inconsistency: BF=0.4 — inconsistent with existing graph\n\n\
+  inconsistency: BF=0.4 — inconsistent with existing graph\n\
+  competition_won: BF=2.0 — won competition against a rival hypothesis\n\
+  competition_lost: BF=0.3 — lost competition against a rival hypothesis\n\
+  pattern_transfer: BF=1.8 — cross-domain pattern strengthens this idea\n\
+  inconsequential_search: BF=1.0 — searched but found nothing relevant (NO CHANGE)\n\n\
+DARWINIAN COMPETITION — ideas compete for survival:\n\
+  When multiple edges explain the same relationship between two nodes, they are\n\
+  COMPETING HYPOTHESES. Research which is best supported by evidence, source quality,\n\
+  and corroborating ideas. Strengthen winners (competition_won), weaken losers\n\
+  (competition_lost). Ideas that are well-sourced and well-corroborated survive.\n\n\
+BENEFICIAL IMPACT — edges have a 'beneficial_impact' field (-1.0 to 1.0):\n\
+  When evaluating competing ideas, FAVOUR those that are beneficial for people and\n\
+  the planet. Set beneficial_impact > 0 for ideas that promote wellbeing, sustainability,\n\
+  cooperation, or understanding. Set < 0 for ideas that promote harm, exploitation, or\n\
+  destruction. This is not censorship — harmful truths should still be recorded — but\n\
+  beneficial ideas get a fitness advantage in competition and prominence.\n\n\
+CORROBORATION STRENGTH — an idea supported by other strong ideas is itself stronger.\n\
+  The 'corroboration_strength' field is auto-computed. Well-connected ideas in a strong\n\
+  neighbourhood have higher relevance. Isolated ideas with no supporting context are weaker.\n\n\
 EVERY edge update MUST include:\n\
   - evidence_type (one of the above)\n\
   - source_id (e.g. 'document:README.md', 'user:roy', 'ai:inference')\n\
@@ -170,12 +211,21 @@ Knowledge graph JSON format:\n\
     \"justificatory_chain\": [{\"step\": N, \"process\": \"...\", \"confidence\": N, \"source\": \"...\"}],\n\
     \"valid_from\": \"YYYY-MM-DD\", \"valid_until\": \"\",\n\
     \"view\": \"semantic|temporal|causal|entity\",\n\
-    \"source\": \"document name, conversation date, or how you know this\"\n\
+    \"source\": \"document name, conversation date, or how you know this\",\n\
+    \"beneficial_impact\": 0.0,\n\
+    \"corroboration_strength\": 0.0,\n\
+    \"competition_group\": \"\"\n\
   }]]\n\
 Initial confidence by basis: observed=0.7, told=0.6, inferred=0.4, assumed=0.3\n\
 Confidence is computed from log_odds via sigmoid. Log-odds is the source of truth.\n\
 Edges below 0.15 confidence are hidden from this prompt but kept in the graph.\n\
 Importance: edges have an 'importance' field (0-1) and 'references' count.\n\n\
+GRADUATED TRUST — reason WITH uncertainty, don't treat all knowledge as equal:\n\
+- ESTABLISHED (≥80%): Reliable. Build on confidently.\n\
+- LIKELY (≥60%): Probably true. Note uncertainty if consequential.\n\
+- POSSIBLE (≥40%): Could go either way. Flag when reasoning from this.\n\
+- UNCERTAIN (≥20%): Weak. Don't base conclusions on this without caveats.\n\
+- DOUBTFUL (<20%): Likely wrong. Consider contradicting or archiving.\n\n\
 EDGE VIEWS: semantic (conceptual), temporal (ordering), causal (why), entity (structural).\n\
 TEMPORAL VALIDITY: Set valid_from when a relationship starts. When superseded, set valid_until.\n\n\
 EPISODIC MEMORY — memory/episodes.json:\n\
@@ -192,7 +242,13 @@ ALL knowledge MUST go into topic graphs in memory/graphs/<topic>.json — NOT in
   Always run mkdir -p memory/graphs/ first.\n\
 - WHEN TO UPDATE THE META-GRAPH: after creating a new topic graph, add a node for it in\n\
   knowledge.json (kind: 'concept', tags: ['graph', 'topic']) with edges to related topics.\n\
-- NEVER put domain-specific nodes (people, tools, decisions) in knowledge.json — always in a topic graph.";
+- NEVER put domain-specific nodes (people, tools, decisions) in knowledge.json — always in a topic graph.\n\n\
+REMINDER — RESIST CONFIRMATION BIAS:\n\
+  Your instinct is to agree, confirm, and make ideas sound good. FIGHT THIS.\n\
+  Strong ideas are built by trying to BREAK them, not by nodding along.\n\
+  When updating the knowledge graph, ask: 'What would make this WRONG?'\n\
+  If you can't find anything that would disprove it, that's 'inconsequential_search' — \n\
+  NOT 'refutation_survived'. Be honest. Be rigorous. Be Popperian.";
 
 /// Extended methodology preamble — included only for analytical commands
 /// (/analyse, /reflect, /specify, /test-vectors). Saves ~1KB per regular request.
@@ -215,7 +271,15 @@ All findings are CONJECTURES with typed evidence. Confidence reflects Bayesian u
   - Explicit in the material → observed (0.7), evidence_type: corroboration\n\
   - Implied by multiple sources → inferred (0.4), evidence_type: consistency\n\
   - Your interpretation → assumed (0.3), evidence_type: consistency\n\
-Always structure analytical findings as a knowledge graph update, not just prose.";
+Always structure analytical findings as a knowledge graph update, not just prose.\n\n\
+ANALYSIS ANTI-CONFIRMATION-BIAS CHECKLIST:\n\
+  Before finalising your analysis, ask yourself:\n\
+  - Did I look for evidence AGAINST my findings, not just evidence FOR them?\n\
+  - Am I using 'refutation_survived' only when I found specific evidence that COULD\n\
+    have disproved my finding but DIDN'T? Or am I just saying 'I didn't find anything wrong'?\n\
+  - Are my confidence levels honest, or inflated because the idea 'feels right'?\n\
+  - Would a hostile critic find flaws I missed?\n\
+  If you only found supporting evidence, that's 'consistency' (BF=1.5), not 'refutation_survived' (BF=2.5).";
 
 const WORKSPACE_PREAMBLE: &str = "\
 Your working directory has the following structure:\
@@ -514,15 +578,27 @@ pub async fn ai_worker_loop(
     let mut last_decay = Instant::now();
 
     while let Some(req) = rx.recv().await {
+        let is_rumination = req.source == "rumination";
+
         // Remember chat IDs per source for cross-channel forwarding.
-        if req.chat_id != 0 && req.source != "web" {
+        if req.chat_id != 0 && req.source != "web" && !is_rumination {
             source_chat_ids.insert(req.source.clone(), req.chat_id);
         }
-        let user_memory_file = config.memory_dir.join(format!("{}.md", req.chat_id));
+
+        // Rumination requests use a dedicated memory file, not per-user.
+        let user_memory_file = if is_rumination {
+            config.memory_dir.join("rumination.md")
+        } else {
+            config.memory_dir.join(format!("{}.md", req.chat_id))
+        };
 
         // Create user memory file if it doesn't exist.
         if !user_memory_file.exists() {
-            let header = format!("# Memory — user {}\n\n", req.chat_id);
+            let header = if is_rumination {
+                "# Rumination Memory\n\nThis file is used by the rumination engine for autonomous thinking.\n\n".to_string()
+            } else {
+                format!("# Memory — user {}\n\n", req.chat_id)
+            };
             let _ = std::fs::write(&user_memory_file, header);
         }
 
@@ -609,17 +685,20 @@ pub async fn ai_worker_loop(
         let timeout_secs = if config.worker_timeout_secs > 0 { config.worker_timeout_secs } else { 600 };
 
         // Broadcast user message (for history and cross-device sync).
-        if let Some(ref tx) = etx {
-            let _ = tx.send(crate::registry::WsEvent::UserMessage {
-                bot: bname.to_string(),
-                chat_id,
-                text: req.message.clone(),
-                source: req.source.clone(),
-            });
+        // Skip for rumination — autonomous thinking is not user-facing.
+        if req.source != "rumination" {
+            if let Some(ref tx) = etx {
+                let _ = tx.send(crate::registry::WsEvent::UserMessage {
+                    bot: bname.to_string(),
+                    chat_id,
+                    text: req.message.clone(),
+                    source: req.source.clone(),
+                });
+            }
         }
 
         // Forward user message to Telegram if from another channel and sync is enabled.
-        if config.sync_channels && req.source != "telegram" && tg_chat != 0 {
+        if config.sync_channels && req.source != "telegram" && req.source != "rumination" && tg_chat != 0 {
             let label = match req.source.as_str() {
                 "web" => "🌐 web",
                 "slack" => "💬 slack",
@@ -965,39 +1044,47 @@ pub async fn ai_worker_loop(
 
             typing_handle.abort();
 
-            // Update stats.
-            if let Ok(mut map) = st.lock() {
-                let s = map.entry(chat_id).or_default();
-                if s.started.is_none() {
-                    s.started = Some(Instant::now());
+            // Update stats (skip for rumination — don't pollute user metrics).
+            if req_source != "rumination" {
+                if let Ok(mut map) = st.lock() {
+                    let s = map.entry(chat_id).or_default();
+                    if s.started.is_none() {
+                        s.started = Some(Instant::now());
+                    }
+                    s.messages += 1;
+                    s.input_chars += input_len;
+                    s.output_chars += response_text.len() as u64;
                 }
-                s.messages += 1;
-                s.input_chars += input_len;
-                s.output_chars += response_text.len() as u64;
             }
 
-            // Broadcast to WebSocket clients.
-            if let Some(ref tx) = etx {
-                let _ = tx.send(crate::registry::WsEvent::Message {
-                    bot: bname.to_string(),
-                    chat_id,
-                    text: response_text.clone(),
-                    task_id,
-                });
-            }
+            // Skip broadcasting and forwarding for rumination — it's internal.
+            if req_source != "rumination" {
+                // Broadcast to WebSocket clients.
+                if let Some(ref tx) = etx {
+                    let _ = tx.send(crate::registry::WsEvent::Message {
+                        bot: bname.to_string(),
+                        chat_id,
+                        text: response_text.clone(),
+                        task_id,
+                    });
+                }
 
-            // Forward response to Telegram if from another channel and sync is enabled.
-            if cfg.sync_channels && req_source != "telegram" && tg_chat != 0 {
-                let _ = ttx.send((tg_chat, response_text.clone()));
-            }
+                // Forward response to Telegram if from another channel and sync is enabled.
+                if cfg.sync_channels && req_source != "telegram" && tg_chat != 0 {
+                    let _ = ttx.send((tg_chat, response_text.clone()));
+                }
 
-            // Push response to R2 event bus (for Telegram plugin).
-            if let Ok(mut q) = rq.lock() {
-                q.push_back(CliResponse {
-                    chat_id,
-                    text: response_text,
-                    task_id,
-                });
+                // Push response to R2 event bus (for Telegram plugin).
+                if let Ok(mut q) = rq.lock() {
+                    q.push_back(CliResponse {
+                        chat_id,
+                        text: response_text,
+                        task_id,
+                    });
+                }
+            } else {
+                log::info!("[{}] Rumination task #{} complete ({} chars)",
+                    bname, task_id, response_text.len());
             }
 
             // Remove from running tasks and broadcast completion.

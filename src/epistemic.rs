@@ -80,6 +80,18 @@ pub enum EvidenceType {
     Consistency,
     /// Inconsistent with existing graph. BF = 0.4
     Inconsistency,
+    /// Transitive inference from two strong edges. BF = 1.2 (weak positive)
+    Synthesis,
+    /// Won a competition against a rival hypothesis. BF = 2.0
+    CompetitionWon,
+    /// Lost a competition against a rival hypothesis. BF = 0.3
+    CompetitionLost,
+    /// Cross-domain pattern transfer: insight from one domain strengthens this. BF = 1.8
+    PatternTransfer,
+    /// Searched for counter-evidence but found nothing relevant. BF = 1.0 (no change).
+    /// Absence of evidence is NOT evidence of absence. Only active, failed refutation
+    /// strengthens a belief — merely not finding anything proves nothing.
+    InconsequentialSearch,
 }
 
 impl EvidenceType {
@@ -94,6 +106,11 @@ impl EvidenceType {
             Self::HumanAttestation => 1.5,
             Self::Consistency => 1.5,
             Self::Inconsistency => 0.4,
+            Self::Synthesis => 1.2,
+            Self::CompetitionWon => 2.0,
+            Self::CompetitionLost => 0.3,
+            Self::PatternTransfer => 1.8,
+            Self::InconsequentialSearch => 1.0, // No change — absence proves nothing
         }
     }
 
@@ -133,6 +150,11 @@ impl EvidenceType {
             Self::HumanAttestation => "User confirmed or corrected",
             Self::Consistency => "Consistent with existing knowledge graph",
             Self::Inconsistency => "Inconsistent with existing knowledge graph",
+            Self::Synthesis => "Transitive inference from two strong edges",
+            Self::CompetitionWon => "Won competition against a rival hypothesis",
+            Self::CompetitionLost => "Lost competition against a rival hypothesis",
+            Self::PatternTransfer => "Cross-domain pattern transfer strengthened this idea",
+            Self::InconsequentialSearch => "Searched for counter-evidence but found nothing relevant",
         }
     }
 }

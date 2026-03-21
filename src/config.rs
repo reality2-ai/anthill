@@ -38,6 +38,43 @@ pub struct SlackConfig {
     pub app_token: Option<String>,
 }
 
+/// Rumination engine configuration — autonomous thinking during idle time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RuminationConfig {
+    /// Enable the rumination engine. Default: false.
+    pub enabled: bool,
+    /// Minimum interval between rumination cycles (seconds). Default: 7200 (2 hours).
+    pub interval_secs: u64,
+    /// Topic graphs to focus on. Empty = all topics.
+    pub topics: Vec<String>,
+    /// Enable active refutation — challenge existing beliefs. Default: true.
+    pub refutation_enabled: bool,
+    /// Enable idea synthesis — conjecture transitive relationships. Default: true.
+    pub synthesis_enabled: bool,
+    /// Enable contradiction resolution — pit conflicting beliefs against each other. Default: true.
+    pub contradiction_resolution: bool,
+    /// Enable autonomous initiative — open-ended self-improvement. Default: false.
+    pub initiative_enabled: bool,
+    /// Minimum idle time before ruminating (seconds). Default: 300.
+    pub min_idle_secs: u64,
+}
+
+impl Default for RuminationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 7200,
+            topics: Vec::new(),
+            refutation_enabled: true,
+            synthesis_enabled: true,
+            contradiction_resolution: true,
+            initiative_enabled: false,
+            min_idle_secs: 300,
+        }
+    }
+}
+
 /// AI and workspace configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -70,6 +107,8 @@ pub struct ClaudeConfig {
     /// Default: false — the AI can only modify files within its workspace and repos/.
     #[serde(default)]
     pub allow_base_code_changes: bool,
+    /// Rumination engine — autonomous thinking during idle time.
+    pub rumination: RuminationConfig,
 }
 
 impl Default for ClaudeConfig {
@@ -87,6 +126,7 @@ impl Default for ClaudeConfig {
             backup_remote: String::new(),
             worker_timeout_secs: 600,
             allow_base_code_changes: false,
+            rumination: RuminationConfig::default(),
         }
     }
 }

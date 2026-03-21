@@ -128,6 +128,10 @@ pub async fn run_bot(
     // Forward events to the global broadcast if in supervisor mode.
     let worker_event_tx = global_event_tx.clone().or_else(|| Some(event_tx.clone()));
 
+    // Clone channels for the maintenance daemon before they're moved to the worker.
+    let maintenance_tasks = Arc::clone(&tasks);
+    let maintenance_request_tx = request_tx.clone();
+
     tokio::spawn(ai_worker::ai_worker_loop(
         request_rx,
         response_queue,
@@ -157,12 +161,14 @@ pub async fn run_bot(
         ));
     }
 
-    // Spawn background knowledge graph maintenance daemon.
     tokio::spawn(crate::maintenance::maintenance_loop(crate::maintenance::MaintenanceConfig {
         memory_dir: maintenance_memory_dir,
         consolidation_interval: std::time::Duration::from_secs(3600),  // 1 hour
         cross_link_interval: std::time::Duration::from_secs(21600),    // 6 hours
         ant_name: bot_name.clone(),
+        request_tx: Some(maintenance_request_tx),
+        tasks: Some(maintenance_tasks),
+        rumination: cfg.claude.rumination.clone(),
     }));
 
     bus.init_all();

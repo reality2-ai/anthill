@@ -249,6 +249,25 @@ pub struct KnowledgeEdge {
     /// Decay category — controls how quickly this belief fades.
     #[serde(default)]
     pub decay_category: DecayCategory,
+
+    // --- Darwinian competition fields ---
+
+    /// Beneficial impact score (-1.0 to 1.0). Positive = beneficial for people/planet.
+    /// Acts as a fitness modifier: beneficial ideas get an evolutionary advantage.
+    /// 0.0 = neutral (default), 1.0 = strongly beneficial, -1.0 = harmful.
+    #[serde(default)]
+    pub beneficial_impact: f64,
+
+    /// Corroboration strength: how strongly this edge is supported by its neighbours.
+    /// Computed from the confidence of edges that connect to the same nodes.
+    /// Higher = better-connected in the knowledge network. Recomputed during consolidation.
+    #[serde(default)]
+    pub corroboration_strength: f64,
+
+    /// Competition group: edges with the same group ID are competing hypotheses.
+    /// Empty = no competitors. Set by the AI or by the competition detection algorithm.
+    #[serde(default)]
+    pub competition_group: String,
 }
 
 /// A single entry in the refutation audit trail.
@@ -313,6 +332,9 @@ impl KnowledgeEdge {
             }],
             source_id: String::new(),
             decay_category,
+            beneficial_impact: 0.0,
+            corroboration_strength: 0.0,
+            competition_group: String::new(),
         }
     }
 
@@ -325,9 +347,13 @@ impl KnowledgeEdge {
         self.importance = self.importance.clamp(0.0, 1.0);
     }
 
-    /// Combined score: confidence × importance. Used for prompt prioritisation.
+    /// Combined score: confidence × importance × fitness. Used for prompt prioritisation.
+    /// Beneficial ideas get a fitness advantage; harmful ideas are penalised.
+    /// Corroboration strength provides a network effect bonus.
     pub fn relevance_score(&self) -> f64 {
-        self.confidence * self.importance
+        let fitness = 1.0 + 0.2 * self.beneficial_impact; // range 0.8–1.2
+        let network_bonus = 1.0 + 0.1 * self.corroboration_strength; // mild boost
+        self.confidence * self.importance * fitness * network_bonus
     }
 
     /// Ensure log_odds and confidence are in sync.
@@ -385,9 +411,13 @@ impl KnowledgeEdge {
         // Record in refutation log (backward compatibility)
         let outcome = match &evidence_type {
             EvidenceType::RefutationSurvived | EvidenceType::Corroboration |
-            EvidenceType::HumanAttestation | EvidenceType::Consistency => "survived",
+            EvidenceType::HumanAttestation | EvidenceType::Consistency |
+            EvidenceType::Synthesis | EvidenceType::CompetitionWon |
+            EvidenceType::PatternTransfer => "survived",
             EvidenceType::RefutationFailed => "contradicted",
-            EvidenceType::Contradiction | EvidenceType::Inconsistency => "weakened",
+            EvidenceType::Contradiction | EvidenceType::Inconsistency |
+            EvidenceType::CompetitionLost => "weakened",
+            EvidenceType::InconsequentialSearch => "inconsequential",
         };
         self.refutation_log.push(RefutationEntry {
             date: date.into(),
@@ -516,6 +546,58 @@ pub struct QueryResult {
     pub edges: Vec<WeightedEdge>,
     /// Paths found (for path queries).
     pub paths: Vec<ConfidencePath>,
+}
+
+/// A pair of contradictory edges between the same nodes.
+#[derive(Debug, Clone)]
+pub struct ContradictionPair {
+    pub node_a_label: String,
+    pub node_b_label: String,
+    pub edge_a_relation: String,
+    pub edge_a_confidence: f64,
+    pub edge_a_context: String,
+    pub edge_b_relation: String,
+    pub edge_b_confidence: f64,
+    pub edge_b_context: String,
+}
+
+/// Statistics about uncertainty in a graph.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct UncertaintyStats {
+    pub edge_count: usize,
+    pub uncertain_edge_count: usize,
+    pub avg_confidence: f64,
+}
+
+/// A group of competing hypotheses between the same pair of nodes.
+#[derive(Debug, Clone)]
+pub struct CompetitorGroup {
+    pub node_a_label: String,
+    pub node_b_label: String,
+    pub competitors: Vec<Competitor>,
+}
+
+/// A single competitor in a group.
+#[derive(Debug, Clone)]
+pub struct Competitor {
+    pub relation: String,
+    pub confidence: f64,
+    pub context: String,
+}
+
+/// A cross-domain pattern match between two topic graphs.
+#[derive(Debug, Clone)]
+pub struct PatternMatch {
+    pub source_from: String,
+    pub source_to: String,
+    pub source_relation: String,
+    pub source_confidence: f64,
+    pub target_from: String,
+    pub target_to: String,
+    pub target_relation: String,
+    pub target_confidence: f64,
+    pub similarity_reason: String,
 }
 
 /// Confidence below which edges are archived (moved to separate file).
@@ -885,8 +967,307 @@ impl KnowledgeGraph {
             justificatory_chain: Vec::new(),
             source_id: "maintenance:cross-link".into(),
             decay_category: DecayCategory::Fact,
+            beneficial_impact: 0.0,
+            corroboration_strength: 0.0,
+            competition_group: String::new(),
         };
         self.graph.add_edge(from, to, edge);
+    }
+
+    /// Add an edge to the graph (used by synthesis and other direct-write operations).
+    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, edge: KnowledgeEdge) {
+        self.graph.add_edge(from, to, edge);
+    }
+
+    // ── Darwinian competition methods ────────────────────────────────
+
+    /// Find competing hypotheses: edges between the same pair of nodes
+    /// that offer alternative explanations (different relations).
+    pub fn find_competitors(&self) -> Vec<CompetitorGroup> {
+        let mut pair_edges: HashMap<(usize, usize), Vec<(petgraph::graph::EdgeIndex, String, f64, String)>> =
+            HashMap::new();
+
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            if !Self::is_edge_current(edge) { continue; }
+            if edge.confidence < MIN_PROMPT_CONFIDENCE { continue; }
+
+            if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                let key = if src.index() <= tgt.index() {
+                    (src.index(), tgt.index())
+                } else {
+                    (tgt.index(), src.index())
+                };
+                pair_edges.entry(key).or_default().push((
+                    edge_idx,
+                    edge.relation.clone(),
+                    edge.confidence,
+                    edge.context.clone(),
+                ));
+            }
+        }
+
+        let mut groups = Vec::new();
+        for ((a, b), edges) in &pair_edges {
+            let unique_relations: HashSet<&str> = edges.iter().map(|(_, r, _, _)| r.as_str()).collect();
+            if unique_relations.len() < 2 { continue; }
+
+            let node_a = self.graph.node_indices()
+                .find(|&n| n.index() == *a)
+                .map(|n| self.graph[n].label.clone())
+                .unwrap_or_else(|| "?".into());
+            let node_b = self.graph.node_indices()
+                .find(|&n| n.index() == *b)
+                .map(|n| self.graph[n].label.clone())
+                .unwrap_or_else(|| "?".into());
+
+            let competitors: Vec<Competitor> = edges.iter().map(|(_, rel, conf, ctx)| {
+                Competitor {
+                    relation: rel.clone(),
+                    confidence: *conf,
+                    context: ctx.clone(),
+                }
+            }).collect();
+
+            groups.push(CompetitorGroup {
+                node_a_label: node_a,
+                node_b_label: node_b,
+                competitors,
+            });
+        }
+
+        groups
+    }
+
+    /// Compute corroboration strength for all edges.
+    /// An edge's corroboration strength is the average confidence of edges
+    /// that share a source or target node — the "neighbourhood strength".
+    pub fn compute_corroboration_strength(&mut self) {
+        let mut node_edge_confidences: HashMap<usize, Vec<f64>> = HashMap::new();
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                node_edge_confidences.entry(src.index()).or_default().push(edge.confidence);
+                node_edge_confidences.entry(tgt.index()).or_default().push(edge.confidence);
+            }
+        }
+
+        let node_avg: HashMap<usize, f64> = node_edge_confidences.iter()
+            .map(|(idx, confs)| {
+                let avg = confs.iter().sum::<f64>() / confs.len() as f64;
+                (*idx, avg)
+            })
+            .collect();
+
+        // Collect updates first to avoid borrow conflict.
+        let updates: Vec<(petgraph::graph::EdgeIndex, f64)> = self.graph.edge_indices()
+            .filter_map(|edge_idx| {
+                let (src, tgt) = self.graph.edge_endpoints(edge_idx)?;
+                let src_avg = node_avg.get(&src.index()).copied().unwrap_or(0.5);
+                let tgt_avg = node_avg.get(&tgt.index()).copied().unwrap_or(0.5);
+                Some((edge_idx, (src_avg + tgt_avg) / 2.0))
+            })
+            .collect();
+
+        for (edge_idx, strength) in updates {
+            self.graph[edge_idx].corroboration_strength = strength;
+        }
+    }
+
+    /// Find cross-domain patterns: edges in different topic areas with similar
+    /// relations that might inform each other.
+    pub fn find_cross_domain_patterns(&self, other: &KnowledgeGraph, limit: usize) -> Vec<PatternMatch> {
+        let mut matches = Vec::new();
+
+        for self_eid in self.graph.edge_indices() {
+            let self_edge = &self.graph[self_eid];
+            if self_edge.confidence < 0.5 { continue; }
+
+            for other_eid in other.graph.edge_indices() {
+                let other_edge = &other.graph[other_eid];
+                if other_edge.confidence < 0.5 { continue; }
+
+                let self_rel = self_edge.relation.to_lowercase();
+                let other_rel = other_edge.relation.to_lowercase();
+                if self_rel == other_rel || relations_similar(&self_rel, &other_rel) {
+                    if let (Some((ss, st)), Some((os, ot))) = (
+                        self.graph.edge_endpoints(self_eid),
+                        other.graph.edge_endpoints(other_eid),
+                    ) {
+                        matches.push(PatternMatch {
+                            source_from: self.graph[ss].label.clone(),
+                            source_to: self.graph[st].label.clone(),
+                            source_relation: self_edge.relation.clone(),
+                            source_confidence: self_edge.confidence,
+                            target_from: other.graph[os].label.clone(),
+                            target_to: other.graph[ot].label.clone(),
+                            target_relation: other_edge.relation.clone(),
+                            target_confidence: other_edge.confidence,
+                            similarity_reason: format!("Similar relation: '{}' ≈ '{}'",
+                                self_edge.relation, other_edge.relation),
+                        });
+                    }
+                }
+            }
+        }
+
+        matches.truncate(limit);
+        matches
+    }
+
+    // ── Rumination support methods ─────────────────────────────────
+
+    /// Find candidates for idea synthesis: A→B→C where both edges are strong
+    /// and no direct A→C edge exists yet.
+    /// Returns (A_index, C_index, B_label, relation_AB, relation_BC) tuples.
+    pub fn synthesis_candidates(&self, limit: usize) -> Vec<(NodeIndex, NodeIndex, String, String, String)> {
+        let mut candidates = Vec::new();
+
+        for b_idx in self.graph.node_indices() {
+            let b_label = self.graph[b_idx].label.clone();
+
+            // Get strong incoming edges to B.
+            let incoming: Vec<_> = self.graph.edges_directed(b_idx, Direction::Incoming)
+                .filter(|e| e.weight().confidence >= 0.6 && Self::is_edge_current(e.weight()))
+                .map(|e| (e.source(), e.weight().relation.clone()))
+                .collect();
+
+            // Get strong outgoing edges from B.
+            let outgoing: Vec<_> = self.graph.edges_directed(b_idx, Direction::Outgoing)
+                .filter(|e| e.weight().confidence >= 0.6 && Self::is_edge_current(e.weight()))
+                .map(|e| (e.target(), e.weight().relation.clone()))
+                .collect();
+
+            for (a_idx, r1) in &incoming {
+                for (c_idx, r2) in &outgoing {
+                    // Skip self-loops and A==C.
+                    if a_idx == c_idx || *a_idx == b_idx || *c_idx == b_idx { continue; }
+
+                    // Check that no direct A→C edge exists.
+                    let has_direct = self.graph.edges_directed(*a_idx, Direction::Outgoing)
+                        .any(|e| e.target() == *c_idx);
+                    if has_direct { continue; }
+
+                    candidates.push((*a_idx, *c_idx, b_label.clone(), r1.clone(), r2.clone()));
+                }
+            }
+        }
+
+        // Sort by combined confidence (use labels for determinism).
+        candidates.sort_by(|a, b| a.2.cmp(&b.2));
+        candidates.truncate(limit);
+        candidates
+    }
+
+    /// Find edges suitable for active refutation: important but uncertain beliefs.
+    /// Returns (from_label, to_label, relation, confidence, importance) tuples.
+    pub fn refutation_candidates(&self, limit: usize) -> Vec<(String, String, String, f64, f64)> {
+        let mut candidates: Vec<(String, String, String, f64, f64)> = Vec::new();
+
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+
+            // Select edges where confidence is moderate and importance is meaningful.
+            if edge.confidence < 0.35 || edge.confidence > 0.80 { continue; }
+            if edge.importance < 0.3 { continue; }
+            if edge.basis == Basis::Assumed { continue; }
+            if !Self::is_edge_current(edge) { continue; }
+
+            if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                let from_label = self.graph[src].label.clone();
+                let to_label = self.graph[tgt].label.clone();
+                candidates.push((
+                    from_label,
+                    to_label,
+                    edge.relation.clone(),
+                    edge.confidence,
+                    edge.importance,
+                ));
+            }
+        }
+
+        // Sort by priority: importance × (1 - confidence) descending.
+        candidates.sort_by(|a, b| {
+            let score_a = a.4 * (1.0 - a.3);
+            let score_b = b.4 * (1.0 - b.3);
+            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.truncate(limit);
+        candidates
+    }
+
+    /// Find pairs of contradictory edges (structured version of detect_contradictions).
+    pub fn contradiction_pairs(&self) -> Vec<ContradictionPair> {
+        let mut pair_edges: std::collections::HashMap<(usize, usize), Vec<(petgraph::graph::EdgeIndex, &KnowledgeEdge)>> =
+            std::collections::HashMap::new();
+
+        for edge_idx in self.graph.edge_indices() {
+            if let Some((src, tgt)) = self.graph.edge_endpoints(edge_idx) {
+                let key = if src.index() <= tgt.index() {
+                    (src.index(), tgt.index())
+                } else {
+                    (tgt.index(), src.index())
+                };
+                pair_edges.entry(key).or_default().push((edge_idx, &self.graph[edge_idx]));
+            }
+        }
+
+        let mut pairs = Vec::new();
+        for ((a, b), edges) in &pair_edges {
+            if edges.len() < 2 { continue; }
+            for i in 0..edges.len() {
+                for j in (i + 1)..edges.len() {
+                    let (_, e1) = &edges[i];
+                    let (_, e2) = &edges[j];
+                    if (e1.confidence > 0.7 && e2.confidence < 0.3)
+                        || (e2.confidence > 0.7 && e1.confidence < 0.3)
+                    {
+                        let node_a = self.graph.node_indices()
+                            .find(|&n| n.index() == *a)
+                            .map(|n| self.graph[n].label.clone())
+                            .unwrap_or_else(|| "?".into());
+                        let node_b = self.graph.node_indices()
+                            .find(|&n| n.index() == *b)
+                            .map(|n| self.graph[n].label.clone())
+                            .unwrap_or_else(|| "?".into());
+                        pairs.push(ContradictionPair {
+                            node_a_label: node_a,
+                            node_b_label: node_b,
+                            edge_a_relation: e1.relation.clone(),
+                            edge_a_confidence: e1.confidence,
+                            edge_a_context: e1.context.clone(),
+                            edge_b_relation: e2.relation.clone(),
+                            edge_b_confidence: e2.confidence,
+                            edge_b_context: e2.context.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        pairs
+    }
+
+    /// Compute uncertainty statistics for this graph.
+    pub fn uncertainty_stats(&self) -> UncertaintyStats {
+        let mut edge_count = 0usize;
+        let mut uncertain_count = 0usize;
+        let mut total_confidence = 0.0f64;
+
+        for edge_idx in self.graph.edge_indices() {
+            let edge = &self.graph[edge_idx];
+            edge_count += 1;
+            total_confidence += edge.confidence;
+            if edge.confidence < 0.6 {
+                uncertain_count += 1;
+            }
+        }
+
+        UncertaintyStats {
+            edge_count,
+            uncertain_edge_count: uncertain_count,
+            avg_confidence: if edge_count > 0 { total_confidence / edge_count as f64 } else { 0.0 },
+        }
     }
 
     /// Export the graph in a format suitable for 3D force-directed visualization.
@@ -1022,6 +1403,9 @@ impl KnowledgeGraph {
                     justificatory_chain: Vec::new(),
                     source_id: "auto:orphan-linking".into(),
                     decay_category: DecayCategory::Assumed,
+                    beneficial_impact: 0.0,
+                    corroboration_strength: 0.0,
+                    competition_group: String::new(),
                 });
             }
         }
@@ -1383,25 +1767,33 @@ impl KnowledgeGraph {
                 let labels: Vec<&str> = path.nodes.iter()
                     .filter_map(|&idx| self.graph.node_weight(idx).map(|n| n.label.as_str()))
                     .collect();
-                let bar = confidence_bar(path.cumulative_confidence);
+                let conf_label = if path.cumulative_confidence >= 0.8 { "ESTABLISHED" }
+                    else if path.cumulative_confidence >= 0.6 { "LIKELY" }
+                    else if path.cumulative_confidence >= 0.4 { "POSSIBLE" }
+                    else if path.cumulative_confidence >= 0.2 { "UNCERTAIN" }
+                    else { "DOUBTFUL" };
                 output.push_str(&format!("{} [{} {:.0}%]\n",
-                    labels.join(" → "), bar, path.cumulative_confidence * 100.0));
+                    labels.join(" → "), conf_label, path.cumulative_confidence * 100.0));
             }
             output.push('\n');
         }
 
         // Render nodes with their edges.
         for (idx, node, score) in &result.nodes {
-            let bar = confidence_bar(*score);
-            output.push_str(&format!("- {} ({}): {} [{}]\n",
-                node.label, node.kind, node.summary, bar));
+            let score_label = if *score >= 0.8 { "ESTABLISHED" }
+                else if *score >= 0.6 { "LIKELY" }
+                else if *score >= 0.4 { "POSSIBLE" }
+                else if *score >= 0.2 { "UNCERTAIN" }
+                else { "DOUBTFUL" };
+            output.push_str(&format!("- {} ({}): {} [{} {:.0}%]\n",
+                node.label, node.kind, node.summary, score_label, score * 100.0));
             for edge in &result.edges {
                 if &edge.from == idx {
                     if let Some(target) = self.graph.node_weight(edge.to) {
-                        let ebar = confidence_bar(edge.edge.confidence);
+                        let elabel = edge.edge.confidence_label().to_uppercase();
                         output.push_str(&format!("  → {} → {} [{} {:.0}%]\n",
                             edge.edge.relation, target.label,
-                            ebar, edge.edge.confidence * 100.0));
+                            elabel, edge.edge.confidence * 100.0));
                     }
                 }
             }
@@ -1564,19 +1956,11 @@ impl KnowledgeGraph {
                     let target = edge_idx.target();
                     let edge = edge_idx.weight();
                     let target_node = &self.graph[target];
-                    let conf_str = if edge.confidence >= 0.8 {
-                        if edge.tests > 0 {
-                            format!(" [{}×]", edge.tests)
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        let bar = confidence_bar(edge.confidence);
-                        format!(" [{} {:.0}%{}]",
-                            bar,
-                            edge.confidence * 100.0,
-                            if edge.tests > 0 { format!(" {}×", edge.tests) } else { String::new() })
-                    };
+                    let label = edge.confidence_label().to_uppercase();
+                    let conf_str = format!(" [{} {:.0}%{}]",
+                        label,
+                        edge.confidence * 100.0,
+                        if edge.tests > 0 { format!(" {}×", edge.tests) } else { String::new() });
                     output.push_str(&format!(
                         "  → {} → {}{}\n",
                         edge.relation, target_node.label, conf_str
@@ -1834,6 +2218,9 @@ impl KnowledgeGraph {
                 },
                 source_id: in_w.source_id.clone(),
                 decay_category: in_w.decay_category.clone(),
+                beneficial_impact: in_w.beneficial_impact.max(out_w.beneficial_impact),
+                corroboration_strength: (in_w.corroboration_strength + out_w.corroboration_strength) / 2.0,
+                competition_group: in_w.competition_group.clone(),
             };
 
             self.graph.add_edge(src, tgt, combined);
@@ -1966,6 +2353,25 @@ fn labels_match(a: &str, b: &str) -> bool {
 }
 
 /// Levenshtein edit distance between two strings.
+/// Check if two relation names are semantically similar.
+/// Uses word overlap and Levenshtein distance for fuzzy matching.
+fn relations_similar(a: &str, b: &str) -> bool {
+    if a == b { return true; }
+    // Check word overlap.
+    let a_words: HashSet<&str> = a.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2).collect();
+    let b_words: HashSet<&str> = b.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2).collect();
+    if !a_words.is_empty() && !b_words.is_empty() {
+        let overlap = a_words.intersection(&b_words).count();
+        let total = a_words.len().max(b_words.len());
+        if overlap as f64 / total as f64 >= 0.5 { return true; }
+    }
+    // Fallback: Levenshtein distance relative to length.
+    let max_len = a.len().max(b.len());
+    if max_len == 0 { return true; }
+    let dist = levenshtein(a, b);
+    (dist as f64 / max_len as f64) < 0.3
+}
+
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
@@ -2696,6 +3102,7 @@ fn is_function_word(w: &str) -> bool {
 
 /// Visual confidence bar (language-agnostic).
 /// ●●●●○ for 80%, ●●○○○ for 40%, etc.
+#[allow(dead_code)]
 fn confidence_bar(confidence: f64) -> String {
     let filled = (confidence * 5.0).round() as usize;
     let empty = 5 - filled.min(5);
@@ -3326,8 +3733,10 @@ mod tests {
 
         let result = kg.query_about("Roy", 1);
         let rendered = kg.render_query_result(&result, 4096);
-        // Should contain confidence indicators.
-        assert!(rendered.contains("●"));
+        // Should contain graduated trust labels and confidence percentages.
+        assert!(rendered.contains("ESTABLISHED") || rendered.contains("LIKELY")
+            || rendered.contains("POSSIBLE") || rendered.contains("UNCERTAIN")
+            || rendered.contains("DOUBTFUL"), "rendered should contain a trust label: {}", rendered);
         assert!(rendered.contains("Roy"));
         assert!(rendered.contains("works_on"));
         assert!(rendered.contains("%"));

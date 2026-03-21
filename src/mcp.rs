@@ -432,6 +432,9 @@ fn handle_tool_call(
                 }],
                 source_id: "mcp".into(),
                 decay_category,
+                beneficial_impact: 0.0,
+                corroboration_strength: 0.0,
+                competition_group: String::new(),
             });
             kg.save();
             format!("Added edge: '{}' → {} → '{}' [confidence: {:.0}%]", from, relation, to, confidence * 100.0)

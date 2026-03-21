@@ -627,6 +627,34 @@
       <span>Allow modifying files outside workspace <span style="color:var(--text-dim)">(e.g. Anthill source code — off by default for safety)</span></span>
     </label>
 
+    <h3 class="section-title">Rumination</h3>
+    <label class="toggle-row">
+      <input type="checkbox" id="c-rumination-enabled">
+      <span>Enable autonomous thinking <span style="color:var(--text-dim)">(ANT actively improves its knowledge when idle)</span></span>
+    </label>
+    <div id="rumination-options" style="margin-left:24px;margin-top:8px;display:none">
+      <div class="field" style="margin-bottom:6px">
+        <span class="field-label">Interval (hours)</span>
+        <input id="c-rumination-interval" class="field-input" type="number" value="2" min="1" max="24" style="width:60px">
+      </div>
+      <label class="toggle-row" style="margin-bottom:4px">
+        <input type="checkbox" id="c-rumination-refutation" checked>
+        <span>Active refutation <span style="color:var(--text-dim)">(challenge existing beliefs)</span></span>
+      </label>
+      <label class="toggle-row" style="margin-bottom:4px">
+        <input type="checkbox" id="c-rumination-synthesis" checked>
+        <span>Idea synthesis <span style="color:var(--text-dim)">(conjecture transitive relationships)</span></span>
+      </label>
+      <label class="toggle-row" style="margin-bottom:4px">
+        <input type="checkbox" id="c-rumination-contradiction" checked>
+        <span>Contradiction resolution <span style="color:var(--text-dim)">(pit conflicting beliefs against each other)</span></span>
+      </label>
+      <label class="toggle-row" style="margin-bottom:4px">
+        <input type="checkbox" id="c-rumination-initiative">
+        <span>Autonomous initiative <span style="color:var(--text-dim)">(self-improvement of weak areas — uses more tokens)</span></span>
+      </label>
+    </div>
+
     <h3 class="section-title">Personality</h3>
     <div class="field">
       <span class="field-label">System Prompt</span>
@@ -1901,6 +1929,19 @@ async function showConfigModal(antId) {
       document.getElementById('c-backup-remote').value = cfg.backup_remote || '';
       document.getElementById('c-prompt').value = cfg.system_prompt || '';
 
+      // Rumination config.
+      const rum = cfg.rumination || {};
+      document.getElementById('c-rumination-enabled').checked = rum.enabled || false;
+      document.getElementById('c-rumination-interval').value = Math.round((rum.interval_secs || 7200) / 3600);
+      document.getElementById('c-rumination-refutation').checked = rum.refutation_enabled !== false;
+      document.getElementById('c-rumination-synthesis').checked = rum.synthesis_enabled !== false;
+      document.getElementById('c-rumination-contradiction').checked = rum.contradiction_resolution !== false;
+      document.getElementById('c-rumination-initiative').checked = rum.initiative_enabled || false;
+      document.getElementById('rumination-options').style.display = rum.enabled ? 'block' : 'none';
+      document.getElementById('c-rumination-enabled').onchange = function() {
+        document.getElementById('rumination-options').style.display = this.checked ? 'block' : 'none';
+      };
+
       // Load available backends and render checkboxes.
       const selectedBackends = cfg.backends || ['claude'];
       try {
@@ -1956,6 +1997,16 @@ async function saveConfig() {
     backup_interval_hours: parseInt(document.getElementById('c-backup-hrs').value) || 0,
     backup_remote: document.getElementById('c-backup-remote').value.trim(),
     system_prompt: document.getElementById('c-prompt').value.trim(),
+    rumination: {
+      enabled: document.getElementById('c-rumination-enabled').checked,
+      interval_secs: (parseInt(document.getElementById('c-rumination-interval').value) || 2) * 3600,
+      refutation_enabled: document.getElementById('c-rumination-refutation').checked,
+      synthesis_enabled: document.getElementById('c-rumination-synthesis').checked,
+      contradiction_resolution: document.getElementById('c-rumination-contradiction').checked,
+      initiative_enabled: document.getElementById('c-rumination-initiative').checked,
+      min_idle_secs: 300,
+      topics: [],
+    },
   };
 
   try {
