@@ -104,6 +104,11 @@ struct Args {
     /// Memory directory for MCP server mode.
     #[arg(long)]
     memory_dir: Option<PathBuf>,
+
+    /// Migrate and fix all knowledge graphs in a directory.
+    /// Fixes invalid enum values, converts non-graph files, cleans up corrupted files.
+    #[arg(long)]
+    migrate_graphs: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -240,6 +245,12 @@ async fn main() -> anyhow::Result<()> {
         println!("  URL: {}", url);
         println!("  Code: {}  (expires in 5 minutes)", code);
         println!();
+        return Ok(());
+    }
+
+    // Migrate graphs — fix invalid values, clean up.
+    if let Some(ref dir) = args.migrate_graphs {
+        store::migration::migrate_all(dir);
         return Ok(());
     }
 
