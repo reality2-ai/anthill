@@ -286,6 +286,10 @@ pub struct KnowledgeEdge {
 /// than a peer-reviewed paper, but even a paper that fails refutation loses value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reference {
+    /// Unique citation code — used to link graph elements to references.
+    /// Format: "cite-<8hex>" (auto-generated if empty).
+    #[serde(default)]
+    pub cite_id: String,
     /// URL of the source (if web-based).
     #[serde(default)]
     pub url: String,

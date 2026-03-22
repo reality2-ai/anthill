@@ -34,7 +34,10 @@ struct GraphInsights {
 }
 
 /// A citation collected during export, with the edge it supports.
+#[derive(Clone)]
 struct CollectedCitation {
+    /// Unique citation code from the graph.
+    cite_id: String,
     url: String,
     title: String,
     author: String,
@@ -122,8 +125,14 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                 if let Some(cites) = link["citations"].as_array() {
                     for cite in cites {
                         let url = cite["url"].as_str().unwrap_or("").to_string();
-                        if !url.is_empty() && seen_urls.insert(url.clone()) {
+                        let cite_id = cite["cite_id"].as_str().unwrap_or("").to_string();
+                        let key = if !url.is_empty() { url.clone() } else { cite_id.clone() };
+                        if !key.is_empty() && seen_urls.insert(key) {
+                            let final_cite_id = if cite_id.is_empty() {
+                                format!("cite-{:04x}", all_citations.len() + 1)
+                            } else { cite_id };
                             all_citations.push(CollectedCitation {
+                                cite_id: final_cite_id,
                                 url,
                                 title: cite["title"].as_str().unwrap_or("").to_string(),
                                 author: cite["author"].as_str().unwrap_or("").to_string(),
@@ -372,6 +381,47 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str) -> String {
     raw_insights.to_string()
 }
 
+/// Post-process AI text to renumber citation codes [cite-xxxx] to [1], [2]...
+/// in order of first appearance. Returns the renumbered text and the
+/// ordered list of citations for the reference section.
+fn renumber_citations(text: &str, all_citations: &[CollectedCitation]) -> (String, Vec<CollectedCitation>) {
+    // Build a lookup from cite_id to citation.
+    let cite_map: std::collections::HashMap<&str, &CollectedCitation> = all_citations.iter()
+        .map(|c| (c.cite_id.as_str(), c))
+        .collect();
+
+    // Find all [cite-xxxx] references in order of appearance.
+    let mut ordered: Vec<CollectedCitation> = Vec::new();
+    let mut id_to_num: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut result = text.to_string();
+
+    // Regex-like scan for [cite-xxxx] patterns.
+    let mut pos = 0;
+    while let Some(start) = result[pos..].find("[cite-") {
+        let abs_start = pos + start;
+        if let Some(end) = result[abs_start..].find(']') {
+            let cite_id = &result[abs_start + 1..abs_start + end].to_string();
+            if !id_to_num.contains_key(cite_id.as_str()) {
+                let num = ordered.len() + 1;
+                id_to_num.insert(cite_id.clone(), num);
+                if let Some(&cite) = cite_map.get(cite_id.as_str()) {
+                    ordered.push(cite.clone());
+                }
+            }
+            pos = abs_start + end + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Replace all [cite-xxxx] with [N] using the numbering.
+    for (cite_id, num) in &id_to_num {
+        result = result.replace(&format!("[{}]", cite_id), &format!("[{}]", num));
+    }
+
+    (result, ordered)
+}
+
 /// Format a list as "A, B, and C" (Oxford comma).
 fn format_list(items: &[String]) -> String {
     match items.len() {
@@ -471,16 +521,18 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     }
 
     // Include citations for the AI to reference.
+    // Use cite_id codes so we can post-process the AI output to renumber them.
     if !insights.all_citations.is_empty() {
-        raw_text.push_str("\nSources and references (include these as numbered citations in the text where relevant):\n");
-        for (i, cite) in insights.all_citations.iter().enumerate() {
-            raw_text.push_str(&format!("  [{}] {} — {}{}{} (quality: {:.0}%, supports: {})\n",
-                i + 1,
-                cite.title,
+        raw_text.push_str("\nSources and references. Use the citation code in square brackets \
+            (e.g. [cite-0001]) wherever a claim is supported by that source. ONLY use codes \
+            from this list — never invent a citation.\n");
+        for cite in &insights.all_citations {
+            raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
+                cite.cite_id,
+                if cite.title.is_empty() { &cite.url } else { &cite.title },
                 if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
                 if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
                 cite.url,
-                cite.quality * 100.0,
                 cite.supports,
             ));
         }
@@ -488,7 +540,13 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
 
     // Ask AI to polish into readable prose.
     let polished = ai_polish_summary(&raw_text, ant_name);
+    let mut ordered_refs: Vec<CollectedCitation> = Vec::new();
     let insights_html = if polished != raw_text {
+        // Post-process: renumber cite-xxxx codes to [1], [2]... in order of appearance.
+        let (renumbered_text, refs) = renumber_citations(&polished, &insights.all_citations);
+        ordered_refs = refs;
+        let renumbered = renumbered_text;
+
         // AI produced a polished version — wrap in HTML.
         let mut html = format!(
             "<h2>{} — Knowledge Summary</h2>\n\
@@ -497,7 +555,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
             ant_name, snapshot_id, crate::dateutil::datetime_now()
         );
         // Convert markdown-ish AI output to HTML paragraphs.
-        for line in polished.lines() {
+        for line in renumbered.lines() {
             let line = line.trim();
             if line.is_empty() { continue; }
             if line.starts_with("# ") {
@@ -524,15 +582,17 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
         raw_insights_html
     };
 
-    // Append reference list if there are citations.
-    let insights_html = if insights.all_citations.is_empty() {
+    // Append reference list — ordered by first appearance in the document.
+    let insights_html = if ordered_refs.is_empty() && insights.all_citations.is_empty() {
         insights_html
     } else {
         let mut with_refs = insights_html;
         with_refs.push_str("<div style='background:#1e293b;border-radius:8px;padding:24px 28px;margin:20px 0;line-height:1.6;font-size:13px'>\n");
         with_refs.push_str("<h3>References</h3>\n");
         with_refs.push_str("<ol style='padding-left:20px'>\n");
-        for cite in &insights.all_citations {
+        // Use the ordered list from renumbering (in order of first appearance).
+        let refs_to_show = if !ordered_refs.is_empty() { &ordered_refs } else { &insights.all_citations };
+        for cite in refs_to_show {
             let mut entry = String::new();
             if !cite.author.is_empty() { entry.push_str(&format!("{}. ", cite.author)); }
             if !cite.title.is_empty() {
