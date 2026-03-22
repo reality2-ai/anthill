@@ -211,7 +211,13 @@ impl BotRegistry {
     /// Send a message to a specific bot.
     pub async fn send_message(&self, bot_name: &str, chat_id: i64, message: String) -> bool {
         let bots = self.bots.read().await;
-        if let Some(handle) = bots.get(bot_name) {
+        // Case-insensitive lookup.
+        let handle = bots.get(bot_name)
+            .or_else(|| {
+                let lower = bot_name.to_lowercase();
+                bots.iter().find(|(k, _)| k.to_lowercase() == lower).map(|(_, v)| v)
+            });
+        if let Some(handle) = handle {
             let task_id = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -242,7 +248,13 @@ impl BotRegistry {
         question: String,
     ) -> bool {
         let bots = self.bots.read().await;
-        if let Some(handle) = bots.get(target_ant) {
+        // Case-insensitive ANT lookup.
+        let handle = bots.get(target_ant)
+            .or_else(|| {
+                let lower = target_ant.to_lowercase();
+                bots.iter().find(|(k, _)| k.to_lowercase() == lower).map(|(_, v)| v)
+            });
+        if let Some(handle) = handle {
             let task_id = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
