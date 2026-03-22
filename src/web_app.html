@@ -988,28 +988,40 @@ const NODE_COLORS = {
 
 async function exportGraph() {
   if (!state.activeBot) return;
+  const btn = event.target;
+  const origText = btn.textContent;
+  btn.textContent = 'Exporting...';
+  btn.disabled = true;
   try {
     const resp = await authFetch(`/api/ants/${state.activeBot}/export`);
-    if (!resp.ok) { alert('Export failed: ' + resp.status); return; }
+    if (!resp.ok) { alert('Export failed: ' + resp.status + ' ' + await resp.text()); return; }
     const blob = await resp.blob();
-    // Get filename from Content-Disposition header.
     const cd = resp.headers.get('Content-Disposition') || '';
     const match = cd.match(/filename="(.+?)"/);
     const filename = match ? match[1] : `${state.activeBot}-knowledge.html`;
-    // Trigger download.
+    // Trigger download — use both methods for browser compatibility.
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    // Clean up after a delay (some browsers need the element to persist briefly).
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1000);
     // Show GitHub gist URL if published.
     const gistUrl = resp.headers.get('X-Gist-Url');
     if (gistUrl) {
-      alert('Published to GitHub!\n\n' + gistUrl + '\n\nThe file was also downloaded.');
+      setTimeout(() => alert('Also published to GitHub!\n\n' + gistUrl), 500);
     }
   } catch (e) {
     alert('Export error: ' + e.message);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
   }
 }
 
