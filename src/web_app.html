@@ -561,6 +561,22 @@
   </div>
 </div>
 
+<!-- Node update dialog (right-click on graph node) -->
+<div id="node-update-modal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:480px">
+    <h2 style="margin-bottom:4px">Update Node</h2>
+    <p id="node-update-label" style="color:var(--text-dim);font-size:14px;margin-bottom:16px"></p>
+    <div class="field">
+      <span class="field-label">Describe the update</span>
+      <textarea id="node-update-text" class="field-input" rows="4" style="resize:vertical" placeholder="e.g. Change location to Auckland, or Add that this person works at University of Auckland"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+      <button onclick="hideNodeUpdateModal()" style="background:none;color:var(--text-dim);border:1px solid var(--border-light);border-radius:6px;padding:8px 16px;cursor:pointer">Cancel</button>
+      <button onclick="submitNodeUpdate()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-weight:600">Update</button>
+    </div>
+  </div>
+</div>
+
 <!-- Settings modal -->
 <div id="config-modal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
   <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto">
@@ -799,6 +815,75 @@ initTheme();
 
 function closeGraphInfo() {
   document.getElementById('graph-info').style.display = 'none';
+}
+
+// --- Node update dialog (right-click on graph node) ---
+let pendingNodeUpdate = null;
+
+function showNodeUpdateDialog(node, graphData) {
+  pendingNodeUpdate = { node, graphData };
+  const modal = document.getElementById('node-update-modal');
+  const label = document.getElementById('node-update-label');
+  const text = document.getElementById('node-update-text');
+
+  // Show node info and its connections for context.
+  const edges = graphData.links.filter(l =>
+    (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id);
+  let info = `<b>${node.label}</b> (${node.kind})`;
+  if (edges.length) {
+    const conns = edges.map(e => {
+      const other = (e.source.id || e.source) === node.id
+        ? (graphData.nodes.find(n => n.id === (e.target.id || e.target)) || {}).label || '?'
+        : (graphData.nodes.find(n => n.id === (e.source.id || e.source)) || {}).label || '?';
+      return `${e.relation} → ${other}`;
+    });
+    info += `<br><span style="color:var(--text-dim)">${conns.join(', ')}</span>`;
+  }
+  label.innerHTML = info;
+  text.value = '';
+  modal.style.display = 'flex';
+  text.focus();
+}
+
+function hideNodeUpdateModal() {
+  document.getElementById('node-update-modal').style.display = 'none';
+  pendingNodeUpdate = null;
+}
+
+function submitNodeUpdate() {
+  const text = document.getElementById('node-update-text').value.trim();
+  if (!text || !pendingNodeUpdate || !state.activeBot || !state.ws) return;
+
+  const node = pendingNodeUpdate.node;
+  const selector = document.getElementById('graph-selector');
+  const graphName = (selector ? selector.value : '') || 'meta';
+
+  // Build a prompt that tells the AI exactly which node to update and how.
+  const prompt = `UPDATE KNOWLEDGE GRAPH NODE:\n\n` +
+    `Graph: ${graphName}\n` +
+    `Node: "${node.label}" (kind: ${node.kind})\n\n` +
+    `User's update: ${text}\n\n` +
+    `Apply this update to the node and its edges in the knowledge graph. ` +
+    `Use the graph tools (graph_add_edge, graph_update_evidence, graph_strengthen, etc.) ` +
+    `to make the changes. If existing edges need correcting, update or replace them. ` +
+    `If new edges are needed, add them with appropriate confidence and evidence type ` +
+    `(human_attestation). Brief summary of what you changed when done.`;
+
+  // Send as a regular chat message.
+  if (!state.messages[state.activeBot]) state.messages[state.activeBot] = [];
+  state.messages[state.activeBot].push({ role: 'user', text: `📝 Update node **${node.label}**: ${text}` });
+  showTyping(state.activeBot);
+
+  wsSendSigned({
+    type: 'chat',
+    bot: state.activeBot,
+    message: prompt,
+  });
+
+  hideNodeUpdateModal();
+  // Switch to chat tab to see the result.
+  switchTab('chat');
+  renderChat();
 }
 
 const state = {
@@ -1188,7 +1273,14 @@ async function loadGraph(graphName) {
           { x: node.x, y: node.y, z: node.z },
           1500  // ms transition
         );
+      })
+      .onNodeRightClick(node => {
+        // Open update dialog for this node.
+        showNodeUpdateDialog(node, data);
       });
+
+    // Suppress browser context menu on the graph canvas.
+    container.addEventListener('contextmenu', e => e.preventDefault());
 
     // Subtle tumble on connected nodes — sine-driven rotation on 3 axes.
     const connectedNodes = new Set();
