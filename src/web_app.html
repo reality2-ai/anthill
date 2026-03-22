@@ -1627,8 +1627,12 @@ function renderChat() {
   }
 
   addCopyButtons();
-  // Scroll after layout to ensure new content is measured.
-  requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+  // Only auto-scroll if the user is near the bottom (within 150px).
+  // If they've scrolled up to read earlier messages, don't interrupt.
+  const isNearBottom = (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
+  if (isNearBottom) {
+    requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+  }
 }
 
 function renderTasks() {
@@ -1665,9 +1669,12 @@ function renderTasks() {
     </div>`;
   }).join('');
 
-  // Tasks panel changed size — re-scroll chat to keep latest message visible.
+  // Only re-scroll chat if the user is already near the bottom.
   const chat = document.getElementById('chat');
-  if (chat) requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+  if (chat) {
+    const isNearBottom = (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
+    if (isNearBottom) requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+  }
 }
 
 // Update task timers every second
