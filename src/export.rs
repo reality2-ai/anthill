@@ -142,202 +142,179 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     let mut html = String::new();
 
     html.push_str(&format!(
-        "<h2>{} — Knowledge Snapshot</h2>\n\
-         <p style='color:#94a3b8'>Snapshot ID: {} | {} nodes, {} edges | Average confidence: {:.0}%</p>\n",
-        ant_name, snapshot_id, insights.total_nodes, insights.total_edges,
-        insights.avg_confidence * 100.0
+        "<h2>{} — Knowledge Summary</h2>\n\
+         <p style='color:#64748b;font-size:13px'>Snapshot {} | Generated {}</p>\n",
+        ant_name, snapshot_id, crate::dateutil::datetime_now()
     ));
 
-    // ── Executive Summary (narrative) ──
-    html.push_str("<div style='background:#1e293b;border-radius:8px;padding:20px;margin:20px 0;line-height:1.7'>\n");
-    html.push_str("<h3 style='margin-top:0'>Executive Summary</h3>\n");
-    html.push_str("<p style='color:#94a3b8;font-style:italic;border-left:3px solid #334155;padding-left:12px;margin-bottom:16px'>\
-        This document summarises what an AI reasoning agent knows about its subject areas. \
-        Unlike a conventional AI that simply stores and retrieves information, this system \
-        treats every piece of knowledge as a <em>conjecture</em> — an idea on trial. \
-        Confidence percentages show how well each idea has survived genuine attempts at \
-        disproof, not how many times it's been confirmed. Higher confidence means the idea \
-        has been tested from multiple angles and held up. Lower confidence means it needs \
-        more investigation.</p>\n");
+    html.push_str("<div style='background:#1e293b;border-radius:8px;padding:24px 28px;margin:20px 0;line-height:1.8;font-size:14px'>\n");
 
-    // Overall assessment.
-    let confidence_desc = if insights.avg_confidence >= 0.7 { "well-established" }
-        else if insights.avg_confidence >= 0.5 { "moderately confident" }
-        else if insights.avg_confidence >= 0.3 { "still developing" }
-        else { "largely exploratory" };
+    // Opening: what this document is.
+    html.push_str("<p style='color:#94a3b8;font-style:italic;border-left:3px solid #334155;padding-left:12px;margin-bottom:20px'>\
+        This document presents what an AI reasoning agent has learned about its subject areas. \
+        Every piece of knowledge here is treated as a conjecture — an idea that must earn its \
+        confidence by surviving genuine attempts to disprove it. When we say an idea has high \
+        confidence, we mean it has been challenged from multiple different angles and held up \
+        each time. Ideas with lower confidence are still being investigated.</p>\n");
 
+    // Overview.
     let active_topics: Vec<&(String, usize, usize, f64)> = insights.topic_summaries.iter()
-        .filter(|(_, n, _, _)| *n > 0)
-        .collect();
+        .filter(|(_, n, _, _)| *n > 0).collect();
 
-    html.push_str(&format!(
-        "<p>{} maintains knowledge across <b>{} topic areas</b> comprising {} entities \
-         and {} relationships. The overall confidence level is <b>{}</b> at {:.0}%, \
-         meaning {}.</p>\n",
-        ant_name,
-        active_topics.len(),
-        insights.total_nodes,
-        insights.total_edges,
-        confidence_desc,
-        insights.avg_confidence * 100.0,
-        match confidence_desc {
-            "well-established" => "most beliefs have survived testing and are backed by diverse evidence",
-            "moderately confident" => "many beliefs have supporting evidence but would benefit from further refutation testing",
-            "still developing" => "the knowledge base is growing but many conjectures need more rigorous testing",
-            _ => "most ideas are early-stage conjectures that need significant evidence gathering",
-        }
-    ));
+    let confidence_word = if insights.avg_confidence >= 0.7 { "strong" }
+        else if insights.avg_confidence >= 0.5 { "moderate" }
+        else if insights.avg_confidence >= 0.3 { "developing" }
+        else { "early" };
 
-    // Topic-by-topic narrative with plain-language explanations.
-    if !active_topics.is_empty() {
-        html.push_str("<h4>Knowledge Areas</h4>\n");
-        html.push_str("<p style='color:#94a3b8;font-size:12px'>Each section below describes a topic this ANT has studied. \
-            Confidence percentages reflect how rigorously each claim has been tested — \
-            higher means the idea has survived more diverse challenges, not just been repeated more often.</p>\n");
-        for (name, nodes, edges, avg) in &insights.topic_summaries {
-            if *nodes == 0 { continue; }
-            let pretty_name = name.replace('-', " ");
-            let density = if *nodes > 1 { *edges as f64 / *nodes as f64 } else { 0.0 };
-            let density_desc = if density >= 3.0 { "richly interconnected" }
-                else if density >= 1.5 { "well-connected" }
-                else if density >= 0.5 { "loosely connected" }
-                else { "mostly standalone" };
-            let conf_desc = if *avg >= 0.7 { "well-tested" }
-                else if *avg >= 0.5 { "partially tested" }
-                else { "early-stage" };
-
-            // Include topic description if available.
-            let description = insights.topic_descriptions.get(name.as_str())
-                .map(|d| format!(" {}", d))
-                .unwrap_or_default();
-
-            html.push_str(&format!(
-                "<p><b style='font-size:15px'>{}</b>{} — \
-                 This area covers {} concepts and {} relationships between them ({}). \
-                 The evidence is {} ({:.0}% average confidence). {}</p>\n",
-                pretty_name,
-                if description.is_empty() { String::new() } else { format!("<br><span style='color:#94a3b8'>{}</span>", description) },
-                nodes, edges, density_desc,
-                conf_desc, avg * 100.0,
-                if *avg < 0.5 { "Many ideas here are still conjectures that need testing against external sources." }
-                else if *avg < 0.7 { "The core ideas have some support but would benefit from being challenged from different angles." }
-                else { "These ideas have been tested from multiple angles and hold up well." }
-            ));
-
-            // Show key entities in this topic with their summaries.
-            let topic_nodes: Vec<(&String, &String)> = insights.node_summaries.iter()
-                .filter(|(label, _)| {
-                    // Check if this node appears in edges from this topic.
-                    insights.strongest_beliefs.iter().any(|(f, t, _, _)| {
-                        f == *label || t == *label
-                    }) || insights.most_connected.iter().any(|(l, _)| l == *label)
-                })
-                .take(3)
-                .collect();
-
-            if !topic_nodes.is_empty() {
-                html.push_str("<ul style='margin:4px 0 12px 20px;color:#cbd5e1'>\n");
-                for (label, summary) in &topic_nodes {
-                    let short = if summary.len() > 200 { &summary[..200] } else { summary.as_str() };
-                    html.push_str(&format!("<li><b>{}</b>: {}</li>\n", label, short));
-                }
-                html.push_str("</ul>\n");
+    if active_topics.len() == 1 {
+        let (name, nodes, edges, avg) = active_topics[0];
+        let pretty = name.replace('-', " ");
+        let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
+        html.push_str(&format!(
+            "<p>This summary covers <b>{}</b>{}. The knowledge base contains {} concepts \
+             connected by {} relationships, with an overall confidence of {:.0}%. \
+             The evidence base is {} — {}.</p>\n",
+            pretty,
+            if desc.is_empty() { String::new() } else { format!(". {}", desc) },
+            nodes, edges, avg * 100.0, confidence_word,
+            match confidence_word {
+                "strong" => "most ideas here have been rigorously tested and are well-supported",
+                "moderate" => "the core ideas are supported but would benefit from further investigation",
+                "developing" => "many ideas are still being explored and tested",
+                _ => "this is an early exploration of the subject",
             }
-        }
+        ));
+    } else if !active_topics.is_empty() {
+        let topic_names: Vec<String> = active_topics.iter()
+            .map(|(n, _, _, _)| n.replace('-', " ")).collect();
+        html.push_str(&format!(
+            "<p>This summary covers {} areas of knowledge: {}. \
+             Across all topics, there are {} concepts connected by {} relationships, \
+             with an overall confidence level of {:.0}%.</p>\n",
+            active_topics.len(), format_list(&topic_names),
+            insights.total_nodes, insights.total_edges, insights.avg_confidence * 100.0
+        ));
     }
 
-    // Key findings from strongest beliefs.
-    if !insights.strongest_beliefs.is_empty() {
-        html.push_str("<h4>Key Findings</h4>\n<p>The strongest beliefs in this knowledge base — those that have earned high confidence through diverse evidence — are:</p>\n<ul>\n");
-        for (from, to, rel, conf) in insights.strongest_beliefs.iter().take(5) {
-            let from_desc = insights.node_summaries.get(from.as_str())
-                .map(|s| {
-                    let short = if s.len() > 120 { format!("{}...", &s[..120]) } else { s.clone() };
-                    format!(" <span style='color:#94a3b8;font-size:12px'>({})</span>", short)
-                })
-                .unwrap_or_default();
-            html.push_str(&format!(
-                "<li><b>{}</b>{} {} <b>{}</b> ({:.0}% confidence)</li>\n",
-                from, from_desc, rel, to, conf * 100.0
-            ));
-        }
-        html.push_str("</ul>\n");
-        html.push_str("<p style='color:#94a3b8;font-size:12px'>Note: In this system, high confidence means the belief has survived genuine attempts at refutation, \
-            not just been confirmed repeatedly. Confidence is capped based on evidence diversity — \
-            an idea needs different <em>kinds</em> of evidence, not just more of the same.</p>\n");
-    }
-
-    // Areas of uncertainty.
-    if !insights.weakest_beliefs.is_empty() {
-        html.push_str("<h4>Open Questions</h4>\n<p>These relationships have low confidence and would benefit from investigation:</p>\n<ul>\n");
-        for (from, to, rel, conf) in insights.weakest_beliefs.iter().take(5) {
-            html.push_str(&format!(
-                "<li><b>{}</b> {} <b>{}</b> ({:.0}% — {})</li>\n",
-                from, rel, to, conf * 100.0,
-                if *conf < 0.2 { "doubtful" } else if *conf < 0.4 { "uncertain" } else { "possible" }
-            ));
-        }
-        html.push_str("</ul>\n");
-    }
-
-    // Central concepts.
-    if !insights.most_connected.is_empty() {
-        html.push_str("<h4>Central Concepts</h4>\n<p>These entities are the most connected in the knowledge graph — they appear in the most relationships and are central to the overall understanding:</p>\n<ol>\n");
-        for (label, count) in insights.most_connected.iter().take(5) {
-            html.push_str(&format!("<li><b>{}</b> — {} connections</li>\n", label, count));
-        }
-        html.push_str("</ol>\n");
-    }
-
-    html.push_str("</div>\n");
-
-    // ── Detailed Tables ──
-    html.push_str("<h3>Detailed Breakdown</h3>\n");
-
-    // Topic table.
-    html.push_str("<h4>Topic Graphs</h4><table><tr><th>Topic</th><th>Nodes</th><th>Edges</th><th>Avg Confidence</th></tr>\n");
+    // Topic-by-topic narrative.
     for (name, nodes, edges, avg) in &insights.topic_summaries {
         if *nodes == 0 { continue; }
-        let colour = if *avg >= 0.7 { "#4ade80" } else if *avg >= 0.5 { "#fbbf24" } else { "#f87171" };
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td style='color:{}'>{:.0}%</td></tr>\n",
-            name, nodes, edges, colour, avg * 100.0
-        ));
-    }
-    html.push_str("</table>\n");
+        let pretty = name.replace('-', " ");
+        let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
 
-    // All strongest beliefs.
-    html.push_str("<h4>All Established Beliefs</h4><ul>\n");
-    for (from, to, rel, conf) in &insights.strongest_beliefs {
-        html.push_str(&format!(
-            "<li><b>{}</b> → {} → <b>{}</b> <span class='conf-high'>{:.0}%</span></li>\n",
-            from, rel, to, conf * 100.0
-        ));
-    }
-    html.push_str("</ul>\n");
+        html.push_str(&format!("<h3 style=\'margin-top:24px\'>{}</h3>\n", pretty));
 
-    // All weakest beliefs.
-    html.push_str("<h4>All Uncertain Beliefs</h4><ul>\n");
-    for (from, to, rel, conf) in &insights.weakest_beliefs {
-        let cls = if *conf >= 0.3 { "conf-low" } else { "conf-weak" };
-        html.push_str(&format!(
-            "<li><b>{}</b> → {} → <b>{}</b> <span class='{}'>{:.0}%</span></li>\n",
-            from, rel, to, cls, conf * 100.0
-        ));
-    }
-    html.push_str("</ul>\n");
+        if !desc.is_empty() {
+            html.push_str(&format!("<p>{}</p>\n", desc));
+        }
 
-    // All connected nodes.
-    html.push_str("<h4>All Connected Nodes</h4><ul>\n");
-    for (label, count) in &insights.most_connected {
-        html.push_str(&format!("<li><b>{}</b> — {} connections</li>\n", label, count));
+        let density = if *nodes > 1 { *edges as f64 / *nodes as f64 } else { 0.0 };
+        html.push_str(&format!(
+            "<p>This area encompasses {} concepts with {} connections between them{}. \
+             The average confidence across these relationships is {:.0}%{}.</p>\n",
+            nodes, edges,
+            if density >= 2.0 { ", forming a richly interconnected body of knowledge" }
+            else if density >= 1.0 { "" }
+            else { ", though many concepts are not yet well connected to each other" },
+            avg * 100.0,
+            if *avg >= 0.7 { ", indicating well-tested understanding" }
+            else if *avg >= 0.5 { ", suggesting the foundations are present but would benefit from deeper investigation" }
+            else { ", meaning much of this knowledge is still in the conjecture phase" }
+        ));
+
+        // Key entities as flowing prose.
+        let relevant: Vec<(&String, &String)> = insights.node_summaries.iter()
+            .filter(|(_, s)| s.len() > 20).take(5).collect();
+        if !relevant.is_empty() {
+            html.push_str("<p>Key concepts include ");
+            for (i, (label, summary)) in relevant.iter().enumerate() {
+                let short = if summary.len() > 150 {
+                    let end = summary[..150].rfind(' ').unwrap_or(150);
+                    format!("{}...", &summary[..end])
+                } else { summary.to_string() };
+                if i > 0 { html.push_str(". "); }
+                html.push_str(&format!("<b>{}</b>, which {}", label,
+                    if short.starts_with(|c: char| c.is_uppercase()) { short[..1].to_lowercase() + &short[1..] }
+                    else { short }));
+            }
+            html.push_str(".</p>\n");
+        }
     }
-    html.push_str("</ul>\n");
+
+    // What is well established.
+    if !insights.strongest_beliefs.is_empty() {
+        html.push_str("<h3 style=\'margin-top:24px\'>What Is Well Established</h3>\n");
+        html.push_str("<p>The following relationships have earned high confidence through diverse evidence — \
+            meaning they have survived genuine attempts at disproof from multiple angles, not simply \
+            been confirmed repeatedly.</p>\n<p>");
+        for (i, (from, to, rel, conf)) in insights.strongest_beliefs.iter().take(7).enumerate() {
+            let from_desc = insights.node_summaries.get(from.as_str())
+                .map(|s| { let short = if s.len() > 80 { format!("{}...", &s[..s[..80].rfind(' ').unwrap_or(80)]) } else { s.clone() }; format!(" ({})", short) })
+                .unwrap_or_default();
+            if i > 0 { html.push_str(" "); }
+            html.push_str(&format!("<b>{}</b>{} {} <b>{}</b> ({:.0}% confidence).",
+                from, from_desc, rel, to, conf * 100.0));
+        }
+        html.push_str("</p>\n");
+    }
+
+    // Areas needing investigation.
+    if !insights.weakest_beliefs.is_empty() {
+        html.push_str("<h3 style=\'margin-top:24px\'>Areas Needing Further Investigation</h3>\n");
+        html.push_str("<p>These ideas are still at an early stage. Low confidence does not mean an idea is \
+            wrong — it means it has not yet been sufficiently tested against independent evidence.</p>\n<p>");
+        for (i, (from, to, rel, conf)) in insights.weakest_beliefs.iter().take(5).enumerate() {
+            if i > 0 { html.push_str(" "); }
+            html.push_str(&format!("The relationship between <b>{}</b> and <b>{}</b> ({}) currently sits at {:.0}% confidence.",
+                from, to, rel, conf * 100.0));
+        }
+        html.push_str("</p>\n");
+    }
+
+    // Central themes.
+    if !insights.most_connected.is_empty() {
+        html.push_str("<h3 style=\'margin-top:24px\'>Central Themes</h3>\n");
+        let central: Vec<String> = insights.most_connected.iter().take(5)
+            .map(|(label, count)| {
+                let desc = insights.node_summaries.get(label.as_str())
+                    .map(|s| { let short = if s.len() > 100 { format!("{}...", &s[..s[..100].rfind(' ').unwrap_or(100)]) } else { s.clone() }; format!(" — {}", short) })
+                    .unwrap_or_default();
+                format!("<b>{}</b> ({} connections{})", label, count, desc)
+            }).collect();
+        html.push_str(&format!(
+            "<p>The concepts that tie this knowledge together most strongly are: {}. \
+             These act as hubs — understanding them provides the best foundation for \
+             understanding the broader subject matter.</p>\n", format_list(&central)));
+    }
+
+    // Closing.
+    html.push_str("<p style=\'margin-top:24px;padding-top:16px;border-top:1px solid #334155;color:#94a3b8;font-size:13px\'>\
+        This summary was generated from a Popperian knowledge graph — a system where every \
+        idea must earn its confidence through surviving genuine challenges. The interactive \
+        3D visualisation (Graph tab) allows exploration of individual concepts and their \
+        connections. All knowledge is provisional and subject to revision as new evidence emerges. \
+        Generated by <a href=\'https://github.com/reality2-ai/anthill\' style=\'color:#60a5fa\'>Anthill</a>.</p>\n");
+
+    html.push_str("</div>\n");
 
     html
 }
 
-/// Export all graphs for an ANT as a single self-contained HTML file.
+
+/// Format a list as "A, B, and C" (Oxford comma).
+fn format_list(items: &[String]) -> String {
+    match items.len() {
+        0 => String::new(),
+        1 => items[0].clone(),
+        2 => format!("{} and {}", items[0], items[1]),
+        _ => {
+            let last = &items[items.len() - 1];
+            let rest: Vec<&str> = items[..items.len() - 1].iter().map(|s| s.as_str()).collect();
+            format!("{}, and {}", rest.join(", "), last)
+        }
+    }
+}
+
 /// Export a single named graph.
 pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
