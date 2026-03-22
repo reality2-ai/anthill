@@ -993,7 +993,7 @@ function handleEvent(msg) {
       }
       renderBotList();
       renderTasks();
-      if (state.activeBot) renderChat();
+      if (state.activeBot) renderChat(true);
       break;
 
     case 'user_message':
@@ -1188,6 +1188,21 @@ async function loadGraph(graphName) {
         }
       }
       container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px">Knowledge graph is empty. Chat with the ANT to populate it.</div>';
+      return;
+    }
+
+    // Check WebGL availability before attempting to render.
+    try {
+      const testCanvas = document.createElement('canvas');
+      const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+      if (!gl) throw new Error('WebGL not available');
+    } catch (_) {
+      container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px">' +
+        '<b>WebGL is not available on this browser.</b><br><br>' +
+        'The 3D knowledge graph requires WebGL. Please check:<br>' +
+        '&bull; Hardware acceleration is enabled in browser settings<br>' +
+        '&bull; GPU drivers are installed and up to date<br>' +
+        '&bull; Try <code>chrome://flags/#ignore-gpu-blocklist</code> &rarr; Enable (Chrome/Edge)</div>';
       return;
     }
 
@@ -1599,13 +1614,13 @@ function selectBot(id) {
   switchTab('chat');
   document.getElementById('input').focus();
   renderBotList();
-  renderChat();
+  renderChat(true);
   renderTasks();
   // Close sidebar on mobile
   document.getElementById('sidebar').classList.remove('open');
 }
 
-function renderChat() {
+function renderChat(forceScroll) {
   const chat = document.getElementById('chat');
   const msgs = state.messages[state.activeBot] || [];
   chat.innerHTML = msgs.map((m, i) => {
@@ -1627,9 +1642,9 @@ function renderChat() {
   }
 
   addCopyButtons();
-  // Only auto-scroll if the user is near the bottom (within 150px).
-  // If they've scrolled up to read earlier messages, don't interrupt.
-  const isNearBottom = (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
+  // Always scroll to bottom when switching bots or opening a chat.
+  // Only auto-scroll on new messages if the user is near the bottom (within 150px).
+  const isNearBottom = forceScroll || (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
   if (isNearBottom) {
     requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
   }
