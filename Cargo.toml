@@ -65,6 +65,9 @@ ciborium = "0.2"
 # QR code generation (for key export)
 qrcode = "0.14"
 
+# UUID generation for knowledge graph snapshots
+uuid = { version = "1", features = ["v4"] }
+
 # Process management (Unix process group signals)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

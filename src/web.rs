@@ -64,6 +64,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/restart", post(restart_ant))
         .route("/api/ants/{id}/compact-history", post(compact_history))
         .route("/api/ants/{id}/graph", get(get_graph))
+        .route("/api/ants/{id}/export", get(export_graph))
         .route("/api/ants/{id}/rumination", get(get_rumination_log))
         .route("/api/backends", get(list_backends))
         .route("/api/doctor", get(doctor_check))
@@ -526,6 +527,48 @@ async fn get_rumination_log(
         "entries": log.entries,
         "count": log.entries.len(),
     })).into_response()
+}
+
+/// GET /api/ants/:id/export — download a self-contained HTML knowledge graph snapshot.
+async fn export_graph(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let bots = state.registry.bots.read().await;
+    let handle = match bots.get(&id) {
+        Some(h) => h,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let memory_dir = handle.working_dir.join("memory");
+    let display_name = handle.display_name.clone();
+    drop(bots);
+
+    // Generate globally unique UUID for this snapshot.
+    let uuid = uuid::Uuid::new_v4().to_string();
+
+    let filename = format!("{}-{}.html", id, uuid);
+
+    // Generate the export HTML.
+    let tmp_path = std::env::temp_dir().join(&filename);
+    match crate::export::export_ant_graphs(&memory_dir, &display_name, &tmp_path) {
+        Ok(()) => {
+            match std::fs::read(&tmp_path) {
+                Ok(html_bytes) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    (
+                        StatusCode::OK,
+                        [
+                            ("Content-Type", "text/html; charset=utf-8"),
+                            ("Content-Disposition", &format!("attachment; filename=\"{}\"", filename)),
+                        ],
+                        html_bytes,
+                    ).into_response()
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Read error: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Export error: {}", e)).into_response(),
+    }
 }
 
 /// POST /api/ants/:id/compact-history — trim chat history to last 4 messages.
@@ -1315,6 +1358,7 @@ async fn handle_web_command(
             /ruminate — trigger a rumination cycle now\n\
             /questions — show pending questions from rumination\n\
             /ask <ant> <topic> — query another ANT's knowledge\n\
+            /export — download knowledge graph as shareable HTML\n\
             /specify <file> — generate spec from code\n\
             /test-vectors <file> — generate test cases\n\n\
             Everything else is sent as a prompt to the AI.".into()
@@ -1599,6 +1643,10 @@ async fn handle_web_command(
                     Some(format!("ANT '{}' not found or not running. Use /ants to see available ANTs.", target_ant))
                 }
             }
+        },
+        "/export" => {
+            drop(bots);
+            Some("Click the **Export** button in the Graph tab to download a shareable HTML snapshot of this ANT's knowledge graph. The file opens in any browser — no server needed.".into())
         },
         "/ruminate" => {
             drop(bots);
