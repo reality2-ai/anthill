@@ -2391,13 +2391,33 @@ impl KnowledgeGraph {
         let edges_merged = self.merge_parallel_edges();
         // 3. Collapse chains: A→B→C where B has degree 2 and is a Fact.
         let chains_collapsed = self.collapse_chains();
-        // 4. Detect contradictions.
+        // 4. Clean up '?' prefixes on relations that have a real title.
+        self.clean_question_mark_relations();
+        // 5. Detect contradictions.
         let contradictions = self.detect_contradictions();
-        // 5. Community detection (GraphRAG-inspired) — find disconnected clusters.
+        // 6. Community detection (GraphRAG-inspired) — find disconnected clusters.
         let clusters = self.detect_communities();
 
         self.rebuild_index();
         ConsolidationReport { nodes_merged, edges_merged, chains_collapsed, contradictions, clusters }
+    }
+
+    /// Clean up edge relations that start with '?' but contain a real title.
+    /// e.g. "? some relationship" → "some relationship", "?title" → "title".
+    /// Pure '?' relations (undetermined) are left as-is.
+    fn clean_question_mark_relations(&mut self) {
+        let edge_indices: Vec<_> = self.graph.edge_indices().collect();
+        for eid in edge_indices {
+            let relation = &self.graph[eid].relation;
+            if relation.starts_with('?') {
+                let trimmed = relation[1..].trim();
+                if !trimmed.is_empty() {
+                    let cleaned = trimmed.to_string();
+                    log::info!("Cleaned relation: '{}' → '{}'", self.graph[eid].relation, cleaned);
+                    self.graph[eid].relation = cleaned;
+                }
+            }
+        }
     }
 
     /// Find and merge nodes with similar labels and same kind.

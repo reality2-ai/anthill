@@ -1383,6 +1383,7 @@ async fn handle_web_command(
             /analyse <file> — thematic analysis → knowledge graph\n\
             /reflect — review and consolidate knowledge graph\n\
             /ruminate — trigger a rumination cycle now\n\
+            /citations — resolve unknown citations and link to topic graphs\n\
             /questions — show pending questions from rumination\n\
             /ask <ant> <topic> — query another ANT's knowledge\n\
             /export — download knowledge graph as shareable HTML\n\
@@ -1712,10 +1713,18 @@ async fn handle_web_command(
                      "Read the citations graph (memory/graphs/citations.cbor or any graph with \
                       citation edges). Also read the topic graphs in memory/graphs/.\n\n\
                       STEP 1 — Resolve unknown citation links:\n\
-                      1. Find edges in the citations graph with relation '?'\n\
+                      1. Find edges in the citations graph with relation '?' AND orphaned \
+                         citation nodes (nodes with no edges or only '?' edges)\n\
                       2. For each '?' edge, look at the citation's url, title, and snippet\n\
-                      3. If there is a URL, fetch it and read the content to determine the core idea\n\
-                      4. If it is a PDF or file, read it to determine the core idea\n\
+                      3. If there is a URL:\n\
+                         a. FIRST check files/ to see if the content has already been downloaded \
+                            (match by filename derived from the URL or cite_id)\n\
+                         b. If NOT already in files/, fetch the URL and save the content to files/ \
+                            so it does not need to be downloaded again in future. Use a descriptive \
+                            filename based on the URL path or title (e.g. files/cite-a1b2c3d4.html \
+                            or files/paper-title.pdf)\n\
+                         c. Read the downloaded content to determine the core idea\n\
+                      4. If it is a PDF or file, check files/ first, then read it to determine the core idea\n\
                       5. Replace the '?' relation with a description of what the citation is about\n\
                       6. Update the citations graph\n\n\
                       STEP 2 — Link citations to topic graph edges:\n\
@@ -1750,6 +1759,52 @@ async fn handle_web_command(
                 }
             }
             Some("🧠 Starting 4 focused rumination tasks — refutation, connections, improvement, citations...".into())
+        },
+        "/citations" => {
+            drop(bots);
+            let bots = registry.bots.read().await;
+            if let Some(handle) = bots.get(bot_name) {
+                let task_id = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos();
+                let prompt = "RUMINATION — CITATION CONSOLIDATION\n\n\
+                     Read the citations graph (memory/graphs/citations.cbor or any graph with \
+                     citation edges). Also read the topic graphs in memory/graphs/.\n\n\
+                     STEP 1 — Resolve unknown citation links:\n\
+                     1. Find edges in the citations graph with relation '?'\n\
+                     2. For each '?' edge, look at the citation's url, title, and snippet\n\
+                     3. If there is a URL:\n\
+                        a. FIRST check files/ to see if the content has already been downloaded \
+                           (match by filename derived from the URL or cite_id)\n\
+                        b. If NOT already in files/, fetch the URL and save the content to files/ \
+                           so it does not need to be downloaded again in future. Use a descriptive \
+                           filename based on the URL path or title (e.g. files/cite-a1b2c3d4.html \
+                           or files/paper-title.pdf)\n\
+                        c. Read the downloaded content to determine the core idea\n\
+                     4. If it is a PDF or file, check files/ first, then read it to determine the core idea\n\
+                     5. Replace the '?' relation with a description of what the citation is about\n\
+                     6. Update the citations graph\n\n\
+                     STEP 2 — Link citations to topic graph edges:\n\
+                     1. For each citation, identify which edges in the topic graphs it supports\n\
+                     2. Check the citation's cite_id (format: cite-<8hex>)\n\
+                     3. If a topic graph edge is supported by this citation but does not have it \
+                        in its citations list, add it: {\"cite_id\": \"<the cite_id>\", \"url\": \"...\", \
+                        \"title\": \"...\", \"ref_type\": \"...\", \"quality\": ...}\n\
+                     4. Do NOT fabricate citations — only link citations that genuinely support the edge\n\
+                     5. Update the topic graph files\n\n\
+                     IMPORTANT: Complete this specific task, update the graph files, \
+                     output a brief summary of what you changed, and STOP. \
+                     Do not ask follow-up questions.".to_string();
+                let _ = handle.request_tx.send(crate::ai_worker::CliRequest {
+                    chat_id,
+                    message: prompt,
+                    new_session: true,
+                    task_id,
+                    source: "rumination".into(),
+                });
+            }
+            Some("📚 Starting citation consolidation — resolving unknown links and cross-referencing...".into())
         },
         _ => None,
     };

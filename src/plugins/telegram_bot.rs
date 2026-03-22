@@ -236,6 +236,7 @@ fn classify_command(text: &str) -> u8 {
         s if s.starts_with("/analyse ") || s.starts_with("/analyze ") => 9,
         "/reflect" => 10,
         "/ruminate" => 13,
+        "/citations" => 17, // CMD_CITATIONS = 0x11
         s if s.starts_with("/specify ") => 11,
         s if s.starts_with("/test-vectors ") || s.starts_with("/testvectors ") => 12,
         _ => 0, // regular message
