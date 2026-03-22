@@ -1418,17 +1418,30 @@ pub async fn ai_worker_loop(
                             let inbox = target_memory.join("colony_inbox");
                             let _ = std::fs::create_dir_all(&inbox);
                             let eval_msg = format!(
-                                "COLONY RESPONSE from {} — evaluate this critically:\n\n\
+                                "COLONY RESPONSE from {} — engage in Socratic discourse:\n\n\
                                  {}\n\n\
-                                 Your task:\n\
-                                 1. Evaluate this response against YOUR OWN knowledge\n\
-                                 2. If it's well-evidenced and consistent, add relevant facts to \
-                                    your graph with source_id 'ant:{}' and evidence_type 'corroboration'\n\
-                                 3. If it contradicts your knowledge, record it with 'contradiction'\n\
-                                 4. If it's weak or unsupported, note it with 'inconsequential_search'\n\
-                                 5. Update the 'expert_in' edge for {} in your meta-graph\n\n\
-                                 IMPORTANT: Complete your evaluation and STOP.",
-                                bname, response_text, bname, bname
+                                 SOCRATIC METHOD — advance the conversation through:\n\
+                                 1. EXAMINE: Does this response introduce NEW knowledge or insight?\n\
+                                    If it repeats what you already know, note that and move on.\n\
+                                 2. QUESTION: What assumptions does {} make? Are they justified?\n\
+                                    Challenge weak claims with specific counter-evidence.\n\
+                                 3. CONJECTURE: Formulate your own thesis in response — what do\n\
+                                    YOU think, based on your expertise and this new input?\n\
+                                 4. REFUTE: Try to disprove your own thesis. If it survives, it's\n\
+                                    stronger. If it fails, say so honestly.\n\
+                                 5. SYNTHESISE: If both perspectives have merit, propose a synthesis\n\
+                                    that combines the strongest elements of each.\n\
+                                 6. ADVANCE: End with a NEW question or direction — not a restatement.\n\
+                                    If the topic is exhausted, say so.\n\n\
+                                 Update your knowledge graph:\n\
+                                 - Well-evidenced claims → add with source_id 'ant:{}', evidence_type 'corroboration'\n\
+                                 - Claims that contradict your evidence → 'contradiction'\n\
+                                 - Unsupported claims → 'inconsequential_search'\n\
+                                 - Update {}'s expert_in edge based on response quality\n\n\
+                                 If you have a substantive response that ADVANCES the conversation,\n\
+                                 send it back via colony_outbox. If you have nothing new to add,\n\
+                                 just update your graph and STOP — do not continue for the sake of it.",
+                                bname, response_text, bname, bname, bname
                             );
                             let inbox_msg = serde_json::json!({
                                 "from": bname.to_string(),
@@ -2271,6 +2284,61 @@ fn resolve_ant_memory(ants_dir: &std::path::Path, ant_name: &str) -> Option<std:
 
 /// Process the colony inbox — pick up messages from other ANTs.
 /// Called on a 5-second poll interval, not just on requests.
+/// Track recent colony exchanges to detect loops.
+/// Persisted as a simple JSON file so it survives restarts.
+fn check_colony_loop(memory_dir: &std::path::Path, from: &str, message: &str) -> bool {
+    let tracker_path = memory_dir.join("colony_tracker.json");
+    let mut tracker: Vec<(String, String)> = if tracker_path.exists() {
+        std::fs::read_to_string(&tracker_path).ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    // Simple loop detection: if the last 3 messages from the same ANT
+    // are very similar (share >60% of words), it's a loop.
+    let recent_from_same: Vec<&str> = tracker.iter().rev()
+        .filter(|(f, _)| f == from)
+        .take(3)
+        .map(|(_, m)| m.as_str())
+        .collect();
+
+    let is_loop = if recent_from_same.len() >= 2 {
+        // Check word overlap between current message and recent ones.
+        let current_words: std::collections::HashSet<&str> = message
+            .split_whitespace()
+            .filter(|w| w.len() > 3)
+            .collect();
+        if current_words.is_empty() { false }
+        else {
+            recent_from_same.iter().all(|prev| {
+                let prev_words: std::collections::HashSet<&str> = prev
+                    .split_whitespace()
+                    .filter(|w| w.len() > 3)
+                    .collect();
+                if prev_words.is_empty() { return false; }
+                let overlap = current_words.intersection(&prev_words).count();
+                let total = current_words.len().max(prev_words.len());
+                (overlap as f64 / total as f64) > 0.6
+            })
+        }
+    } else {
+        false
+    };
+
+    // Record this message.
+    tracker.push((from.to_string(), message.chars().take(200).collect()));
+    // Keep last 20 entries.
+    if tracker.len() > 20 { tracker.drain(..tracker.len() - 20); }
+    let _ = std::fs::write(&tracker_path, serde_json::to_string(&tracker).unwrap_or_default());
+
+    is_loop
+}
+
+/// Maximum colony exchanges per conversation before forcing a conclusion.
+const MAX_COLONY_EXCHANGES: usize = 6;
+
 fn process_colony_inbox(
     memory_dir: &std::path::Path,
     request_tx: &tokio::sync::mpsc::UnboundedSender<CliRequest>,
@@ -2294,6 +2362,13 @@ fn process_colony_inbox(
                 let orig_chat_id = msg.get("chat_id").and_then(|c| c.as_i64()).unwrap_or(0);
 
                 if !message.is_empty() {
+                    // Loop detection — stop repetitive exchanges.
+                    if check_colony_loop(memory_dir, from, message) {
+                        log::warn!("[{}] Colony loop detected with {} — stopping exchange", bot_name, from);
+                        let _ = std::fs::remove_file(&path);
+                        continue;
+                    }
+
                     let _ = request_tx.send(CliRequest {
                         chat_id: -2,
                         message: message.to_string(),
@@ -2341,9 +2416,18 @@ fn process_colony_outbox(
                         if target_memory.exists() {
                             let colony_msg = format!(
                                 "COLONY MESSAGE from {}\n\n{}\n\n\
-                                 Respond with your knowledge and reasoning. \
-                                 Your response will be forwarded back to {}.\n\n\
-                                 IMPORTANT: Complete your response and STOP.",
+                                 RULES OF DISCOURSE (Platonic dialectic):\n\
+                                 Each exchange in a conversation must ADVANCE the discussion.\n\
+                                 Do NOT repeat what has already been said. Instead:\n\
+                                 1. If you agree, add NEW information or a new angle\n\
+                                 2. If you disagree, state a clear counter-thesis with evidence\n\
+                                 3. If you see a synthesis, propose it and move to the next question\n\
+                                 4. If the topic is exhausted, say so and suggest what to explore next\n\
+                                 5. If you have nothing new to add, say 'I have nothing further to \
+                                    contribute on this topic' and STOP — do not reformulate what \
+                                    was already said\n\n\
+                                 Your response will be forwarded back to {}.\n\
+                                 IMPORTANT: Advance the conversation, then STOP.",
                                 from, message, from
                             );
                             let target_inbox = target_memory.join("colony_inbox");
