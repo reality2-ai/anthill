@@ -23,14 +23,26 @@ struct GraphInsights {
     total_nodes: usize,
     total_edges: usize,
     avg_confidence: f64,
-    strongest_beliefs: Vec<(String, String, String, f64)>, // from, to, relation, confidence
+    strongest_beliefs: Vec<(String, String, String, f64)>,
     weakest_beliefs: Vec<(String, String, String, f64)>,
-    most_connected: Vec<(String, usize)>, // label, connection count
-    topic_summaries: Vec<(String, usize, usize, f64)>, // name, nodes, edges, avg_conf
-    /// Node summaries keyed by label — for plain-language explanations.
+    most_connected: Vec<(String, usize)>,
+    topic_summaries: Vec<(String, usize, usize, f64)>,
     node_summaries: std::collections::HashMap<String, String>,
-    /// Topic descriptions — extracted from hub nodes or meta-graph.
     topic_descriptions: std::collections::HashMap<String, String>,
+    /// All citations collected from edges, deduplicated by URL.
+    all_citations: Vec<CollectedCitation>,
+}
+
+/// A citation collected during export, with the edge it supports.
+struct CollectedCitation {
+    url: String,
+    title: String,
+    author: String,
+    date: String,
+    ref_type: String,
+    quality: f64,
+    /// Which relationship this citation supports.
+    supports: String,
 }
 
 /// Compute insights from the graph data.
@@ -45,6 +57,8 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
     let mut topic_summaries = Vec::new();
     let mut node_summaries: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut topic_descriptions: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut all_citations: Vec<CollectedCitation> = Vec::new();
+    let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for graph in all_data {
         let name = graph["name"].as_str().unwrap_or("?");
@@ -104,6 +118,24 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                 *node_connections.entry(from.clone()).or_default() += 1;
                 *node_connections.entry(to.clone()).or_default() += 1;
 
+                // Collect citations from this edge.
+                if let Some(cites) = link["citations"].as_array() {
+                    for cite in cites {
+                        let url = cite["url"].as_str().unwrap_or("").to_string();
+                        if !url.is_empty() && seen_urls.insert(url.clone()) {
+                            all_citations.push(CollectedCitation {
+                                url,
+                                title: cite["title"].as_str().unwrap_or("").to_string(),
+                                author: cite["author"].as_str().unwrap_or("").to_string(),
+                                date: cite["date"].as_str().unwrap_or("").to_string(),
+                                ref_type: cite["ref_type"].as_str().unwrap_or("website").to_string(),
+                                quality: cite["quality"].as_f64().unwrap_or(0.5),
+                                supports: format!("{} {} {}", from, relation, to),
+                            });
+                        }
+                    }
+                }
+
                 strongest.push((from.clone(), to.clone(), relation.to_string(), conf));
                 weakest.push((from.clone(), to.clone(), relation.to_string(), conf));
             }
@@ -135,6 +167,7 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
         topic_summaries,
         node_summaries,
         topic_descriptions,
+        all_citations,
     }
 }
 
@@ -306,11 +339,14 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 fn ai_polish_summary(raw_insights: &str, ant_name: &str) -> String {
     let prompt = format!(
         "Rewrite the following knowledge graph summary as a clear, accessible, well-written \
-         executive summary of 1-2 pages. Write it for a general reader who has a brief \
-         understanding of the topics but wants to learn more. Use flowing prose — no bullet \
-         points, no tables, no technical jargon about graphs or confidence scores. \
-         Explain what is known, what is well-established, what is uncertain, and what the \
-         key themes are. Include specific facts and descriptions from the summary data. \
+         document of 1-2 pages. Write it for a general reader who wants to learn about these topics. \
+         Use flowing prose — no bullet points, no tables, no technical jargon about graphs or nodes. \
+         Structure it with a brief overall introduction, then a section for EACH topic area \
+         (use markdown ## headings), then a conclusion highlighting what is well-established \
+         and what needs further investigation. \
+         Include specific facts and descriptions from the data. \
+         If references are provided, cite them as numbered references [1], [2] etc. in the text \
+         where they support specific claims. ONLY cite references that are listed — never fabricate one. \
          Write in third person, referring to the knowledge as belonging to '{}'.\n\n\
          Raw summary data:\n\n{}",
         ant_name, raw_insights
@@ -434,6 +470,22 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
         raw_text.push_str(&format!("  {}: {}\n", label, short));
     }
 
+    // Include citations for the AI to reference.
+    if !insights.all_citations.is_empty() {
+        raw_text.push_str("\nSources and references (include these as numbered citations in the text where relevant):\n");
+        for (i, cite) in insights.all_citations.iter().enumerate() {
+            raw_text.push_str(&format!("  [{}] {} — {}{}{} (quality: {:.0}%, supports: {})\n",
+                i + 1,
+                cite.title,
+                if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
+                if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
+                cite.url,
+                cite.quality * 100.0,
+                cite.supports,
+            ));
+        }
+    }
+
     // Ask AI to polish into readable prose.
     let polished = ai_polish_summary(&raw_text, ant_name);
     let insights_html = if polished != raw_text {
@@ -470,6 +522,34 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     } else {
         // Fallback to algorithmic version.
         raw_insights_html
+    };
+
+    // Append reference list if there are citations.
+    let insights_html = if insights.all_citations.is_empty() {
+        insights_html
+    } else {
+        let mut with_refs = insights_html;
+        with_refs.push_str("<div style='background:#1e293b;border-radius:8px;padding:24px 28px;margin:20px 0;line-height:1.6;font-size:13px'>\n");
+        with_refs.push_str("<h3>References</h3>\n");
+        with_refs.push_str("<ol style='padding-left:20px'>\n");
+        for cite in &insights.all_citations {
+            let mut entry = String::new();
+            if !cite.author.is_empty() { entry.push_str(&format!("{}. ", cite.author)); }
+            if !cite.title.is_empty() {
+                if !cite.url.is_empty() {
+                    entry.push_str(&format!("<a href='{}' style='color:#60a5fa'>{}</a>", cite.url, cite.title));
+                } else {
+                    entry.push_str(&format!("<em>{}</em>", cite.title));
+                }
+            } else if !cite.url.is_empty() {
+                entry.push_str(&format!("<a href='{}' style='color:#60a5fa'>{}</a>", cite.url, cite.url));
+            }
+            if !cite.date.is_empty() { entry.push_str(&format!(" ({})", cite.date)); }
+            entry.push_str(&format!(" <span style='color:#64748b'>[{}]</span>", cite.ref_type));
+            with_refs.push_str(&format!("<li>{}</li>\n", entry));
+        }
+        with_refs.push_str("</ol>\n</div>\n");
+        with_refs
     };
 
     let graphs_json = serde_json::to_string(&all_data)?;

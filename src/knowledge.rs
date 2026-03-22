@@ -274,6 +274,92 @@ pub struct KnowledgeEdge {
     /// Empty = no competitors. Set by the AI or by the competition detection algorithm.
     #[serde(default)]
     pub competition_group: String,
+
+    /// Citations: URLs, documents, or sources that support this edge.
+    /// These are threaded into exported documents as proper citations.
+    #[serde(default)]
+    pub citations: Vec<Reference>,
+}
+
+/// A reference — URL, citation, or source supporting a knowledge claim.
+/// References have their own quality assessment — a website is less reliable
+/// than a peer-reviewed paper, but even a paper that fails refutation loses value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Reference {
+    /// URL of the source (if web-based).
+    #[serde(default)]
+    pub url: String,
+    /// Title or short description of the source.
+    #[serde(default)]
+    pub title: String,
+    /// Author(s) if known.
+    #[serde(default)]
+    pub author: String,
+    /// Publication date or year.
+    #[serde(default)]
+    pub date: String,
+    /// When this source was accessed or cited.
+    #[serde(default)]
+    pub accessed: String,
+    /// Brief snippet or quote from the source.
+    #[serde(default)]
+    pub snippet: String,
+    /// Type of source — determines initial quality weighting.
+    #[serde(default)]
+    pub ref_type: ReferenceType,
+    /// Quality score (0.0-1.0). Starts based on ref_type, evolves
+    /// based on whether claims from this source survive refutation.
+    #[serde(default = "default_ref_quality")]
+    pub quality: f64,
+}
+
+fn default_ref_quality() -> f64 { 0.5 }
+
+/// Type of reference source — determines initial quality weighting.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceType {
+    /// Peer-reviewed scientific paper. Initial quality: 0.8.
+    PeerReviewed,
+    /// Official report or government publication. Initial quality: 0.7.
+    OfficialReport,
+    /// Book or textbook. Initial quality: 0.7.
+    Book,
+    /// News article from a reputable source. Initial quality: 0.5.
+    News,
+    /// Blog post or opinion piece. Initial quality: 0.3.
+    Blog,
+    /// Website or general web source. Initial quality: 0.4.
+    #[default]
+    Website,
+    /// Personal communication or user statement. Initial quality: 0.5.
+    Personal,
+    /// Another ANT's knowledge. Initial quality: 0.6.
+    AntKnowledge,
+    /// AI inference (no external source). Initial quality: 0.3.
+    AiInference,
+    /// Catch-all for unknown types.
+    #[serde(other)]
+    Other,
+}
+
+impl ReferenceType {
+    /// Initial quality score for this reference type.
+    #[allow(dead_code)]
+    pub fn initial_quality(&self) -> f64 {
+        match self {
+            Self::PeerReviewed => 0.8,
+            Self::OfficialReport => 0.7,
+            Self::Book => 0.7,
+            Self::News => 0.5,
+            Self::Personal => 0.5,
+            Self::AntKnowledge => 0.6,
+            Self::Website => 0.4,
+            Self::Blog => 0.3,
+            Self::AiInference => 0.3,
+            Self::Other => 0.3,
+        }
+    }
 }
 
 /// A single entry in the refutation audit trail.
@@ -341,6 +427,7 @@ impl KnowledgeEdge {
             beneficial_impact: 0.0,
             corroboration_strength: 0.0,
             competition_group: String::new(),
+            citations: Vec::new(),
         }
     }
 
@@ -359,7 +446,15 @@ impl KnowledgeEdge {
     pub fn relevance_score(&self) -> f64 {
         let fitness = 1.0 + 0.2 * self.beneficial_impact; // range 0.8–1.2
         let network_bonus = 1.0 + 0.1 * self.corroboration_strength; // mild boost
-        self.confidence * self.importance * fitness * network_bonus
+        // Citation bonus: well-cited edges with high-quality sources get a boost.
+        let citation_bonus = if self.citations.is_empty() {
+            1.0 // No penalty for uncited — still valid if survived refutation.
+        } else {
+            let avg_quality = self.citations.iter().map(|c| c.quality).sum::<f64>()
+                / self.citations.len() as f64;
+            1.0 + 0.15 * avg_quality // Up to 15% boost for well-sourced claims.
+        };
+        self.confidence * self.importance * fitness * network_bonus * citation_bonus
     }
 
     /// Ensure log_odds and confidence are in sync.
@@ -1226,6 +1321,7 @@ impl KnowledgeGraph {
             beneficial_impact: 0.0,
             corroboration_strength: 0.0,
             competition_group: String::new(),
+            citations: Vec::new(),
         };
         self.graph.add_edge(from, to, edge);
     }
@@ -1682,6 +1778,7 @@ impl KnowledgeGraph {
                     beneficial_impact: 0.0,
                     corroboration_strength: 0.0,
                     competition_group: String::new(),
+                    citations: Vec::new(),
                 });
             }
         }
@@ -1745,6 +1842,11 @@ impl KnowledgeGraph {
                 "decay_category": format!("{:?}", edge.decay_category).to_lowercase(),
                 "evidence_count": edge.evidence_log.len(),
                 "is_orphan_link": is_orphan_link,
+                "citations": edge.citations.iter().map(|c| serde_json::json!({
+                    "url": c.url, "title": c.title, "author": c.author,
+                    "date": c.date, "ref_type": format!("{:?}", c.ref_type).to_lowercase(),
+                    "quality": c.quality,
+                })).collect::<Vec<_>>(),
             }))
         }).collect();
 
@@ -2520,6 +2622,11 @@ impl KnowledgeGraph {
                 beneficial_impact: in_w.beneficial_impact.max(out_w.beneficial_impact),
                 corroboration_strength: (in_w.corroboration_strength + out_w.corroboration_strength) / 2.0,
                 competition_group: in_w.competition_group.clone(),
+                citations: {
+                    let mut c = in_w.citations.clone();
+                    c.extend(out_w.citations.iter().cloned());
+                    c
+                },
             };
 
             self.graph.add_edge(src, tgt, combined);
