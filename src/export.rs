@@ -124,8 +124,109 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
         insights.avg_confidence * 100.0
     ));
 
-    // Topic summaries.
-    html.push_str("<h3>Topic Graphs</h3><table><tr><th>Topic</th><th>Nodes</th><th>Edges</th><th>Avg Confidence</th></tr>\n");
+    // ── Executive Summary (narrative) ──
+    html.push_str("<div style='background:#1e293b;border-radius:8px;padding:20px;margin:20px 0;line-height:1.7'>\n");
+    html.push_str("<h3 style='margin-top:0'>Executive Summary</h3>\n");
+
+    // Overall assessment.
+    let confidence_desc = if insights.avg_confidence >= 0.7 { "well-established" }
+        else if insights.avg_confidence >= 0.5 { "moderately confident" }
+        else if insights.avg_confidence >= 0.3 { "still developing" }
+        else { "largely exploratory" };
+
+    let active_topics: Vec<&(String, usize, usize, f64)> = insights.topic_summaries.iter()
+        .filter(|(_, n, _, _)| *n > 0)
+        .collect();
+
+    html.push_str(&format!(
+        "<p>{} maintains knowledge across <b>{} topic areas</b> comprising {} entities \
+         and {} relationships. The overall confidence level is <b>{}</b> at {:.0}%, \
+         meaning {}.</p>\n",
+        ant_name,
+        active_topics.len(),
+        insights.total_nodes,
+        insights.total_edges,
+        confidence_desc,
+        insights.avg_confidence * 100.0,
+        match confidence_desc {
+            "well-established" => "most beliefs have survived testing and are backed by diverse evidence",
+            "moderately confident" => "many beliefs have supporting evidence but would benefit from further refutation testing",
+            "still developing" => "the knowledge base is growing but many conjectures need more rigorous testing",
+            _ => "most ideas are early-stage conjectures that need significant evidence gathering",
+        }
+    ));
+
+    // Topic-by-topic narrative.
+    if !active_topics.is_empty() {
+        html.push_str("<h4>Knowledge Areas</h4>\n");
+        for (name, nodes, edges, avg) in &insights.topic_summaries {
+            if *nodes == 0 { continue; }
+            let density = if *nodes > 1 { *edges as f64 / *nodes as f64 } else { 0.0 };
+            let density_desc = if density >= 3.0 { "densely connected" }
+                else if density >= 1.5 { "well-connected" }
+                else if density >= 0.5 { "sparsely connected" }
+                else { "mostly isolated entities" };
+            let conf_desc = if *avg >= 0.7 { "high confidence" }
+                else if *avg >= 0.5 { "moderate confidence" }
+                else { "low confidence — needs more evidence" };
+
+            html.push_str(&format!(
+                "<p><b>{}</b> — {} entities with {} relationships ({}). \
+                 Average confidence: {:.0}% ({}). {}</p>\n",
+                name.replace('-', " "),
+                nodes, edges, density_desc,
+                avg * 100.0, conf_desc,
+                if *avg < 0.5 { "This area would benefit from active refutation testing and external source corroboration." }
+                else if *avg < 0.7 { "The foundations are present but could be strengthened through diverse evidence types." }
+                else { "This is a well-developed knowledge area with strong evidential support." }
+            ));
+        }
+    }
+
+    // Key findings from strongest beliefs.
+    if !insights.strongest_beliefs.is_empty() {
+        html.push_str("<h4>Key Findings</h4>\n<p>The strongest beliefs in this knowledge base — those that have earned high confidence through diverse evidence — are:</p>\n<ul>\n");
+        for (from, to, rel, conf) in insights.strongest_beliefs.iter().take(5) {
+            html.push_str(&format!(
+                "<li><b>{}</b> {} <b>{}</b> ({:.0}% confidence)</li>\n",
+                from, rel, to, conf * 100.0
+            ));
+        }
+        html.push_str("</ul>\n");
+        html.push_str("<p style='color:#94a3b8;font-size:12px'>Note: In this system, high confidence means the belief has survived genuine attempts at refutation, \
+            not just been confirmed repeatedly. Confidence is capped based on evidence diversity — \
+            an idea needs different <em>kinds</em> of evidence, not just more of the same.</p>\n");
+    }
+
+    // Areas of uncertainty.
+    if !insights.weakest_beliefs.is_empty() {
+        html.push_str("<h4>Open Questions</h4>\n<p>These relationships have low confidence and would benefit from investigation:</p>\n<ul>\n");
+        for (from, to, rel, conf) in insights.weakest_beliefs.iter().take(5) {
+            html.push_str(&format!(
+                "<li><b>{}</b> {} <b>{}</b> ({:.0}% — {})</li>\n",
+                from, rel, to, conf * 100.0,
+                if *conf < 0.2 { "doubtful" } else if *conf < 0.4 { "uncertain" } else { "possible" }
+            ));
+        }
+        html.push_str("</ul>\n");
+    }
+
+    // Central concepts.
+    if !insights.most_connected.is_empty() {
+        html.push_str("<h4>Central Concepts</h4>\n<p>These entities are the most connected in the knowledge graph — they appear in the most relationships and are central to the overall understanding:</p>\n<ol>\n");
+        for (label, count) in insights.most_connected.iter().take(5) {
+            html.push_str(&format!("<li><b>{}</b> — {} connections</li>\n", label, count));
+        }
+        html.push_str("</ol>\n");
+    }
+
+    html.push_str("</div>\n");
+
+    // ── Detailed Tables ──
+    html.push_str("<h3>Detailed Breakdown</h3>\n");
+
+    // Topic table.
+    html.push_str("<h4>Topic Graphs</h4><table><tr><th>Topic</th><th>Nodes</th><th>Edges</th><th>Avg Confidence</th></tr>\n");
     for (name, nodes, edges, avg) in &insights.topic_summaries {
         if *nodes == 0 { continue; }
         let colour = if *avg >= 0.7 { "#4ade80" } else if *avg >= 0.5 { "#fbbf24" } else { "#f87171" };
@@ -136,8 +237,8 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     }
     html.push_str("</table>\n");
 
-    // Strongest beliefs.
-    html.push_str("<h3>Strongest Beliefs (ESTABLISHED)</h3><ul>\n");
+    // All strongest beliefs.
+    html.push_str("<h4>All Established Beliefs</h4><ul>\n");
     for (from, to, rel, conf) in &insights.strongest_beliefs {
         html.push_str(&format!(
             "<li><b>{}</b> → {} → <b>{}</b> <span class='conf-high'>{:.0}%</span></li>\n",
@@ -146,8 +247,8 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     }
     html.push_str("</ul>\n");
 
-    // Weakest beliefs.
-    html.push_str("<h3>Weakest Beliefs (need testing)</h3><ul>\n");
+    // All weakest beliefs.
+    html.push_str("<h4>All Uncertain Beliefs</h4><ul>\n");
     for (from, to, rel, conf) in &insights.weakest_beliefs {
         let cls = if *conf >= 0.3 { "conf-low" } else { "conf-weak" };
         html.push_str(&format!(
@@ -157,8 +258,8 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     }
     html.push_str("</ul>\n");
 
-    // Most connected nodes.
-    html.push_str("<h3>Most Connected Nodes (central to understanding)</h3><ul>\n");
+    // All connected nodes.
+    html.push_str("<h4>All Connected Nodes</h4><ul>\n");
     for (label, count) in &insights.most_connected {
         html.push_str(&format!("<li><b>{}</b> — {} connections</li>\n", label, count));
     }
