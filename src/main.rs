@@ -129,6 +129,10 @@ struct Args {
     /// Output file for --export-graph (default: <ant>-knowledge.html).
     #[arg(long, short)]
     output: Option<PathBuf>,
+
+    /// Publish the exported graph to GitHub as a public gist (requires gh CLI).
+    #[arg(long)]
+    publish: bool,
 }
 
 #[tokio::main]
@@ -310,6 +314,15 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }
+
+        // Publish to GitHub if requested.
+        if args.publish {
+            match export::publish_to_github(&output, ant_name) {
+                Ok(url) => println!("Published: {}", url),
+                Err(e) => eprintln!("Publish failed: {}", e),
+            }
+        }
+
         return Ok(());
     }
 

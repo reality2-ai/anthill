@@ -1003,6 +1003,11 @@ async function exportGraph() {
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    // Show GitHub gist URL if published.
+    const gistUrl = resp.headers.get('X-Gist-Url');
+    if (gistUrl) {
+      alert('Published to GitHub!\n\n' + gistUrl + '\n\nThe file was also downloaded.');
+    }
   } catch (e) {
     alert('Export error: ' + e.message);
   }

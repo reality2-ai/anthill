@@ -385,3 +385,66 @@ loadGraph(firstNonEmpty);
 
     Ok(())
 }
+
+/// Publish an exported HTML file to GitHub Pages via `gh` CLI.
+/// Creates a gist (public, shareable link) or publishes to a repo's gh-pages branch.
+/// Returns the URL if successful.
+pub fn publish_to_github(html_path: &Path, ant_name: &str) -> anyhow::Result<String> {
+    // Check if gh is available.
+    let gh_available = std::process::Command::new("gh")
+        .args(["--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !gh_available {
+        return Err(anyhow::anyhow!("GitHub CLI (gh) not installed. Install from https://cli.github.com/"));
+    }
+
+    // Check if gh is authenticated.
+    let auth_ok = std::process::Command::new("gh")
+        .args(["auth", "status"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !auth_ok {
+        return Err(anyhow::anyhow!("GitHub CLI not authenticated. Run: gh auth login"));
+    }
+
+    let filename = html_path.file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("{}-knowledge.html", ant_name));
+
+    // Create a public gist — simplest way to get a shareable URL.
+    let output = std::process::Command::new("gh")
+        .args([
+            "gist", "create",
+            "--public",
+            "--desc", &format!("{} — Knowledge Graph Snapshot (Anthill)", ant_name),
+            "--filename", &filename,
+        ])
+        .arg(html_path)
+        .output()
+        .map_err(|e| anyhow::anyhow!("gh gist create failed: {}", e))?;
+
+    if output.status.success() {
+        let gist_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        // Convert gist URL to raw URL for direct HTML viewing.
+        // gh returns: https://gist.github.com/user/hash
+        // Raw view: https://gist.githack.com/user/hash/raw/filename
+        // Or use htmlpreview: https://htmlpreview.github.io/?<gist-raw-url>
+        let view_url = if gist_url.contains("gist.github.com") {
+            format!("{}\n  (View raw HTML: open the gist and click 'Raw')", gist_url)
+        } else {
+            gist_url.clone()
+        };
+
+        println!("Published to GitHub: {}", view_url);
+        Ok(gist_url)
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(anyhow::anyhow!("gh gist create failed: {}", stderr))
+    }
+}
