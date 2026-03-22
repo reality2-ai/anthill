@@ -268,27 +268,28 @@ COMMUNITY OF PRACTICE — you are not alone:\n\
 You are part of a colony of ANTs, each with different areas of expertise.\n\
 Use 'list_colony_ants' to discover your peers and their topic graphs.\n\
 Use 'query_ant' to ask a peer about their area of expertise.\n\n\
-HOW TO COMMUNICATE WITH PEERS:\n\
-  To send a message to another ANT, write a JSON file to memory/colony_outbox/.\n\
-  The message will be delivered within 5 seconds. Format:\n\
-    mkdir -p memory/colony_outbox\n\
-    Write to memory/colony_outbox/<target>-<timestamp>.json:\n\
-    {{\"from\": \"<your name>\", \"to\": \"<target ANT>\", \"message\": \"<your message>\", \"chat_id\": 0}}\n\
-  The response will arrive as a follow-up in your conversation.\n\
-  If the MCP tools 'talk_to_ant' or 'query_ant' are available, use those instead.\n\
-  Do NOT create markdown files or other indirect methods to communicate.\n\n\
-RECOGNISING WHEN TO CONTACT ANOTHER ANT:\n\
-  The user will NOT always say '/ask'. Listen for NATURAL LANGUAGE cues:\n\
-  - 'work with Gaea on this' → send message to Gaea via colony_outbox\n\
-  - 'check with Alfred' → send question to Alfred\n\
-  - 'Sven would know about this' → send query to Sven\n\
-  - 'get Hine's perspective' → send question to Hine\n\
-  - 'collaborate with X on Y' → send context and ask for input\n\
-  - 'create a summary and share it with X' → do the work, then send to X\n\
-  - Any mention of another ANT's name in context of a task → consider contacting them\n\
-  When the user says 'work with' another ANT, send them your current work/context\n\
-  and ask for their input. This is a CONVERSATION, not just a query.\n\
-  ALWAYS use the colony_outbox JSON method — it works in every session.\n\n\
+TALKING TO OTHER ANTS — THIS IS CRITICAL:\n\
+  To send a message to another ANT, create a file in memory/colony_outbox/.\n\
+  The FILENAME determines who receives it. The FILE CONTENT is the message.\n\n\
+  Step 1: mkdir -p memory/colony_outbox\n\
+  Step 2: Write a file named: to-<ANT_NAME>.md\n\
+    Example: memory/colony_outbox/to-Gaea.md\n\
+    Example: memory/colony_outbox/to-Sven.md\n\
+    Example: memory/colony_outbox/to-Alfred.md\n\
+  Step 3: The file content IS your message. Write it in plain text.\n\
+    Just write what you want to say — no JSON, no special format.\n\n\
+  The message is delivered within 5 seconds. The response arrives\n\
+  as a follow-up in your conversation.\n\n\
+  DO NOT create markdown files elsewhere. DO NOT try to read their files.\n\
+  The ONLY way to talk to another ANT is: memory/colony_outbox/to-<NAME>.md\n\n\
+WHEN TO TALK TO ANOTHER ANT:\n\
+  Listen for these cues from the user:\n\
+  - 'work with Gaea' → write memory/colony_outbox/to-Gaea.md\n\
+  - 'ask Alfred about' → write memory/colony_outbox/to-Alfred.md\n\
+  - 'check with Sven' → write memory/colony_outbox/to-Sven.md\n\
+  - 'share this with Hine' → write memory/colony_outbox/to-Hine.md\n\
+  - Any mention of a colony ANT by name → consider writing to them\n\
+  Include your current context and what you want from them.\n\n\
 WHEN TO CONSULT A PEER (even without being asked):\n\
   - When you encounter a topic OUTSIDE your own expertise\n\
   - When you want to CROSS-REFERENCE your knowledge with another domain\n\
@@ -2399,60 +2400,88 @@ fn process_colony_outbox(
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.extension().map(|e| e == "json").unwrap_or(false) { continue; }
-        if let Ok(contents) = std::fs::read_to_string(&path) {
-            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&contents) {
-                let to = msg.get("to").and_then(|t| t.as_str()).unwrap_or("");
-                let from = msg.get("from").and_then(|f| f.as_str()).unwrap_or("");
-                let message = msg.get("message").and_then(|m| m.as_str()).unwrap_or("");
-                let chat_id = msg.get("chat_id").and_then(|c| c.as_i64()).unwrap_or(0);
+        let filename = path.file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
 
-                if !to.is_empty() && !message.is_empty() {
-                    let ants_dir = memory_dir.parent()
-                        .and_then(|p| p.parent())
-                        .and_then(|p| p.parent());
-                    if let Some(dir) = ants_dir {
-                        let target_memory = dir.join(to).join("working").join("memory");
-                        if target_memory.exists() {
-                            let colony_msg = format!(
-                                "COLONY MESSAGE from {}\n\n{}\n\n\
-                                 RULES OF DISCOURSE (Platonic dialectic):\n\
-                                 Each exchange in a conversation must ADVANCE the discussion.\n\
-                                 Do NOT repeat what has already been said. Instead:\n\
-                                 1. If you agree, add NEW information or a new angle\n\
-                                 2. If you disagree, state a clear counter-thesis with evidence\n\
-                                 3. If you see a synthesis, propose it and move to the next question\n\
-                                 4. If the topic is exhausted, say so and suggest what to explore next\n\
-                                 5. If you have nothing new to add, say 'I have nothing further to \
-                                    contribute on this topic' and STOP — do not reformulate what \
-                                    was already said\n\n\
-                                 Your response will be forwarded back to {}.\n\
-                                 IMPORTANT: Advance the conversation, then STOP.",
-                                from, message, from
-                            );
-                            let target_inbox = target_memory.join("colony_inbox");
-                            let _ = std::fs::create_dir_all(&target_inbox);
-                            let inbox_msg = serde_json::json!({
-                                "from": from,
-                                "message": colony_msg,
-                                "chat_id": chat_id,
-                                "timestamp": crate::dateutil::datetime_now(),
-                            });
-                            let inbox_file = format!("{}-{}.json", from,
-                                std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_millis());
-                            let _ = std::fs::write(
-                                target_inbox.join(&inbox_file),
-                                serde_json::to_string_pretty(&inbox_msg).unwrap_or_default()
-                            );
-                            log::info!("[{}] Colony outbox: forwarded to {} inbox", bot_name, to);
-                        }
-                    }
+        // Parse the message — two formats supported:
+        // 1. to-<ANT>.md — simple plain text (preferred, easy for AI)
+        // 2. <name>.json — JSON with from/to/message fields (legacy)
+        let (to, from, message, chat_id) = if filename.starts_with("to-") &&
+            (filename.ends_with(".md") || filename.ends_with(".txt"))
+        {
+            // Simple format: filename = "to-Gaea.md", content = plain text message
+            let target = filename
+                .strip_prefix("to-").unwrap_or("")
+                .strip_suffix(".md").or_else(|| filename.strip_prefix("to-")?.strip_suffix(".txt"))
+                .unwrap_or("")
+                .to_string();
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            (target, bot_name.to_string(), content, 0i64)
+        } else if filename.ends_with(".json") {
+            // JSON format
+            let contents = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => { let _ = std::fs::remove_file(&path); continue; }
+            };
+            match serde_json::from_str::<serde_json::Value>(&contents) {
+                Ok(msg) => {
+                    let to = msg.get("to").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                    let from = msg.get("from").and_then(|f| f.as_str()).unwrap_or(bot_name).to_string();
+                    let message = msg.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                    let chat_id = msg.get("chat_id").and_then(|c| c.as_i64()).unwrap_or(0);
+                    (to, from, message, chat_id)
                 }
-                let _ = std::fs::remove_file(&path);
+                Err(_) => { let _ = std::fs::remove_file(&path); continue; }
+            }
+        } else {
+            // Unknown format — skip.
+            continue;
+        };
+
+        if !to.is_empty() && !message.is_empty() {
+            let ants_dir = memory_dir.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent());
+            if let Some(dir) = ants_dir {
+                // Check ant.toml for custom working_dir.
+                let target_memory = resolve_ant_memory(dir, &to)
+                    .unwrap_or_else(|| dir.join(&to).join("working").join("memory"));
+                if target_memory.exists() {
+                    let colony_msg = format!(
+                        "COLONY MESSAGE from {}\n\n{}\n\n\
+                         RULES OF DISCOURSE (Socratic dialectic with Popperian refutation):\n\
+                         Each exchange must ADVANCE the discussion:\n\
+                         1. If you agree, add NEW information or a new angle\n\
+                         2. If you disagree, state a clear counter-thesis with evidence\n\
+                         3. If you see a synthesis, propose it and move to the next question\n\
+                         4. If the topic is exhausted, say so\n\
+                         5. If you have nothing new to add, say so and STOP\n\n\
+                         Your response will be forwarded back to {}.\n\
+                         IMPORTANT: Advance the conversation, then STOP.",
+                        from, message, from
+                    );
+                    let target_inbox = target_memory.join("colony_inbox");
+                    let _ = std::fs::create_dir_all(&target_inbox);
+                    let inbox_msg = serde_json::json!({
+                        "from": from,
+                        "message": colony_msg,
+                        "chat_id": chat_id,
+                        "timestamp": crate::dateutil::datetime_now(),
+                    });
+                    let inbox_file = format!("{}-{}.json", from,
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis());
+                    let _ = std::fs::write(
+                        target_inbox.join(&inbox_file),
+                        serde_json::to_string_pretty(&inbox_msg).unwrap_or_default()
+                    );
+                    log::info!("[{}] Colony outbox: forwarded to {} inbox", bot_name, to);
+                }
             }
         }
+        let _ = std::fs::remove_file(&path);
     }
 }
