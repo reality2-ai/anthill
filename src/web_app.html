@@ -999,19 +999,11 @@ async function exportGraph() {
     const cd = resp.headers.get('Content-Disposition') || '';
     const match = cd.match(/filename="(.+?)"/);
     const filename = match ? match[1] : `${state.activeBot}-knowledge.html`;
-    // Trigger download — use both methods for browser compatibility.
+    // Open the export in a new tab — works in PWAs, Brave, and all browsers.
+    // User can save with Ctrl+S or the browser's save function.
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    // Clean up after a delay (some browsers need the element to persist briefly).
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 1000);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
     // Show GitHub gist URL if published.
     const gistUrl = resp.headers.get('X-Gist-Url');
     if (gistUrl) {
