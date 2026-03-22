@@ -1439,9 +1439,15 @@ pub async fn ai_worker_loop(
                                  - Claims that contradict your evidence → 'contradiction'\n\
                                  - Unsupported claims → 'inconsequential_search'\n\
                                  - Update {}'s expert_in edge based on response quality\n\n\
-                                 If you have a substantive response that ADVANCES the conversation,\n\
-                                 send it back via colony_outbox. If you have nothing new to add,\n\
-                                 just update your graph and STOP — do not continue for the sake of it.",
+                                 CRITICAL — when to respond vs when to stop:\n\
+                                 - If you have a substantive response that introduces NEW knowledge,\n\
+                                   a NEW question, or a genuine disagreement backed by evidence,\n\
+                                   send it back via colony_outbox.\n\
+                                 - If you AGREE with the other ANT, or the topic is exhausted, or\n\
+                                   you have nothing new to add: update your graph and STOP.\n\
+                                   Do NOT write to colony_outbox. Do NOT send a message saying\n\
+                                   you agree or that the discussion is complete — silence IS the\n\
+                                   signal that the conversation has concluded.",
                                 bname, response_text, bname, bname, bname
                             );
                             let inbox_msg = serde_json::json!({
@@ -2297,16 +2303,42 @@ fn check_colony_loop(memory_dir: &std::path::Path, from: &str, message: &str) ->
         Vec::new()
     };
 
-    // Simple loop detection: if the last 3 messages from the same ANT
-    // are very similar (share >60% of words), it's a loop.
+    // 1. Hard cap: too many exchanges with this ANT → stop.
+    let exchange_count = tracker.iter().filter(|(f, _)| f == from).count();
+    if exchange_count >= MAX_COLONY_EXCHANGES {
+        log::info!("Colony exchange cap reached ({} messages from {})", exchange_count, from);
+        // Clear tracker for this ANT so future conversations can start fresh.
+        tracker.retain(|(f, _)| f != from);
+        let _ = std::fs::write(&tracker_path, serde_json::to_string(&tracker).unwrap_or_default());
+        return true;
+    }
+
+    // 2. Conclusion detection: if the message signals the discussion is over,
+    //    don't deliver it — the other ANT would just agree back.
+    let lower = message.to_lowercase();
+    let conclusion_phrases = [
+        "discussion is complete", "conversation is complete", "exchange is complete",
+        "nothing new to add", "nothing further to add", "no new insights",
+        "agree with your assessment", "agree with your conclusion",
+        "we are in agreement", "we're in agreement",
+        "topic is exhausted", "topic has been exhausted",
+        "covered all the key", "covered the key points",
+        "no further points", "no additional insights",
+        "this concludes", "concludes our discussion",
+        "thank you for the exchange", "thank you for this exchange",
+        "productive exchange", "productive discussion",
+    ];
+    let is_conclusion = conclusion_phrases.iter().any(|p| lower.contains(p));
+
+    // 3. Word overlap: if the last 2 messages from the same ANT share >60%
+    //    of significant words with the current message, it's a loop.
     let recent_from_same: Vec<&str> = tracker.iter().rev()
         .filter(|(f, _)| f == from)
         .take(3)
         .map(|(_, m)| m.as_str())
         .collect();
 
-    let is_loop = if recent_from_same.len() >= 2 {
-        // Check word overlap between current message and recent ones.
+    let is_word_loop = if recent_from_same.len() >= 2 {
         let current_words: std::collections::HashSet<&str> = message
             .split_whitespace()
             .filter(|w| w.len() > 3)
@@ -2328,6 +2360,8 @@ fn check_colony_loop(memory_dir: &std::path::Path, from: &str, message: &str) ->
         false
     };
 
+    let is_loop = is_conclusion || is_word_loop;
+
     // Record this message.
     tracker.push((from.to_string(), message.chars().take(200).collect()));
     // Keep last 20 entries.
@@ -2337,7 +2371,7 @@ fn check_colony_loop(memory_dir: &std::path::Path, from: &str, message: &str) ->
     is_loop
 }
 
-/// Maximum colony exchanges per conversation before forcing a conclusion.
+/// Maximum colony exchanges per ANT pair before forcing a conclusion.
 const MAX_COLONY_EXCHANGES: usize = 6;
 
 fn process_colony_inbox(
