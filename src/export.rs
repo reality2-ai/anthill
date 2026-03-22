@@ -21,8 +21,6 @@ struct GraphInsights {
     strongest_beliefs: Vec<(String, String, String, f64)>, // from, to, relation, confidence
     weakest_beliefs: Vec<(String, String, String, f64)>,
     most_connected: Vec<(String, usize)>, // label, connection count
-    #[allow(dead_code)]
-    evidence_diversity: Vec<(String, String, String, usize)>, // from, to, relation, num_types
     topic_summaries: Vec<(String, usize, usize, f64)>, // name, nodes, edges, avg_conf
 }
 
@@ -107,7 +105,6 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
         strongest_beliefs: strongest,
         weakest_beliefs: weakest,
         most_connected,
-        evidence_diversity: Vec::new(), // TODO: compute from evidence_log
         topic_summaries,
     }
 }
