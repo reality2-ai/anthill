@@ -39,7 +39,7 @@ impl OllamaClient {
             base_url: base_url.unwrap_or(DEFAULT_BASE_URL).trim_end_matches('/').into(),
             embed_model: embed_model.unwrap_or(DEFAULT_EMBED_MODEL).into(),
             client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .connect_timeout(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
             embed_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -111,6 +111,7 @@ impl OllamaClient {
         let resp = self.client
             .post(format!("{}/api/embed", self.base_url))
             .json(&body)
+            .timeout(std::time::Duration::from_secs(60))
             .send()
             .await
             .map_err(|e| format!("Ollama embed request failed: {}", e))?;

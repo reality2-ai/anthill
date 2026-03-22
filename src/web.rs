@@ -1708,6 +1708,24 @@ async fn handle_web_command(
                       3. Look for edges that should exist based on what you know\n\
                       4. Add any new conjectures with appropriate basis and confidence\n\
                       5. Update the topic graph files"),
+                    ("RUMINATION — CITATION CONSOLIDATION",
+                     "Read the citations graph (memory/graphs/citations.cbor or any graph with \
+                      citation edges). Also read the topic graphs in memory/graphs/.\n\n\
+                      STEP 1 — Resolve unknown citation links:\n\
+                      1. Find edges in the citations graph with relation '?'\n\
+                      2. For each '?' edge, look at the citation's url, title, and snippet\n\
+                      3. If there is a URL, fetch it and read the content to determine the core idea\n\
+                      4. If it is a PDF or file, read it to determine the core idea\n\
+                      5. Replace the '?' relation with a description of what the citation is about\n\
+                      6. Update the citations graph\n\n\
+                      STEP 2 — Link citations to topic graph edges:\n\
+                      1. For each citation, identify which edges in the topic graphs it supports\n\
+                      2. Check the citation's cite_id (format: cite-<8hex>)\n\
+                      3. If a topic graph edge is supported by this citation but does not have it \
+                         in its citations list, add it: {\"cite_id\": \"<the cite_id>\", \"url\": \"...\", \
+                         \"title\": \"...\", \"ref_type\": \"...\", \"quality\": ...}\n\
+                      4. Do NOT fabricate citations — only link citations that genuinely support the edge\n\
+                      5. Update the topic graph files"),
                 ];
 
                 for (title, body) in tasks {
@@ -1731,7 +1749,7 @@ async fn handle_web_command(
                     });
                 }
             }
-            Some("🧠 Starting 3 focused rumination tasks — refutation, connections, improvement...".into())
+            Some("🧠 Starting 4 focused rumination tasks — refutation, connections, improvement, citations...".into())
         },
         _ => None,
     };

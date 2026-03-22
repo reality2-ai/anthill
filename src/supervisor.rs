@@ -223,6 +223,9 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     loop {
         // Check for reload signal (non-blocking).
         if reload_rx.try_recv().is_ok() {
+            // Remove finished tasks so stopped ANTs can be re-discovered.
+            ant_tasks.retain(|(_, handle, _)| !handle.is_finished());
+
             let new_configs = discover_ants(&ants_dir);
             let running: Vec<String> = ant_tasks.iter().map(|(n, _, _)| n.clone()).collect();
             for (name, config_path) in &new_configs {
@@ -284,13 +287,19 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
 
+                // Re-read config from disk so runtime changes (e.g. disabling
+                // rumination) take effect on restart.
+                let config_path = ants_dir.join(name.as_str()).join("ant.toml");
+                let fresh_cfg = Config::load(&config_path).unwrap_or_else(|_| cfg.clone());
+                *cfg = fresh_cfg.clone();
+
                 *handle = spawn_bot_task(
                     name.clone(),
-                    cfg.clone(),
+                    fresh_cfg,
                     registry.global_tx.clone(),
                     Arc::clone(&registry),
                 );
-                log::info!("Ant '{}' restarted", name);
+                log::info!("Ant '{}' restarted (config reloaded from disk)", name);
                 let _ = registry.global_tx.send(crate::registry::WsEvent::BotStatus {
                     bot: name.clone(),
                     status: "running".into(),
