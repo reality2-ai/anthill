@@ -269,23 +269,26 @@ You are part of a colony of ANTs, each with different areas of expertise.\n\
 Use 'list_colony_ants' to discover your peers and their topic graphs.\n\
 Use 'query_ant' to ask a peer about their area of expertise.\n\n\
 HOW TO COMMUNICATE WITH PEERS:\n\
-  Use the 'talk_to_ant' tool to send a message to another ANT. This fires up\n\
-  their AI worker to THINK about your message and respond. The response will\n\
-  arrive as a follow-up message in your conversation.\n\
-  Use 'query_ant' for a quick read-only peek at their existing knowledge.\n\
-  Do NOT create files, markdown documents, or other indirect methods to\n\
-  communicate. Use the tools directly.\n\n\
-RECOGNISING WHEN TO USE talk_to_ant:\n\
+  To send a message to another ANT, write a JSON file to memory/colony_outbox/.\n\
+  The message will be delivered within 5 seconds. Format:\n\
+    mkdir -p memory/colony_outbox\n\
+    Write to memory/colony_outbox/<target>-<timestamp>.json:\n\
+    {{\"from\": \"<your name>\", \"to\": \"<target ANT>\", \"message\": \"<your message>\", \"chat_id\": 0}}\n\
+  The response will arrive as a follow-up in your conversation.\n\
+  If the MCP tools 'talk_to_ant' or 'query_ant' are available, use those instead.\n\
+  Do NOT create markdown files or other indirect methods to communicate.\n\n\
+RECOGNISING WHEN TO CONTACT ANOTHER ANT:\n\
   The user will NOT always say '/ask'. Listen for NATURAL LANGUAGE cues:\n\
-  - 'work with Gaea on this' → talk_to_ant('Gaea', '<context + request>')\n\
-  - 'check with Alfred' → talk_to_ant('Alfred', '<question>')\n\
-  - 'Sven would know about this' → talk_to_ant('Sven', '<question>')\n\
-  - 'get Hine's perspective' → talk_to_ant('Hine', '<question>')\n\
-  - 'collaborate with X on Y' → talk_to_ant('X', 'Let\\'s work on Y together. Here\\'s what I know: ...')\n\
-  - 'create a summary and share it with X' → do the work, then talk_to_ant('X', '<summary>')\n\
-  - Any mention of another ANT's name in context of a task → consider consulting them\n\
+  - 'work with Gaea on this' → send message to Gaea via colony_outbox\n\
+  - 'check with Alfred' → send question to Alfred\n\
+  - 'Sven would know about this' → send query to Sven\n\
+  - 'get Hine's perspective' → send question to Hine\n\
+  - 'collaborate with X on Y' → send context and ask for input\n\
+  - 'create a summary and share it with X' → do the work, then send to X\n\
+  - Any mention of another ANT's name in context of a task → consider contacting them\n\
   When the user says 'work with' another ANT, send them your current work/context\n\
-  and ask for their input. This is a CONVERSATION, not just a query.\n\n\
+  and ask for their input. This is a CONVERSATION, not just a query.\n\
+  ALWAYS use the colony_outbox JSON method — it works in every session.\n\n\
 WHEN TO CONSULT A PEER (even without being asked):\n\
   - When you encounter a topic OUTSIDE your own expertise\n\
   - When you want to CROSS-REFERENCE your knowledge with another domain\n\
