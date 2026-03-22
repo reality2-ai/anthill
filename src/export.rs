@@ -13,6 +13,11 @@ use std::path::Path;
 use crate::store::KnowledgeStore;
 use crate::store::live::LiveKnowledgeStore;
 
+// Embed vendor JS at compile time — makes the export fully self-contained.
+const THREE_JS: &str = include_str!("vendor/three.min.js");
+const SPRITETEXT_JS: &str = include_str!("vendor/three-spritetext.min.js");
+const FORCEGRAPH_JS: &str = include_str!("vendor/3d-force-graph.min.js");
+
 /// Pre-computed insights about a graph.
 struct GraphInsights {
     total_nodes: usize,
@@ -198,9 +203,9 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path) 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{ant_name} — Knowledge Snapshot {snapshot_id}</title>
-<script src="https://unpkg.com/three@0.175.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three-spritetext@1.9.7/dist/three-spritetext.min.js"></script>
-<script src="https://unpkg.com/3d-force-graph@1.78.6/dist/3d-force-graph.min.js"></script>
+<script>{three_js}</script>
+<script>{spritetext_js}</script>
+<script>{forcegraph_js}</script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ background: #0f172a; color: #e2e8f0; font-family: -apple-system, system-ui, sans-serif; }}
@@ -370,6 +375,9 @@ loadGraph(firstNonEmpty);
         insights_html = insights_html,
         graphs_json = graphs_json,
         version = env!("CARGO_PKG_VERSION"),
+        three_js = THREE_JS,
+        spritetext_js = SPRITETEXT_JS,
+        forcegraph_js = FORCEGRAPH_JS,
     );
 
     std::fs::write(output_path, &html)?;

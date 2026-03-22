@@ -999,11 +999,24 @@ async function exportGraph() {
     const cd = resp.headers.get('Content-Disposition') || '';
     const match = cd.match(/filename="(.+?)"/);
     const filename = match ? match[1] : `${state.activeBot}-knowledge.html`;
-    // Open the export in a new tab — works in PWAs, Brave, and all browsers.
-    // User can save with Ctrl+S or the browser's save function.
+    // Download the file — it must be opened from disk (not blob URL)
+    // because blob URLs can't load external CDN scripts.
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 2000);
+    // Show confirmation with instructions.
+    setTimeout(() => {
+      const msg = 'Knowledge graph exported as: ' + filename + '\n\nOpen the downloaded file in your browser to explore the 3D graph.';
+      alert(msg);
+    }, 500);
     // Show GitHub gist URL if published.
     const gistUrl = resp.headers.get('X-Gist-Url');
     if (gistUrl) {
