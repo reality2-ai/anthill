@@ -757,7 +757,11 @@
       </div>
       <button onclick="toggleTheme()" id="theme-toggle" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;width:32px;height:32px;font-size:16px;cursor:pointer;line-height:1" title="Toggle light/dark theme">☀</button>
     </div>
-    <div id="graph-info" style="display:none;position:absolute;bottom:10px;left:10px;right:10px;max-height:33vh;overflow-y:auto;background:var(--overlay-strong);padding:12px 16px;border-radius:8px;font-size:13px;color:var(--text)">
+    <div id="graph-query-bar" style="position:absolute;bottom:10px;left:10px;right:10px;display:flex;gap:8px;z-index:10">
+      <input id="graph-query-input" placeholder="Ask about this graph..." style="flex:1;background:var(--overlay-strong);color:var(--text);border:1px solid var(--border-light);border-radius:8px;padding:10px 14px;font-size:14px;font-family:var(--font)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitGraphQuery()}">
+      <button onclick="submitGraphQuery()" style="background:var(--accent);color:white;border:none;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;font-size:14px;white-space:nowrap">Ask</button>
+    </div>
+    <div id="graph-info" style="display:none;position:absolute;bottom:56px;left:10px;right:10px;max-height:30vh;overflow-y:auto;background:var(--overlay-strong);padding:12px 16px;border-radius:8px;font-size:13px;color:var(--text);z-index:11">
       <button onclick="closeGraphInfo()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text-dim);font-size:16px;cursor:pointer;line-height:1" title="Close">✕</button>
     </div>
   </div>
@@ -815,6 +819,37 @@ initTheme();
 
 function closeGraphInfo() {
   document.getElementById('graph-info').style.display = 'none';
+}
+
+// --- Graph query (ask about the current graph) ---
+function submitGraphQuery() {
+  const input = document.getElementById('graph-query-input');
+  const text = input.value.trim();
+  if (!text || !state.activeBot || !state.ws) return;
+
+  const selector = document.getElementById('graph-selector');
+  const graphName = (selector ? selector.value : '') || 'meta';
+
+  const prompt = `GRAPH QUERY — answer using ONLY the "${graphName}" knowledge graph:\n\n` +
+    `${text}\n\n` +
+    `Read the "${graphName}" topic graph in memory/graphs/ and answer the question ` +
+    `based on what is in that graph. Reference specific nodes and edges with their ` +
+    `confidence levels. If the answer isn't in this graph, say so — do not use ` +
+    `general knowledge. Keep your answer concise.`;
+
+  if (!state.messages[state.activeBot]) state.messages[state.activeBot] = [];
+  state.messages[state.activeBot].push({ role: 'user', text: `🔍 [${graphName}] ${text}` });
+  showTyping(state.activeBot);
+
+  wsSendSigned({
+    type: 'chat',
+    bot: state.activeBot,
+    message: prompt,
+  });
+
+  input.value = '';
+  switchTab('chat');
+  renderChat();
 }
 
 // --- Node update dialog (right-click on graph node) ---
