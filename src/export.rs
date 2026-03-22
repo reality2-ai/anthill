@@ -301,6 +301,41 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 }
 
 
+/// Ask an AI to rewrite the raw insights as polished plain English.
+/// Falls back to the algorithmic version if the AI is unavailable.
+fn ai_polish_summary(raw_insights: &str, ant_name: &str) -> String {
+    let prompt = format!(
+        "Rewrite the following knowledge graph summary as a clear, accessible, well-written \
+         executive summary of 1-2 pages. Write it for a general reader who has a brief \
+         understanding of the topics but wants to learn more. Use flowing prose — no bullet \
+         points, no tables, no technical jargon about graphs or confidence scores. \
+         Explain what is known, what is well-established, what is uncertain, and what the \
+         key themes are. Include specific facts and descriptions from the summary data. \
+         Write in third person, referring to the knowledge as belonging to '{}'.\n\n\
+         Raw summary data:\n\n{}",
+        ant_name, raw_insights
+    );
+
+    // Try claude CLI directly.
+    let output = std::process::Command::new("claude")
+        .args(["-p", "--max-turns", "1"])
+        .arg(&prompt)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if text.len() > 100 {
+                return text;
+            }
+        }
+        _ => {}
+    }
+
+    // Fallback: return raw insights unchanged.
+    raw_insights.to_string()
+}
+
 /// Format a list as "A, B, and C" (Oxford comma).
 fn format_list(items: &[String]) -> String {
     match items.len() {
@@ -364,7 +399,79 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
         .as_secs());
 
     let insights = compute_insights(all_data);
-    let insights_html = render_insights_html(&insights, ant_name, &snapshot_id);
+    let raw_insights_html = render_insights_html(&insights, ant_name, &snapshot_id);
+
+    // Try to get an AI-polished summary. Build plain text from the raw data.
+    let mut raw_text = format!("Knowledge summary for {}\n\n", ant_name);
+    raw_text.push_str(&format!("Total: {} concepts, {} relationships, {:.0}% average confidence\n\n",
+        insights.total_nodes, insights.total_edges, insights.avg_confidence * 100.0));
+    for (name, nodes, edges, avg) in &insights.topic_summaries {
+        if *nodes == 0 { continue; }
+        let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
+        raw_text.push_str(&format!("Topic: {} ({} concepts, {} relationships, {:.0}% confidence)\n",
+            name.replace('-', " "), nodes, edges, avg * 100.0));
+        if !desc.is_empty() { raw_text.push_str(&format!("  Description: {}\n", desc)); }
+    }
+    raw_text.push_str("\nStrongest beliefs:\n");
+    for (from, to, rel, conf) in insights.strongest_beliefs.iter().take(10) {
+        let desc = insights.node_summaries.get(from.as_str()).cloned().unwrap_or_default();
+        raw_text.push_str(&format!("  {} {} {} ({:.0}%){}\n", from, rel, to, conf * 100.0,
+            if desc.is_empty() { String::new() } else { format!(" — {}", if desc.len() > 150 { &desc[..150] } else { &desc }) }));
+    }
+    raw_text.push_str("\nWeakest beliefs (need investigation):\n");
+    for (from, to, rel, conf) in insights.weakest_beliefs.iter().take(7) {
+        raw_text.push_str(&format!("  {} {} {} ({:.0}%)\n", from, rel, to, conf * 100.0));
+    }
+    raw_text.push_str("\nMost connected concepts:\n");
+    for (label, count) in insights.most_connected.iter().take(7) {
+        let desc = insights.node_summaries.get(label.as_str()).cloned().unwrap_or_default();
+        raw_text.push_str(&format!("  {} ({} connections){}\n", label, count,
+            if desc.is_empty() { String::new() } else { format!(" — {}", if desc.len() > 150 { &desc[..150] } else { &desc }) }));
+    }
+    raw_text.push_str("\nKey entity descriptions:\n");
+    for (label, summary) in insights.node_summaries.iter().take(15) {
+        let short = if summary.len() > 200 { &summary[..200] } else { summary.as_str() };
+        raw_text.push_str(&format!("  {}: {}\n", label, short));
+    }
+
+    // Ask AI to polish into readable prose.
+    let polished = ai_polish_summary(&raw_text, ant_name);
+    let insights_html = if polished != raw_text {
+        // AI produced a polished version — wrap in HTML.
+        let mut html = format!(
+            "<h2>{} — Knowledge Summary</h2>\n\
+             <p style='color:#64748b;font-size:13px'>Snapshot {} | Generated {}</p>\n\
+             <div style='background:#1e293b;border-radius:8px;padding:24px 28px;margin:20px 0;line-height:1.8;font-size:14px'>\n",
+            ant_name, snapshot_id, crate::dateutil::datetime_now()
+        );
+        // Convert markdown-ish AI output to HTML paragraphs.
+        for line in polished.lines() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            if line.starts_with("# ") {
+                html.push_str(&format!("<h3 style='margin-top:20px'>{}</h3>\n", &line[2..]));
+            } else if line.starts_with("## ") {
+                html.push_str(&format!("<h3 style='margin-top:20px'>{}</h3>\n", &line[3..]));
+            } else if line.starts_with("### ") {
+                html.push_str(&format!("<h4 style='margin-top:16px'>{}</h4>\n", &line[4..]));
+            } else if line.starts_with("**") && line.ends_with("**") {
+                html.push_str(&format!("<h4 style='margin-top:16px'>{}</h4>\n", &line[2..line.len()-2]));
+            } else {
+                // Convert inline **bold** to <b>.
+                let line = line.replace("**", "<b>").replace("**", "</b>");
+                html.push_str(&format!("<p>{}</p>\n", line));
+            }
+        }
+        html.push_str("<p style='margin-top:20px;color:#94a3b8;font-size:13px'>This summary was written by an AI reasoning agent based on its knowledge graph. \
+            The interactive 3D visualisation (Graph tab) allows exploration of individual concepts. \
+            Generated by <a href='https://github.com/reality2-ai/anthill' style='color:#60a5fa'>Anthill</a>.</p>\n");
+        html.push_str("</div>\n");
+        html
+    } else {
+        // Fallback to algorithmic version.
+        raw_insights_html
+    };
+
     let graphs_json = serde_json::to_string(&all_data)?;
     let timestamp = crate::dateutil::datetime_now();
 
