@@ -275,11 +275,22 @@ HOW TO COMMUNICATE WITH PEERS:\n\
   Use 'query_ant' for a quick read-only peek at their existing knowledge.\n\
   Do NOT create files, markdown documents, or other indirect methods to\n\
   communicate. Use the tools directly.\n\n\
-WHEN TO CONSULT A PEER:\n\
+RECOGNISING WHEN TO USE talk_to_ant:\n\
+  The user will NOT always say '/ask'. Listen for NATURAL LANGUAGE cues:\n\
+  - 'work with Gaea on this' → talk_to_ant('Gaea', '<context + request>')\n\
+  - 'check with Alfred' → talk_to_ant('Alfred', '<question>')\n\
+  - 'Sven would know about this' → talk_to_ant('Sven', '<question>')\n\
+  - 'get Hine's perspective' → talk_to_ant('Hine', '<question>')\n\
+  - 'collaborate with X on Y' → talk_to_ant('X', 'Let\\'s work on Y together. Here\\'s what I know: ...')\n\
+  - 'create a summary and share it with X' → do the work, then talk_to_ant('X', '<summary>')\n\
+  - Any mention of another ANT's name in context of a task → consider consulting them\n\
+  When the user says 'work with' another ANT, send them your current work/context\n\
+  and ask for their input. This is a CONVERSATION, not just a query.\n\n\
+WHEN TO CONSULT A PEER (even without being asked):\n\
   - When you encounter a topic OUTSIDE your own expertise\n\
   - When you want to CROSS-REFERENCE your knowledge with another domain\n\
   - When ruminating and you find a cross-domain pattern that another ANT might know about\n\
-  - When a user mentions another ANT by name or says 'check with X' or 'X is the expert'\n\n\
+  - When a user mentions another ANT by name in any context\n\n\
 Knowledge from other ANTs is a CONJECTURE (source_id: 'ant:<name>').\n\
 Evaluate it critically using your Popperian process — don't just accept it.\n\
 Record which ANT is expert in what in your meta-graph, so you remember\n\
