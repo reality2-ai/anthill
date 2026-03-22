@@ -338,16 +338,29 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 }
 
 /// Export all graphs for an ANT as a single self-contained HTML file.
+/// Export a single named graph.
+pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path) -> anyhow::Result<()> {
+    let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
+
+    let mut all_data = Vec::new();
+    if let Ok(viz) = store.to_visualization(graph_name) {
+        let stats = store.graph_stats(graph_name).ok();
+        all_data.push(serde_json::json!({
+            "name": graph_name,
+            "node_count": stats.as_ref().map(|s| s.node_count).unwrap_or(0),
+            "edge_count": stats.as_ref().map(|s| s.edge_count).unwrap_or(0),
+            "data": viz,
+        }));
+    }
+
+    let title = format!("{} — {}", ant_name, graph_name.replace('-', " "));
+    generate_export_html(&all_data, &title, output_path)
+}
+
+/// Export all graphs for an ANT.
 pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
-    // Generate unique snapshot ID.
-    let snapshot_id = format!("{:08x}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs());
-
-    // Collect all graph data.
     let graphs = store.list_graphs()?;
     let mut all_data = Vec::new();
 
@@ -362,7 +375,18 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path) 
         }
     }
 
-    let insights = compute_insights(&all_data);
+    generate_export_html(&all_data, ant_name, output_path)
+}
+
+fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path: &Path) -> anyhow::Result<()> {
+    let ant_name = title;
+
+    let snapshot_id = format!("{:08x}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs());
+
+    let insights = compute_insights(all_data);
     let insights_html = render_insights_html(&insights, ant_name, &snapshot_id);
     let graphs_json = serde_json::to_string(&all_data)?;
     let timestamp = crate::dateutil::datetime_now();

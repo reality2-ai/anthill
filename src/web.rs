@@ -530,9 +530,11 @@ async fn get_rumination_log(
 }
 
 /// GET /api/ants/:id/export — download a self-contained HTML knowledge graph snapshot.
+/// Optional query param: ?graph=<name> to export just one graph (default: all).
 async fn export_graph(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let bots = state.registry.bots.read().await;
     let handle = match bots.get(&id) {
@@ -543,14 +545,25 @@ async fn export_graph(
     let display_name = handle.display_name.clone();
     drop(bots);
 
+    let graph_filter = params.get("graph").cloned().filter(|g| !g.is_empty());
+
     // Generate globally unique UUID for this snapshot.
     let uuid = uuid::Uuid::new_v4().to_string();
 
-    let filename = format!("{}-{}.html", id, uuid);
+    let filename = if let Some(ref g) = graph_filter {
+        format!("{}-{}-{}.html", id, g, uuid)
+    } else {
+        format!("{}-{}.html", id, uuid)
+    };
 
     // Generate the export HTML.
     let tmp_path = std::env::temp_dir().join(&filename);
-    match crate::export::export_ant_graphs(&memory_dir, &display_name, &tmp_path) {
+    let export_result = if let Some(ref graph_name) = graph_filter {
+        crate::export::export_single_graph(&memory_dir, &display_name, graph_name, &tmp_path)
+    } else {
+        crate::export::export_ant_graphs(&memory_dir, &display_name, &tmp_path)
+    };
+    match export_result {
         Ok(()) => {
             // Try to publish to GitHub if gh is available.
             let gist_url = crate::export::publish_to_github(&tmp_path, &display_name).ok();
