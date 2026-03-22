@@ -1801,6 +1801,14 @@ function renderWorkers() {
     list.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px 0">No active workers. Send a message to start one.</div>';
     return;
   }
+
+  // Preserve follow-up input values before re-rendering.
+  const savedInputs = {};
+  tasks.forEach(t => {
+    const input = document.getElementById('followup-' + t.id);
+    if (input && input.value) savedInputs[t.id] = input.value;
+  });
+
   list.innerHTML = tasks.map(t => {
     const secs = Math.floor((Date.now() - t.startTime) / 1000);
     const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
@@ -1830,14 +1838,24 @@ function renderWorkers() {
       </div>
     </div>`;
   }).join('');
+
+  // Restore follow-up input values and focus after re-render.
+  const active = document.activeElement;
+  const hadFocus = active && active.id && active.id.startsWith('followup-') ? active.id : null;
+  Object.entries(savedInputs).forEach(([id, val]) => {
+    const input = document.getElementById('followup-' + id);
+    if (input) input.value = val;
+  });
+  if (hadFocus) {
+    const el = document.getElementById(hadFocus);
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }
 }
 setInterval(() => {
-  if (currentTab === 'workers') {
-    // Don't re-render if the user is typing in a follow-up input.
-    const active = document.activeElement;
-    if (active && active.id && active.id.startsWith('followup-')) return;
-    renderWorkers();
-  }
+  if (currentTab === 'workers') renderWorkers();
 }, 1000);
 
 // --- File browser ---
