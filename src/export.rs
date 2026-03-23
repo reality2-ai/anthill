@@ -347,33 +347,39 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 
 
 /// Ask an AI to rewrite the raw insights as polished plain English.
+/// The user's guidance prompt is the primary instruction to the AI.
 /// Falls back to the algorithmic version if the AI is unavailable.
 fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>) -> String {
-    let guidance_text = guidance
-        .map(|g| format!("\n\nADDITIONAL DIRECTION FROM THE USER:\n{}\n\nFollow this guidance \
-            to shape the tone, focus, and structure of the report.", g))
-        .unwrap_or_default();
     let has_citations = raw_insights.contains("[cite-");
     let citation_instruction = if has_citations {
-        "\n\nCITATIONS ARE MANDATORY. A list of sources with citation codes like [cite-xxxx] is \
-         provided at the end of the data. You MUST cite these sources throughout your text using \
-         their codes in square brackets (e.g. [cite-a1b2c3d4]) wherever a claim, fact, or \
-         relationship is supported by that source. Every section should have at least one citation. \
-         The citations will be automatically renumbered to [1], [2], etc. in the final output. \
-         ONLY use citation codes from the provided list — never fabricate one. \
-         If a claim has no supporting citation, do not add one — just state the claim without a reference."
+        "\n\nCITATIONS: A list of sources with citation codes like [cite-xxxx] is provided \
+         at the end of the data. Cite these sources inline using their codes in square brackets \
+         wherever a claim is supported. The codes will be renumbered to [1], [2] etc. automatically. \
+         ONLY use codes from the list — never fabricate one."
     } else { "" };
+
+    // The user's guidance is the primary prompt. If none provided, use a sensible default.
+    let user_prompt = guidance.unwrap_or(
+        "Summarise the knowledge in this area, looking for practical insights and solutions \
+         that would work in the real world. Highlight what is well-established, what needs \
+         further investigation, and any surprising connections between ideas."
+    );
+
     let prompt = format!(
-        "Rewrite the following knowledge graph summary as a clear, accessible, well-written \
-         document of 1-2 pages. Write it for a general reader who wants to learn about these topics. \
-         Use flowing prose — no bullet points, no tables, no technical jargon about graphs or nodes. \
-         Structure it with a brief overall introduction, then a section for EACH topic area \
-         (use markdown ## headings), then a conclusion highlighting what is well-established \
-         and what needs further investigation. \
-         Include specific facts and descriptions from the data. \
-         Write in third person, referring to the knowledge as belonging to '{}'.{}{}\n\n\
-         Raw summary data:\n\n{}",
-        ant_name, citation_instruction, guidance_text, raw_insights
+        "You are writing a report based on knowledge graph data for '{ant_name}'.\n\n\
+         YOUR TASK:\n{user_prompt}\n\n\
+         FORMATTING RULES:\n\
+         - Write flowing prose — no bullet points, no tables, no technical jargon about graphs or nodes.\n\
+         - Use markdown ## headings to structure the document.\n\
+         - Include specific facts and evidence from the data.\n\
+         - Write as a unified whole — not individual summaries of each topic, but an integrated narrative \
+           that draws connections across the entire knowledge base.\n\
+         - Write in third person, referring to the knowledge as belonging to '{ant_name}'.{citation_instruction}\n\n\
+         Knowledge data:\n\n{raw_insights}",
+        ant_name = ant_name,
+        user_prompt = user_prompt,
+        citation_instruction = citation_instruction,
+        raw_insights = raw_insights,
     );
 
     // Cap prompt size to avoid overwhelming the AI or hitting token limits.
@@ -463,7 +469,7 @@ fn format_list(items: &[String]) -> String {
 }
 
 /// Export a single named graph.
-pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path, guidance: Option<&str>) -> anyhow::Result<()> {
+pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path, guidance: Option<&str>, include_citations: bool) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
     let mut all_data = Vec::new();
@@ -478,11 +484,11 @@ pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, 
     }
 
     let title = format!("{} — {}", ant_name, graph_name.replace('-', " "));
-    generate_export_html(&all_data, &title, output_path, guidance)
+    generate_export_html(&all_data, &title, output_path, guidance, include_citations)
 }
 
 /// Export all graphs for an ANT.
-pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, guidance: Option<&str>) -> anyhow::Result<()> {
+pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, guidance: Option<&str>, include_citations: bool) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
     let graphs = store.list_graphs()?;
@@ -502,10 +508,10 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, 
         }
     }
 
-    generate_export_html(&all_data, ant_name, output_path, guidance)
+    generate_export_html(&all_data, ant_name, output_path, guidance, include_citations)
 }
 
-fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path: &Path, guidance: Option<&str>) -> anyhow::Result<()> {
+fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path: &Path, guidance: Option<&str>, include_citations: bool) -> anyhow::Result<()> {
     let ant_name = title;
 
     let snapshot_id = format!("{:08x}", std::time::SystemTime::now()
@@ -551,7 +557,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
 
     // Include citations for the AI to reference.
     // Use cite_id codes so we can post-process the AI output to renumber them.
-    if !insights.all_citations.is_empty() {
+    if include_citations && !insights.all_citations.is_empty() {
         raw_text.push_str("\n\nSOURCES AND REFERENCES — YOU MUST CITE THESE IN YOUR TEXT.\n\
             Each source has a citation code in square brackets. Use these codes (e.g. [cite-a1b2c3d4]) \
             inline in your text wherever you make a claim supported by that source. \
@@ -642,7 +648,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     };
 
     // Append reference list — ordered by first appearance in the document.
-    let insights_html = if ordered_refs.is_empty() && insights.all_citations.is_empty() {
+    let insights_html = if !include_citations || (ordered_refs.is_empty() && insights.all_citations.is_empty()) {
         insights_html
     } else {
         let mut with_refs = insights_html;

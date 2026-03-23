@@ -707,6 +707,40 @@
   </div>
 </div>
 
+<!-- Export dialog -->
+<div id="export-modal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:560px;max-height:90vh;overflow-y:auto">
+    <h2 style="margin-bottom:16px">Export Knowledge Report</h2>
+
+    <div style="margin-bottom:16px">
+      <label style="font-size:13px;color:var(--text-dim);display:block;margin-bottom:6px">Scope</label>
+      <div style="display:flex;gap:8px">
+        <button id="export-scope-current" onclick="setExportScope('current')" style="flex:1;padding:10px;border-radius:8px;border:2px solid var(--accent);background:var(--surface2);color:var(--text);cursor:pointer;font-size:14px">Current graph</button>
+        <button id="export-scope-all" onclick="setExportScope('all')" style="flex:1;padding:10px;border-radius:8px;border:2px solid var(--border-light);background:var(--bg);color:var(--text);cursor:pointer;font-size:14px">All knowledge</button>
+      </div>
+      <div id="export-scope-hint" style="font-size:12px;color:var(--text-dim);margin-top:4px"></div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label style="font-size:13px;color:var(--text-dim);display:block;margin-bottom:6px">Report guidance</label>
+      <textarea id="export-prompt" rows="5" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border-light);border-radius:8px;padding:10px 14px;font-size:14px;font-family:var(--font);resize:vertical" placeholder="Tell the AI what to focus on..."></textarea>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">This prompt is sent directly to the AI report writer. Be as specific or general as you like.</div>
+    </div>
+
+    <div style="margin-bottom:20px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+        <input type="checkbox" id="export-citations" checked style="width:16px;height:16px;accent-color:var(--accent)">
+        Include citations and references
+      </label>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button onclick="hideExportDialog()" style="background:none;color:var(--text-dim);border:1px solid var(--border-light);border-radius:6px;padding:8px 20px;cursor:pointer;font-size:14px">Cancel</button>
+      <button id="export-submit-btn" onclick="submitExport()" style="background:var(--accent);color:white;border:none;border-radius:6px;padding:8px 20px;cursor:pointer;font-size:14px;font-weight:600">Export</button>
+    </div>
+  </div>
+</div>
+
 <div id="main">
   <div id="connection">Disconnected — reconnecting...</div>
   <div id="header">
@@ -744,8 +778,7 @@
     <div id="graph-container" style="width:100%;height:100%"></div>
     <div id="graph-toolbar" style="position:absolute;top:10px;left:10px;display:flex;gap:8px;align-items:center">
       <select id="graph-selector" onchange="loadGraph(this.value)" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer"></select>
-      <button onclick="exportGraph('current')" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer" title="Export this graph">Export</button>
-      <button onclick="exportGraph('all')" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer" title="Export all graphs">Export All</button>
+      <button onclick="showExportDialog()" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer" title="Export knowledge report">Export</button>
       <div style="background:var(--overlay);padding:8px 12px;border-radius:8px;font-size:11px;color:var(--text-dim)">
         <span style="color:#e94560">●</span> person
         <span style="color:#4ade80">●</span> project
@@ -1196,51 +1229,98 @@ const NODE_COLORS = {
   event: '#fb923c', fact: '#94a3b8',
 };
 
-async function exportGraph(mode) {
+let exportScope = 'current';
+const defaultExportPrompt = 'Summarise the knowledge in this area, looking for practical insights and solutions that would work in the real world. Highlight what is well-established, what needs further investigation, and any surprising connections between ideas.';
+
+function showExportDialog() {
   if (!state.activeBot) return;
-  const btn = event.target;
-  // Prompt for optional guidance text.
-  const guidance = prompt('Optional: provide guidance for the AI report writer\n(e.g. "Focus on practical applications" or "Write for a beginner audience")\n\nLeave blank for default:', '');
-  if (guidance === null) return; // cancelled
-  const origText = btn.textContent;
+  const modal = document.getElementById('export-modal');
+  modal.style.display = 'flex';
+  // Set default prompt if empty.
+  const promptEl = document.getElementById('export-prompt');
+  if (!promptEl.value.trim()) promptEl.value = defaultExportPrompt;
+  // Set scope hints.
+  setExportScope('current');
+  // Focus the prompt textarea.
+  setTimeout(() => promptEl.focus(), 100);
+}
+
+function hideExportDialog() {
+  document.getElementById('export-modal').style.display = 'none';
+}
+
+function setExportScope(scope) {
+  exportScope = scope;
+  const currentBtn = document.getElementById('export-scope-current');
+  const allBtn = document.getElementById('export-scope-all');
+  const hint = document.getElementById('export-scope-hint');
+  const selector = document.getElementById('graph-selector');
+  const graphName = selector ? selector.value : '';
+  if (scope === 'current') {
+    currentBtn.style.borderColor = 'var(--accent)';
+    currentBtn.style.background = 'var(--surface2)';
+    allBtn.style.borderColor = 'var(--border-light)';
+    allBtn.style.background = 'var(--bg)';
+    hint.textContent = graphName ? `Export "${graphName}" only.` : 'Export the currently selected graph.';
+  } else {
+    allBtn.style.borderColor = 'var(--accent)';
+    allBtn.style.background = 'var(--surface2)';
+    currentBtn.style.borderColor = 'var(--border-light)';
+    currentBtn.style.background = 'var(--bg)';
+    hint.textContent = 'Export all topic graphs as a unified report — not individual summaries, but an integrated whole.';
+  }
+}
+
+async function submitExport() {
+  if (!state.activeBot) return;
+  const btn = document.getElementById('export-submit-btn');
+  const prompt = document.getElementById('export-prompt').value.trim();
+  const includeCitations = document.getElementById('export-citations').checked;
+
   btn.textContent = 'Exporting...';
   btn.disabled = true;
+
   try {
     const selector = document.getElementById('graph-selector');
-    const graphName = (mode === 'current' && selector) ? selector.value : '';
-    const query = graphName ? `?graph=${encodeURIComponent(graphName)}` : '';
-    const guidanceParam = guidance ? `${query ? '&' : '?'}guidance=${encodeURIComponent(guidance)}` : '';
-    const resp = await authFetch(`/api/ants/${state.activeBot}/export${query}${guidanceParam}`);
+    const graphName = (exportScope === 'current' && selector) ? selector.value : '';
+    let url = `/api/ants/${state.activeBot}/export`;
+    const params = [];
+    if (graphName) params.push(`graph=${encodeURIComponent(graphName)}`);
+    if (prompt) params.push(`guidance=${encodeURIComponent(prompt)}`);
+    if (!includeCitations) params.push('citations=false');
+    if (params.length) url += '?' + params.join('&');
+
+    const resp = await authFetch(url);
     if (!resp.ok) { alert('Export failed: ' + resp.status + ' ' + await resp.text()); return; }
     const blob = await resp.blob();
     const cd = resp.headers.get('Content-Disposition') || '';
     const match = cd.match(/filename="(.+?)"/);
     const filename = match ? match[1] : `${state.activeBot}-knowledge.html`;
-    // Download the file — it must be opened from disk (not blob URL)
-    // because blob URLs can't load external CDN scripts.
-    const url = URL.createObjectURL(blob);
+
+    const dlUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = dlUrl;
     a.download = filename;
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 2000);
-    // Show confirmation with instructions.
-    setTimeout(() => {
-      const msg = 'Knowledge graph exported as: ' + filename + '\n\nOpen the downloaded file in your browser to explore the 3D graph.';
-      alert(msg);
-    }, 500);
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(dlUrl); }, 2000);
+
+    hideExportDialog();
   } catch (e) {
     alert('Export error: ' + e.message);
   } finally {
-    btn.textContent = origText;
+    btn.textContent = 'Export';
     btn.disabled = false;
   }
 }
+
+// Close export dialog on Escape.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('export-modal').style.display === 'flex') {
+    hideExportDialog();
+  }
+});
 
 async function loadGraph(graphName) {
   if (!state.activeBot) return;
