@@ -238,6 +238,23 @@ anthill --qr-join                # show QR code — scan with phone to join
 
 ---
 
+## Knowledge Export
+
+Export what an ANT knows as a **self-contained HTML file** — one file, no server, opens in any browser. Send it by email, share it with colleagues, or archive it.
+
+Each export includes:
+- **AI-written narrative** — the ANT's knowledge rewritten as readable prose, with numbered citations linking claims to their sources
+- **Interactive 3D graph** — explore concepts and connections visually, click nodes for details
+- **Optional guidance** — tell the report writer what to focus on (e.g. "write for a legal audience" or "emphasise the gaps")
+
+From the web dashboard, click **Export** or **Export All** on the Graphs tab. Or from the CLI:
+
+```bash
+anthill --export-graph --ant my-ant --output report.html
+```
+
+---
+
 ## Documentation
 
 | Guide | What it covers |
