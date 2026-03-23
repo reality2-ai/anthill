@@ -324,9 +324,10 @@
     padding: 8px 20px;
     background: var(--surface);
     border-top: 1px solid var(--border);
-    max-height: 150px;
+    max-height: 120px;
     overflow-y: auto;
     display: none;
+    flex-shrink: 0;
   }
 
   #tasks-panel.has-tasks { display: block; }
@@ -1649,18 +1650,17 @@ function renderChat(forceScroll) {
     return `<div class="msg user">${escapeHtml(m.text)}${replyBtn}</div>`;
   }).join('');
 
-  // Show typing if active
-  if (state.typing[state.activeBot]) {
-    chat.innerHTML += '<div class="typing">Thinking...</div>';
-  }
-
   addCopyButtons();
+
   // Always scroll to bottom when switching bots or opening a chat.
   // Only auto-scroll on new messages if the user is near the bottom (within 150px).
   const isNearBottom = forceScroll || (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
   if (isNearBottom) {
     requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
   }
+
+  // Update the tasks panel to show/hide typing indicator.
+  renderTasks();
 }
 
 function renderTasks() {
@@ -1668,7 +1668,9 @@ function renderTasks() {
   const tasks = state.tasks[state.activeBot] || [];
   const taskBar = document.getElementById('task-bar');
 
-  if (tasks.length === 0) {
+  const isTyping = state.typing[state.activeBot];
+
+  if (tasks.length === 0 && !isTyping) {
     panel.className = '';
     panel.innerHTML = '';
     taskBar.textContent = '';
@@ -1676,6 +1678,12 @@ function renderTasks() {
   }
 
   panel.className = 'has-tasks';
+
+  if (tasks.length === 0 && isTyping) {
+    panel.innerHTML = '<div class="task-item" style="color:var(--text-dim);font-style:italic">Thinking...</div>';
+    taskBar.textContent = '';
+    return;
+  }
   taskBar.textContent = `${tasks.length} worker${tasks.length > 1 ? 's' : ''} active`;
 
   panel.innerHTML = tasks.map(t => {
@@ -1696,13 +1704,6 @@ function renderTasks() {
       ${progress}${agentList}
     </div>`;
   }).join('');
-
-  // Only re-scroll chat if the user is already near the bottom.
-  const chat = document.getElementById('chat');
-  if (chat) {
-    const isNearBottom = (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
-    if (isNearBottom) requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
-  }
 }
 
 // Update task timers every second
@@ -1830,8 +1831,11 @@ function renderWorkers() {
     return;
   }
 
-  // Preserve follow-up input values before re-rendering.
+  // Preserve follow-up input values and focus before re-rendering.
   const savedInputs = {};
+  const active = document.activeElement;
+  const hadFocus = active && active.id && active.id.startsWith('followup-') ? active.id : null;
+  const cursorPos = hadFocus ? active.selectionStart : null;
   tasks.forEach(t => {
     const input = document.getElementById('followup-' + t.id);
     if (input && input.value) savedInputs[t.id] = input.value;
@@ -1868,8 +1872,6 @@ function renderWorkers() {
   }).join('');
 
   // Restore follow-up input values and focus after re-render.
-  const active = document.activeElement;
-  const hadFocus = active && active.id && active.id.startsWith('followup-') ? active.id : null;
   Object.entries(savedInputs).forEach(([id, val]) => {
     const input = document.getElementById('followup-' + id);
     if (input) input.value = val;
@@ -1878,7 +1880,8 @@ function renderWorkers() {
     const el = document.getElementById(hadFocus);
     if (el) {
       el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
+      const pos = cursorPos !== null ? Math.min(cursorPos, el.value.length) : el.value.length;
+      el.setSelectionRange(pos, pos);
     }
   }
 }
