@@ -91,6 +91,7 @@ pub async fn run_web_server(
         .route("/vendor/three.min.js", get(vendor_three))
         .route("/vendor/three-spritetext.min.js", get(vendor_spritetext))
         .route("/vendor/3d-force-graph.min.js", get(vendor_force_graph))
+        .route("/vendor/force-graph.min.js", get(vendor_force_graph_2d))
         .route("/api/auth/verify", post(auth_verify))
         .route("/api/auth/join", post(auth_join))
         .route("/api/auth/status", get(auth_status))
@@ -132,6 +133,7 @@ async fn logo() -> impl IntoResponse {
 const VENDOR_THREE: &str = include_str!("vendor/three.min.js");
 const VENDOR_SPRITETEXT: &str = include_str!("vendor/three-spritetext.min.js");
 const VENDOR_FORCE_GRAPH: &str = include_str!("vendor/3d-force-graph.min.js");
+const VENDOR_FORCE_GRAPH_2D: &str = include_str!("vendor/force-graph.min.js");
 
 async fn vendor_three() -> impl IntoResponse {
     ([(axum::http::header::CONTENT_TYPE, "application/javascript")], VENDOR_THREE)
@@ -139,6 +141,10 @@ async fn vendor_three() -> impl IntoResponse {
 
 async fn vendor_force_graph() -> impl IntoResponse {
     ([(axum::http::header::CONTENT_TYPE, "application/javascript")], VENDOR_FORCE_GRAPH)
+}
+
+async fn vendor_force_graph_2d() -> impl IntoResponse {
+    ([(axum::http::header::CONTENT_TYPE, "application/javascript")], VENDOR_FORCE_GRAPH_2D)
 }
 
 async fn vendor_spritetext() -> impl IntoResponse {

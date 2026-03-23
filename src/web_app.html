@@ -15,6 +15,7 @@
 <script src="/vendor/three.min.js"></script>
 <script src="/vendor/three-spritetext.min.js"></script>
 <script src="/vendor/3d-force-graph.min.js"></script>
+<script src="/vendor/force-graph.min.js"></script>
 <style>
   :root {
     --bg: #1a1a2e;
@@ -1100,51 +1101,90 @@ function handleEvent(msg) {
 }
 
 // --- 2D Fallback (no WebGL) ---
+let graph2DInstance = null;
+
 function render2DFallback(container, data) {
-  const nodeMap = {};
-  data.nodes.forEach(n => { nodeMap[n.id] = n; });
-  const edgesByNode = {};
-  (data.links || []).forEach(l => {
-    const s = l.source.id !== undefined ? l.source.id : l.source;
-    const t = l.target.id !== undefined ? l.target.id : l.target;
-    if (!edgesByNode[s]) edgesByNode[s] = [];
-    if (!edgesByNode[t]) edgesByNode[t] = [];
-    edgesByNode[s].push(l);
-    edgesByNode[t].push(l);
-  });
-  // Sort nodes: hubs first, then by connection count.
-  const sorted = [...data.nodes].sort((a, b) => {
-    if (a.is_hub !== b.is_hub) return a.is_hub ? -1 : 1;
-    return (edgesByNode[b.id] || []).length - (edgesByNode[a.id] || []).length;
-  });
-  let html = '<div style="padding:20px;overflow-y:auto;height:100%">';
-  html += '<div style="color:var(--text-dim);font-size:13px;margin-bottom:16px">2D view (WebGL unavailable — restart browser to try 3D)</div>';
-  sorted.forEach(n => {
-    const color = NODE_COLORS[n.kind] || '#888';
-    const edges = edgesByNode[n.id] || [];
-    const conf = n.confidence !== undefined ? Math.round(n.confidence * 100) : '?';
-    html += `<div style="background:var(--surface);border-left:4px solid ${color};border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:8px">`;
-    html += `<div style="font-weight:600;color:${color}">${escapeHtml(n.label)} <span style="color:var(--text-dim);font-weight:400;font-size:12px">${n.kind} · ${conf}%</span></div>`;
-    if (n.summary) html += `<div style="color:var(--text-dim);font-size:13px;margin-top:4px">${escapeHtml(n.summary)}</div>`;
-    if (edges.length) {
-      html += '<div style="margin-top:8px;font-size:12px">';
-      edges.forEach(e => {
-        const s = e.source.id !== undefined ? e.source.id : e.source;
-        const t = e.target.id !== undefined ? e.target.id : e.target;
-        const other = s === n.id ? nodeMap[t] : nodeMap[s];
-        const dir = s === n.id ? '→' : '←';
-        const econf = Math.round(e.confidence * 100);
-        const confColor = econf >= 80 ? 'var(--green)' : econf >= 50 ? 'var(--yellow)' : 'var(--red)';
-        if (other) {
-          html += `<div style="padding:2px 0">${dir} ${escapeHtml(e.relation)} ${dir} <b>${escapeHtml(other.label)}</b> <span style="color:${confColor}">${econf}%</span></div>`;
-        }
-      });
-      html += '</div>';
-    }
-    html += '</div>';
-  });
-  html += '</div>';
-  container.innerHTML = html;
+  if (graph2DInstance) {
+    graph2DInstance._destructor && graph2DInstance._destructor();
+    graph2DInstance = null;
+  }
+  container.innerHTML = '';
+
+  if (typeof ForceGraph === 'undefined') {
+    container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px">Graph library not available.</div>';
+    return;
+  }
+
+  const cs = () => getComputedStyle(document.documentElement);
+  graph2DInstance = ForceGraph()(container)
+    .graphData(data)
+    .nodeLabel(n => {
+      const s = cs();
+      const bg = s.getPropertyValue('--overlay-strong').trim();
+      const fg = s.getPropertyValue('--text').trim();
+      return `<div style="background:${bg};padding:6px 10px;border-radius:6px;font-size:13px;color:${fg}">
+        <b>${n.label}</b> (${n.kind})<br>${n.summary || ''}</div>`;
+    })
+    .nodeColor(n => NODE_COLORS[n.kind] || '#888888')
+    .nodeVal(n => n.is_hub ? 12 : 5)
+    .nodeCanvasObject((n, ctx, globalScale) => {
+      const label = n.label;
+      const fontSize = Math.max(12 / globalScale, 3);
+      const color = NODE_COLORS[n.kind] || '#888';
+      const size = n.is_hub ? 6 : 3;
+      // Draw node circle.
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, size, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      const alpha = n.confidence !== undefined ? Math.max(0.3, n.confidence) : 0.7;
+      ctx.globalAlpha = alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // Draw label.
+      if (globalScale > 0.8) {
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = color;
+        ctx.fillText(label, n.x, n.y + size + 2);
+      }
+    })
+    .linkWidth(l => l.is_orphan_link ? 0.3 : Math.max(0.5, l.confidence * 1.5))
+    .linkColor(l => {
+      if (l.is_orphan_link) return '#888888';
+      if (l.confidence >= 0.8) return '#4ade80';
+      if (l.confidence >= 0.5) return '#fbbf24';
+      if (l.confidence >= 0.3) return '#fb923c';
+      return '#f87171';
+    })
+    .linkDirectionalArrowLength(6)
+    .linkDirectionalArrowRelPos(0.95)
+    .backgroundColor(cs().getPropertyValue('--bg').trim())
+    .onNodeClick(node => {
+      const info = document.getElementById('graph-info');
+      const edges = data.links.filter(l =>
+        (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id);
+      let html = `<b>${node.label}</b> (${node.kind})`;
+      if (node.summary) html += `<br>${node.summary}`;
+      if (edges.length) {
+        html += '<br><br><b>Connections:</b>';
+        edges.forEach(e => {
+          const other = (e.source.id || e.source) === node.id
+            ? (data.nodes.find(n => n.id === (e.target.id || e.target)) || {}).label || '?'
+            : (data.nodes.find(n => n.id === (e.source.id || e.source)) || {}).label || '?';
+          const conf = Math.round(e.confidence * 100);
+          const color = conf >= 80 ? 'var(--green)' : conf >= 50 ? 'var(--yellow)' : 'var(--red)';
+          html += `<br>→ ${e.relation} → ${other} <span style="color:${color}">${conf}%</span>`;
+        });
+      }
+      info.innerHTML = '<button onclick="closeGraphInfo()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text-dim);font-size:16px;cursor:pointer;line-height:1" title="Close">✕</button>' + html;
+      info.style.display = 'block';
+    })
+    .warmupTicks(50)
+    .cooldownTime(3000);
+
+  // Zoom to fit after settle.
+  setTimeout(() => { if (graph2DInstance) graph2DInstance.zoomToFit(400, 40); }, 800);
 }
 
 // --- 3D Knowledge Graph ---
