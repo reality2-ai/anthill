@@ -1086,6 +1086,63 @@ fn run_consolidation(config: &MaintenanceConfig) {
             }
         }
     }
+
+    // Cross-check citation integrity.
+    check_citation_integrity(config);
+}
+
+/// Check citation integrity across all graphs.
+/// If a cite_id on an edge doesn't match any node in the citations graph,
+/// the citation is still kept on the edge (it's self-contained with url/title)
+/// but a warning is logged. If a citation node is removed, edges don't break
+/// because each edge carries its own copy of the citation data.
+fn check_citation_integrity(config: &MaintenanceConfig) {
+    use crate::store::KnowledgeStore;
+    let store = LiveKnowledgeStore::new(config.memory_dir.clone());
+
+    // Collect all cite_ids from the citations graph nodes.
+    let citation_node_ids: std::collections::HashSet<String> = store
+        .to_visualization("citations")
+        .ok()
+        .and_then(|v| v.get("nodes")?.as_array().cloned())
+        .map(|nodes| {
+            nodes.iter()
+                .filter_map(|n| n.get("label").and_then(|l| l.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if citation_node_ids.is_empty() { return; }
+
+    // Check all topic graphs for dangling cite_ids.
+    let mut dangling = 0u32;
+    if let Ok(graphs) = store.list_graphs() {
+        for g in &graphs {
+            if g.name == "meta" || g.name == "citations" { continue; }
+            if let Ok(viz) = store.to_visualization(&g.name) {
+                if let Some(links) = viz.get("links").and_then(|l| l.as_array()) {
+                    for link in links {
+                        if let Some(cites) = link.get("citations").and_then(|c| c.as_array()) {
+                            for cite in cites {
+                                let cite_id = cite.get("cite_id").and_then(|c| c.as_str()).unwrap_or("");
+                                if !cite_id.is_empty() && !citation_node_ids.contains(cite_id) {
+                                    // The cite_id doesn't match a node — but the citation data
+                                    // is self-contained on the edge, so it still works for export.
+                                    // This is informational, not an error.
+                                    dangling += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if dangling > 0 {
+        log::info!("[{}] Citation integrity: {} edge citations reference cite_ids not in citations graph (data preserved on edges)",
+            config.ant_name, dangling);
+    }
 }
 
 /// Cross-link topic graphs: find entities that appear in multiple topics
