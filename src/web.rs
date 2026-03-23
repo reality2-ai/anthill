@@ -1565,12 +1565,70 @@ async fn handle_web_command(
                 }
             }
 
+            // Remove legacy JSON graph files where CBOR exists with equal or more data.
+            let mut json_removed = 0u32;
+            if let Ok(entries) = std::fs::read_dir(&graphs_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_file() { continue; }
+                    let filename = path.file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !filename.ends_with(".json") { continue; }
+
+                    let cbor_path = path.with_extension("cbor");
+                    if !cbor_path.exists() { continue; }
+
+                    // Compare edge counts: only remove JSON if CBOR has >= edges.
+                    let json_edges = std::fs::read_to_string(&path)
+                        .ok()
+                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                        .and_then(|v| v.get("edges")?.as_array().map(|a| a.len()))
+                        .unwrap_or(0);
+                    let cbor_edges = std::fs::read(&cbor_path)
+                        .ok()
+                        .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok())
+                        .map(|d| d.edges.len())
+                        .unwrap_or(0);
+
+                    if cbor_edges >= json_edges && cbor_edges > 0 {
+                        let _ = std::fs::remove_file(&path);
+                        json_removed += 1;
+                        log::info!("Removed legacy JSON: {} (CBOR has {} edges, JSON had {})",
+                            filename, cbor_edges, json_edges);
+                    }
+                }
+            }
+            // Also check meta-graph JSON in memory root.
+            let meta_json = memory_dir.join("knowledge.json");
+            let meta_cbor = memory_dir.join("knowledge.cbor");
+            if meta_json.exists() && meta_cbor.exists() {
+                let json_edges = std::fs::read_to_string(&meta_json)
+                    .ok()
+                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                    .and_then(|v| v.get("edges")?.as_array().map(|a| a.len()))
+                    .unwrap_or(0);
+                let cbor_edges = std::fs::read(&meta_cbor)
+                    .ok()
+                    .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok())
+                    .map(|d| d.edges.len())
+                    .unwrap_or(0);
+                if cbor_edges >= json_edges && cbor_edges > 0 {
+                    let _ = std::fs::remove_file(&meta_json);
+                    json_removed += 1;
+                    log::info!("Removed legacy meta-graph JSON (CBOR has {} edges)", cbor_edges);
+                }
+            }
+
             let mut summary = format!("Reprocessed {} graph(s): backfilled, consolidated, orphans linked.", processed);
             if moved_count > 0 {
                 summary.push_str(&format!("\nMoved {} stray graph file(s) into graphs/.", moved_count));
             }
             if cleaned_count > 0 {
                 summary.push_str(&format!("\nCleaned up {} corrupted/temp file(s).", cleaned_count));
+            }
+            if json_removed > 0 {
+                summary.push_str(&format!("\nRemoved {} legacy JSON graph file(s) (CBOR is source of truth).", json_removed));
             }
             Some(summary)
         },
