@@ -254,19 +254,6 @@ anthill --qr-join                # show QR code — scan with phone to join
 | [Security](docs/security.md) | Trust groups, device provisioning, access control |
 | [Comparison](docs/comparison.md) | How Anthill compares to OpenClaw, Goose, Aider, n8n |
 
-## Specifications
-
-Formal specifications for Anthill's architecture, following the R2-specifications style:
-
-| Spec | What it covers |
-|---|---|
-| [ANTHILL-INTRO](specs/ANTHILL-INTRO.md) | Vision, R2 relationship, design principles |
-| [ANTHILL-COLONY](specs/ANTHILL-COLONY.md) | Supervisor, ANT lifecycle, trust groups, provisioning |
-| [ANTHILL-MEMORY](specs/ANTHILL-MEMORY.md) | Thurisaz epistemic engine, Bayesian knowledge graph, rumination |
-| [ANTHILL-THEMATIC](specs/ANTHILL-THEMATIC.md) | Thematic analysis, spec generation, test vectors |
-| [ANTHILL-WORKER](specs/ANTHILL-WORKER.md) | AI worker lifecycle, multi-backend, supervision |
-| [ANTHILL-WEB](specs/ANTHILL-WEB.md) | Web dashboard, WebSocket protocol, REST API |
-
 ---
 
 ## Security
