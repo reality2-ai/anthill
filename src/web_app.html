@@ -1099,6 +1099,54 @@ function handleEvent(msg) {
   }
 }
 
+// --- 2D Fallback (no WebGL) ---
+function render2DFallback(container, data) {
+  const nodeMap = {};
+  data.nodes.forEach(n => { nodeMap[n.id] = n; });
+  const edgesByNode = {};
+  (data.links || []).forEach(l => {
+    const s = l.source.id !== undefined ? l.source.id : l.source;
+    const t = l.target.id !== undefined ? l.target.id : l.target;
+    if (!edgesByNode[s]) edgesByNode[s] = [];
+    if (!edgesByNode[t]) edgesByNode[t] = [];
+    edgesByNode[s].push(l);
+    edgesByNode[t].push(l);
+  });
+  // Sort nodes: hubs first, then by connection count.
+  const sorted = [...data.nodes].sort((a, b) => {
+    if (a.is_hub !== b.is_hub) return a.is_hub ? -1 : 1;
+    return (edgesByNode[b.id] || []).length - (edgesByNode[a.id] || []).length;
+  });
+  let html = '<div style="padding:20px;overflow-y:auto;height:100%">';
+  html += '<div style="color:var(--text-dim);font-size:13px;margin-bottom:16px">2D view (WebGL unavailable — restart browser to try 3D)</div>';
+  sorted.forEach(n => {
+    const color = NODE_COLORS[n.kind] || '#888';
+    const edges = edgesByNode[n.id] || [];
+    const conf = n.confidence !== undefined ? Math.round(n.confidence * 100) : '?';
+    html += `<div style="background:var(--surface);border-left:4px solid ${color};border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:8px">`;
+    html += `<div style="font-weight:600;color:${color}">${escapeHtml(n.label)} <span style="color:var(--text-dim);font-weight:400;font-size:12px">${n.kind} · ${conf}%</span></div>`;
+    if (n.summary) html += `<div style="color:var(--text-dim);font-size:13px;margin-top:4px">${escapeHtml(n.summary)}</div>`;
+    if (edges.length) {
+      html += '<div style="margin-top:8px;font-size:12px">';
+      edges.forEach(e => {
+        const s = e.source.id !== undefined ? e.source.id : e.source;
+        const t = e.target.id !== undefined ? e.target.id : e.target;
+        const other = s === n.id ? nodeMap[t] : nodeMap[s];
+        const dir = s === n.id ? '→' : '←';
+        const econf = Math.round(e.confidence * 100);
+        const confColor = econf >= 80 ? 'var(--green)' : econf >= 50 ? 'var(--yellow)' : 'var(--red)';
+        if (other) {
+          html += `<div style="padding:2px 0">${dir} ${escapeHtml(e.relation)} ${dir} <b>${escapeHtml(other.label)}</b> <span style="color:${confColor}">${econf}%</span></div>`;
+        }
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
 // --- 3D Knowledge Graph ---
 let graphInstance = null;
 
@@ -1194,18 +1242,19 @@ async function loadGraph(graphName) {
       return;
     }
 
-    // Check WebGL availability before attempting to render.
-    try {
-      const testCanvas = document.createElement('canvas');
-      const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
-      if (!gl) throw new Error('WebGL not available');
-    } catch (_) {
-      container.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:40px">' +
-        '<b>WebGL is not available on this browser.</b><br><br>' +
-        'The 3D knowledge graph requires WebGL. Please check:<br>' +
-        '&bull; Hardware acceleration is enabled in browser settings<br>' +
-        '&bull; GPU drivers are installed and up to date<br>' +
-        '&bull; Try <code>chrome://flags/#ignore-gpu-blocklist</code> &rarr; Enable (Chrome/Edge)</div>';
+    // Check WebGL availability — retry once if it fails (transient GPU context loss).
+    let webglOk = false;
+    for (let attempt = 0; attempt < 2 && !webglOk; attempt++) {
+      try {
+        const testCanvas = document.createElement('canvas');
+        const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+        if (gl) webglOk = true;
+      } catch (_) {}
+      if (!webglOk && attempt === 0) await new Promise(r => setTimeout(r, 500)); // wait before retry
+    }
+    if (!webglOk) {
+      // Show 2D fallback instead of error message.
+      render2DFallback(container, data);
       return;
     }
 
