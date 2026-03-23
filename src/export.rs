@@ -536,25 +536,35 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     // Build the raw text for the AI. Citations go FIRST so they're never truncated.
     let mut raw_text = format!("Knowledge summary for {}\n\n", ant_name);
 
-    // CITATIONS FIRST — these are the most important part for a referenced report.
+    // CITATIONS FIRST — sorted by quality (highest first), capped at half the prompt budget.
     if include_citations && !insights.all_citations.is_empty() {
         raw_text.push_str("SOURCES AND REFERENCES — USE THESE IN YOUR TEXT.\n\
             Each source below has a code like [cite-a1b2c3d4]. Place these codes in your text \
             immediately after any claim that the source supports. For example:\n\
             'The evidence suggests X [cite-a1b2c3d4] and this is consistent with Y [cite-b2c3d4e5].'\n\
-            Use as many as are relevant. Do not invent codes not on this list.\n\n");
+            Use as many as are relevant. Do not invent codes not on this list.\n\
+            Sources are listed highest quality first.\n\n");
         let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
         sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
-        let cites_to_include = &sorted_cites[..sorted_cites.len().min(50)];
-        for cite in cites_to_include {
-            raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
+        let citation_budget = max_prompt_chars / 2;
+        let mut citation_chars = 0usize;
+        let mut included = 0usize;
+        for cite in &sorted_cites {
+            let line = format!("  [{}] {} — {}{}{} (supports: {})\n",
                 cite.cite_id,
                 if cite.title.is_empty() { &cite.url } else { &cite.title },
                 if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
                 if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
                 cite.url,
                 cite.supports,
-            ));
+            );
+            if citation_chars + line.len() > citation_budget { break; }
+            raw_text.push_str(&line);
+            citation_chars += line.len();
+            included += 1;
+        }
+        if included < sorted_cites.len() {
+            raw_text.push_str(&format!("  [{} lower-quality sources omitted]\n", sorted_cites.len() - included));
         }
         raw_text.push('\n');
     }
