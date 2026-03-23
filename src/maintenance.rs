@@ -234,7 +234,10 @@ async fn run_rumination(
         run_initiative(config, &store, request_tx, &mut log);
     }
 
-    // 7. Meta-rumination.
+    // 7. Citation consolidation — ensure sources are tracked and linked.
+    run_citation_consolidation(config, &store, request_tx, &mut log);
+
+    // 8. Meta-rumination.
     run_meta_rumination(config, &store, request_tx, &mut log);
 
     // Drop the store to release locks before consolidation.
@@ -725,6 +728,100 @@ fn run_initiative(
         edges_created: 0,
         edges_updated: 0,
     }, &config.memory_dir);
+}
+
+// ── Citation Consolidation ───────────────────────────────────────────
+
+/// Ensure citation sources are tracked in the citations graph and linked to topic graph edges.
+/// This is a core maintenance task — every ANT should have a well-maintained citations graph.
+fn run_citation_consolidation(
+    config: &MaintenanceConfig,
+    store: &LiveKnowledgeStore,
+    request_tx: &mpsc::UnboundedSender<CliRequest>,
+    log: &mut RuminationLog,
+) {
+    // Count uncited edges across topic graphs to decide if consolidation is needed.
+    let mut uncited_edges = 0u32;
+    let mut total_edges = 0u32;
+    let mut topics_with_edges: Vec<String> = Vec::new();
+
+    for topic in filtered_topics(config, store) {
+        if let Ok(stats) = store.uncertainty_stats(&topic) {
+            if stats.edge_count > 0 {
+                total_edges += stats.edge_count as u32;
+                topics_with_edges.push(topic);
+            }
+        }
+    }
+
+    // Also check if citations graph exists and has unresolved '?' edges.
+    let has_citations_graph = store.list_graphs()
+        .map(|gs| gs.iter().any(|g| g.name == "citations"))
+        .unwrap_or(false);
+
+    // Check for edges lacking citations across all topic graphs.
+    for topic in &topics_with_edges {
+        if let Ok(viz) = store.to_visualization(topic) {
+            if let Some(links) = viz.get("links").and_then(|l| l.as_array()) {
+                for link in links {
+                    let has_cite = link.get("citations")
+                        .and_then(|c| c.as_array())
+                        .map(|a| !a.is_empty())
+                        .unwrap_or(false);
+                    if !has_cite {
+                        uncited_edges += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Only run if there's meaningful work: no citations graph yet, or many uncited edges.
+    if !has_citations_graph || uncited_edges > total_edges / 3 {
+        let topics_list = topics_with_edges.join(", ");
+        let prompt = format!(
+            "RUMINATION — CITATION CONSOLIDATION\n\n\
+             Read the citations graph (memory/graphs/citations.cbor or .json). \
+             If it doesn't exist yet, create it. Also read the topic graphs: {}.\n\n\
+             STEP 1 — Build/update the citations graph:\n\
+             1. Scan all topic graph edges for citations (the 'citations' field on edges)\n\
+             2. For each unique citation source, ensure a node exists in the citations graph\n\
+             3. For edges in the citations graph with relation '?', resolve them:\n\
+                a. Check the citation's url, title, and snippet\n\
+                b. If there is a URL, check files/ first, then fetch if needed and save to files/\n\
+                c. Replace '?' with a description of what the citation is about\n\
+             4. Update the citations graph\n\n\
+             STEP 2 — Link citations to topic graph edges:\n\
+             1. For each citation, identify which edges in the topic graphs it supports\n\
+             2. If a topic graph edge is supported by a citation but doesn't have it in its \
+                citations list, add it with cite_id, url, title, ref_type, and quality\n\
+             3. Do NOT fabricate citations — only link citations that genuinely support the edge\n\
+             4. Update the topic graph files\n\n\
+             Currently {} of {} edges lack citations across these topics.{}",
+            topics_list, uncited_edges, total_edges, RUMINATION_STOP_DIRECTIVE
+        );
+
+        let _ = request_tx.send(CliRequest {
+            chat_id: RUMINATION_CHAT_ID,
+            message: prompt,
+            new_session: true,
+            task_id: 0,
+            source: "rumination".into(),
+        });
+
+        log.append(RuminationEntry {
+            timestamp: chrono_now(),
+            kind: "citations".into(),
+            topic: "citations".into(),
+            description: format!(
+                "Citation consolidation: {}/{} edges uncited, citations graph {}",
+                uncited_edges, total_edges,
+                if has_citations_graph { "exists" } else { "will be created" }
+            ),
+            edges_created: 0,
+            edges_updated: 0,
+        }, &config.memory_dir);
+    }
 }
 
 // ── Meta-Rumination (Self-Modification) ─────────────────────────────

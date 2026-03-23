@@ -310,7 +310,7 @@ async fn main() -> anyhow::Result<()> {
 
         let output = args.output.unwrap_or_else(|| PathBuf::from(format!("{}-knowledge.html", ant_name)));
 
-        if let Err(e) = export::export_ant_graphs(&memory_dir, ant_name, &output) {
+        if let Err(e) = export::export_ant_graphs(&memory_dir, ant_name, &output, None) {
             eprintln!("Error: {}", e);
             std::process::exit(1);
         }

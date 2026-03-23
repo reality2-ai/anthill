@@ -239,12 +239,14 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     }
 
     // Topic-by-topic narrative.
-    for (name, nodes, edges, avg) in &insights.topic_summaries {
+    for (idx, (name, nodes, edges, avg)) in insights.topic_summaries.iter().enumerate() {
         if *nodes == 0 { continue; }
         let pretty = name.replace('-', " ");
         let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
 
-        html.push_str(&format!("<h3 style=\'margin-top:24px\'>{}</h3>\n", pretty));
+        html.push_str(&format!("<h3 style=\'margin-top:24px\'>{} <a href=\'#\' onclick=\'showTab(\"graph\",{});return false;\' \
+            style=\'font-size:12px;color:#60a5fa;text-decoration:none;margin-left:8px\'>View graph →</a></h3>\n",
+            pretty, idx));
 
         if !desc.is_empty() {
             html.push_str(&format!("<p>{}</p>\n", desc));
@@ -345,7 +347,11 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 
 /// Ask an AI to rewrite the raw insights as polished plain English.
 /// Falls back to the algorithmic version if the AI is unavailable.
-fn ai_polish_summary(raw_insights: &str, ant_name: &str) -> String {
+fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>) -> String {
+    let guidance_text = guidance
+        .map(|g| format!("\n\nADDITIONAL DIRECTION FROM THE USER:\n{}\n\nFollow this guidance \
+            to shape the tone, focus, and structure of the report.", g))
+        .unwrap_or_default();
     let prompt = format!(
         "Rewrite the following knowledge graph summary as a clear, accessible, well-written \
          document of 1-2 pages. Write it for a general reader who wants to learn about these topics. \
@@ -356,9 +362,9 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str) -> String {
          Include specific facts and descriptions from the data. \
          If references are provided, cite them as numbered references [1], [2] etc. in the text \
          where they support specific claims. ONLY cite references that are listed — never fabricate one. \
-         Write in third person, referring to the knowledge as belonging to '{}'.\n\n\
+         Write in third person, referring to the knowledge as belonging to '{}'.{}\n\n\
          Raw summary data:\n\n{}",
-        ant_name, raw_insights
+        ant_name, guidance_text, raw_insights
     );
 
     // Try claude CLI directly.
@@ -437,7 +443,7 @@ fn format_list(items: &[String]) -> String {
 }
 
 /// Export a single named graph.
-pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path) -> anyhow::Result<()> {
+pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path, guidance: Option<&str>) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
     let mut all_data = Vec::new();
@@ -452,11 +458,11 @@ pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, 
     }
 
     let title = format!("{} — {}", ant_name, graph_name.replace('-', " "));
-    generate_export_html(&all_data, &title, output_path)
+    generate_export_html(&all_data, &title, output_path, guidance)
 }
 
 /// Export all graphs for an ANT.
-pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path) -> anyhow::Result<()> {
+pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, guidance: Option<&str>) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
     let graphs = store.list_graphs()?;
@@ -473,10 +479,10 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path) 
         }
     }
 
-    generate_export_html(&all_data, ant_name, output_path)
+    generate_export_html(&all_data, ant_name, output_path, guidance)
 }
 
-fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path: &Path) -> anyhow::Result<()> {
+fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path: &Path, guidance: Option<&str>) -> anyhow::Result<()> {
     let ant_name = title;
 
     let snapshot_id = format!("{:08x}", std::time::SystemTime::now()
@@ -539,7 +545,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     }
 
     // Ask AI to polish into readable prose.
-    let polished = ai_polish_summary(&raw_text, ant_name);
+    let polished = ai_polish_summary(&raw_text, ant_name, guidance);
     let mut ordered_refs: Vec<CollectedCitation> = Vec::new();
     let insights_html = if polished != raw_text {
         // Post-process: renumber cite-xxxx codes to [1], [2]... in order of appearance.
@@ -640,8 +646,8 @@ body {{ background: #0f172a; color: #e2e8f0; font-family: -apple-system, system-
 #search {{ background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px;
   padding: 6px 12px; font-size: 13px; width: 200px; }}
 #search::placeholder {{ color: #64748b; }}
-#graph-view {{ width: 100%; height: 80vh; }}
-#insights-view {{ display: none; max-width: 900px; margin: 0 auto; padding: 30px 20px; }}
+#graph-view {{ width: 100%; height: 80vh; display: none; }}
+#insights-view {{ max-width: 900px; margin: 0 auto; padding: 30px 20px; }}
 #insights-view h2 {{ font-size: 22px; margin-bottom: 8px; }}
 #insights-view h3 {{ font-size: 16px; margin: 20px 0 8px; color: #60a5fa; }}
 #insights-view table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
@@ -655,7 +661,7 @@ body {{ background: #0f172a; color: #e2e8f0; font-family: -apple-system, system-
 .conf-high {{ color: #4ade80; }} .conf-mid {{ color: #fbbf24; }}
 .conf-low {{ color: #fb923c; }} .conf-weak {{ color: #f87171; }}
 #legend {{ position: fixed; top: 60px; right: 20px; background: rgba(15,23,42,0.9);
-  border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; font-size: 12px; z-index: 100; }}
+  border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; font-size: 12px; z-index: 100; display: none; }}
 #legend div {{ margin: 3px 0; }}
 .dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }}
 #footer {{ text-align: center; padding: 20px; color: #64748b; font-size: 12px; border-top: 1px solid #1e293b; }}
@@ -668,8 +674,8 @@ a {{ color: #60a5fa; }}
   <h1>{ant_name}</h1>
   <span class="subtitle">Knowledge Snapshot — {timestamp}</span>
   <div id="tabs">
-    <button class="active" onclick="showTab('graph')">Graph</button>
-    <button onclick="showTab('insights')">Insights</button>
+    <button class="active" onclick="showTab('insights')">Insights</button>
+    <button onclick="showTab('graph')">Graph</button>
   </div>
   <select id="selector" onchange="loadGraph(this.value)"></select>
   <input id="search" type="text" placeholder="Search nodes..." oninput="searchNodes(this.value)">
@@ -712,12 +718,23 @@ const NODE_COLORS = {{
 }};
 let graphInstance = null, currentData = null;
 
-function showTab(tab) {{
+function showTab(tab, graphIdx) {{
   document.getElementById('graph-view').style.display = tab === 'graph' ? 'block' : 'none';
   document.getElementById('insights-view').style.display = tab === 'insights' ? 'block' : 'none';
   document.getElementById('legend').style.display = tab === 'graph' ? 'block' : 'none';
   document.querySelectorAll('#tabs button').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  document.querySelectorAll('#tabs button').forEach(b => {{
+    if ((tab === 'graph' && b.textContent === 'Graph') || (tab === 'insights' && b.textContent === 'Insights'))
+      b.classList.add('active');
+  }});
+  if (tab === 'graph') {{
+    if (graphIdx !== undefined) {{
+      document.getElementById('selector').value = graphIdx;
+      loadGraph(graphIdx);
+    }} else if (!graphInstance) {{
+      loadGraph(document.getElementById('selector').value);
+    }}
+  }}
 }}
 
 const selector = document.getElementById('selector');
@@ -784,7 +801,7 @@ function searchNodes(q) {{
     return m?(NODE_COLORS[n.kind]||'#fff'):'rgba(100,100,100,0.1)'; }});
 }}
 
-loadGraph(firstNonEmpty);
+// Graph loads on demand when the user clicks the Graph tab.
 </script>
 </body></html>"##,
         ant_name = ant_name,

@@ -919,10 +919,12 @@ pub async fn ai_worker_loop(
         request_count += 1;
         if request_count.is_multiple_of(50) {
             use crate::store::KnowledgeStore;
-            // Consolidate all graphs.
+            // Consolidate all graphs: dedup, link orphans, backfill.
             if let Ok(graphs) = knowledge_store.list_graphs() {
                 for g in &graphs {
                     let _ = knowledge_store.consolidate(&g.name);
+                    let _ = knowledge_store.backfill_thurisaz(&g.name);
+                    let _ = knowledge_store.link_orphans(&g.name);
                 }
             }
             // Invalidate the CachedGraph so it picks up changes.

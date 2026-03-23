@@ -546,6 +546,7 @@ async fn export_graph(
     drop(bots);
 
     let graph_filter = params.get("graph").cloned().filter(|g| !g.is_empty());
+    let guidance = params.get("guidance").cloned().filter(|g| !g.is_empty());
 
     // Generate globally unique UUID for this snapshot.
     let uuid = uuid::Uuid::new_v4().to_string();
@@ -559,9 +560,9 @@ async fn export_graph(
     // Generate the export HTML.
     let tmp_path = std::env::temp_dir().join(&filename);
     let export_result = if let Some(ref graph_name) = graph_filter {
-        crate::export::export_single_graph(&memory_dir, &display_name, graph_name, &tmp_path)
+        crate::export::export_single_graph(&memory_dir, &display_name, graph_name, &tmp_path, guidance.as_deref())
     } else {
-        crate::export::export_ant_graphs(&memory_dir, &display_name, &tmp_path)
+        crate::export::export_ant_graphs(&memory_dir, &display_name, &tmp_path, guidance.as_deref())
     };
     match export_result {
         Ok(()) => {

@@ -1110,6 +1110,9 @@ const NODE_COLORS = {
 async function exportGraph(mode) {
   if (!state.activeBot) return;
   const btn = event.target;
+  // Prompt for optional guidance text.
+  const guidance = prompt('Optional: provide guidance for the AI report writer\n(e.g. "Focus on practical applications" or "Write for a beginner audience")\n\nLeave blank for default:', '');
+  if (guidance === null) return; // cancelled
   const origText = btn.textContent;
   btn.textContent = 'Exporting...';
   btn.disabled = true;
@@ -1117,7 +1120,8 @@ async function exportGraph(mode) {
     const selector = document.getElementById('graph-selector');
     const graphName = (mode === 'current' && selector) ? selector.value : '';
     const query = graphName ? `?graph=${encodeURIComponent(graphName)}` : '';
-    const resp = await authFetch(`/api/ants/${state.activeBot}/export${query}`);
+    const guidanceParam = guidance ? `${query ? '&' : '?'}guidance=${encodeURIComponent(guidance)}` : '';
+    const resp = await authFetch(`/api/ants/${state.activeBot}/export${query}${guidanceParam}`);
     if (!resp.ok) { alert('Export failed: ' + resp.status + ' ' + await resp.text()); return; }
     const blob = await resp.blob();
     const cd = resp.headers.get('Content-Disposition') || '';
@@ -1242,7 +1246,9 @@ async function loadGraph(graphName) {
       })
       .nodeOpacity(1.0)
       .nodeVal(n => n.is_hub ? 6 : 3)
-      .nodeResolution(12);
+      .nodeResolution(12)
+      .warmupTicks(100)
+      .cooldownTime(3000);
 
     // Add text labels if SpriteText loaded successfully.
     if (typeof SpriteText !== 'undefined') {
@@ -1329,6 +1335,7 @@ async function loadGraph(graphName) {
         showNodeUpdateDialog(node, data);
       });
 
+
     // Suppress browser context menu on the graph canvas.
     container.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -1380,7 +1387,13 @@ async function loadGraph(graphName) {
       .distance(l => l.is_orphan_link ? 120 : 60)    // orphans drift far out
       .strength(l => l.is_orphan_link ? 0.05 : 0.8);  // barely held
 
+    // After warmup ticks complete, zoom to fit so camera isn't inside the graph.
+    let initialFitDone = false;
     graphInstance.onEngineTick(() => {
+      if (!initialFitDone) {
+        graphInstance.zoomToFit(0, 80);
+        initialFitDone = true;
+      }
       const t = Date.now() * 0.001;
       for (const n of data.nodes) {
         const tb = tumble[n.id];

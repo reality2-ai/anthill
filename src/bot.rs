@@ -169,7 +169,7 @@ pub async fn run_bot(
 
     tokio::spawn(crate::maintenance::maintenance_loop(crate::maintenance::MaintenanceConfig {
         memory_dir: maintenance_memory_dir,
-        consolidation_interval: std::time::Duration::from_secs(3600),  // 1 hour
+        consolidation_interval: std::time::Duration::from_secs(900),  // 15 minutes
         cross_link_interval: std::time::Duration::from_secs(21600),    // 6 hours
         ant_name: bot_name.clone(),
         request_tx: Some(maintenance_request_tx),
