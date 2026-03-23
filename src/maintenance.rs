@@ -781,24 +781,26 @@ fn run_citation_consolidation(
         let topics_list = topics_with_edges.join(", ");
         let prompt = format!(
             "RUMINATION — CITATION CONSOLIDATION\n\n\
+             Your PRIMARY goal: ensure every edge in every topic graph has proper citations \
+             in its 'citations' field. Currently {} of {} edges lack citations.\n\n\
              Read the citations graph (memory/graphs/citations.cbor or .json). \
              If it doesn't exist yet, create it. Also read the topic graphs: {}.\n\n\
              STEP 1 — Build/update the citations graph:\n\
-             1. Scan all topic graph edges for citations (the 'citations' field on edges)\n\
+             1. Scan all topic graph edges for their 'citations' field\n\
              2. For each unique citation source, ensure a node exists in the citations graph\n\
-             3. For edges in the citations graph with relation '?', resolve them:\n\
-                a. Check the citation's url, title, and snippet\n\
-                b. If there is a URL, check files/ first, then fetch if needed and save to files/\n\
-                c. Replace '?' with a description of what the citation is about\n\
+             3. For '?' edges, resolve them: check url/title, fetch if needed, update relation\n\
              4. Update the citations graph\n\n\
-             STEP 2 — Link citations to topic graph edges:\n\
-             1. For each citation, identify which edges in the topic graphs it supports\n\
-             2. If a topic graph edge is supported by a citation but doesn't have it in its \
-                citations list, add it with cite_id, url, title, ref_type, and quality\n\
-             3. Do NOT fabricate citations — only link citations that genuinely support the edge\n\
-             4. Update the topic graph files\n\n\
-             Currently {} of {} edges lack citations across these topics.{}",
-            topics_list, uncited_edges, total_edges, RUMINATION_STOP_DIRECTIVE
+             STEP 2 — Link citations to ALL topic graph edges (MOST IMPORTANT):\n\
+             1. For EACH topic graph, read EVERY edge\n\
+             2. For edges with NO citations, add them:\n\
+                {{\"cite_id\": \"cite-<8hex>\", \"url\": \"...\", \"title\": \"...\", \
+                \"ref_type\": \"peer_reviewed|official_report|book|news|blog|website|personal|ant_knowledge|ai_inference\", \
+                \"quality\": 0.0-1.0}}\n\
+             3. For web-sourced edges, use the source URL as the citation\n\
+             4. For AI-inferred edges, use ref_type 'ai_inference'\n\
+             5. Do NOT fabricate citations — but DO add ai_inference citations for your own reasoning\n\
+             6. WRITE ALL updated topic graph files — every graph must be saved{}",
+            uncited_edges, total_edges, topics_list, RUMINATION_STOP_DIRECTIVE
         );
 
         let _ = request_tx.send(CliRequest {

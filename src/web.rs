@@ -1711,31 +1711,23 @@ async fn handle_web_command(
                       4. Add any new conjectures with appropriate basis and confidence\n\
                       5. Update the topic graph files"),
                     ("RUMINATION — CITATION CONSOLIDATION",
-                     "Read the citations graph (memory/graphs/citations.cbor or any graph with \
-                      citation edges). Also read the topic graphs in memory/graphs/.\n\n\
-                      STEP 1 — Resolve unknown citation links:\n\
-                      1. Find edges in the citations graph with relation '?' AND orphaned \
-                         citation nodes (nodes with no edges or only '?' edges)\n\
-                      2. For each '?' edge, look at the citation's url, title, and snippet\n\
-                      3. If there is a URL:\n\
-                         a. FIRST check files/ to see if the content has already been downloaded \
-                            (match by filename derived from the URL or cite_id)\n\
-                         b. If NOT already in files/, fetch the URL and save the content to files/ \
-                            so it does not need to be downloaded again in future. Use a descriptive \
-                            filename based on the URL path or title (e.g. files/cite-a1b2c3d4.html \
-                            or files/paper-title.pdf)\n\
-                         c. Read the downloaded content to determine the core idea\n\
-                      4. If it is a PDF or file, check files/ first, then read it to determine the core idea\n\
-                      5. Replace the '?' relation with a description of what the citation is about\n\
-                      6. Update the citations graph\n\n\
-                      STEP 2 — Link citations to topic graph edges:\n\
-                      1. For each citation, identify which edges in the topic graphs it supports\n\
-                      2. Check the citation's cite_id (format: cite-<8hex>)\n\
-                      3. If a topic graph edge is supported by this citation but does not have it \
-                         in its citations list, add it: {\"cite_id\": \"<the cite_id>\", \"url\": \"...\", \
-                         \"title\": \"...\", \"ref_type\": \"...\", \"quality\": ...}\n\
-                      4. Do NOT fabricate citations — only link citations that genuinely support the edge\n\
-                      5. Update the topic graph files"),
+                     "Your PRIMARY goal: ensure every edge in every topic graph has proper citations.\n\n\
+                      Read the citations graph (memory/graphs/citations.cbor or .json). \
+                      If it doesn't exist, create it. Also read ALL topic graphs in memory/graphs/.\n\n\
+                      STEP 1 — Build/update the citations graph:\n\
+                      1. Scan all topic graph edges for their 'citations' field\n\
+                      2. For each unique citation source, ensure a node exists in the citations graph\n\
+                      3. For '?' edges, resolve them: check url/title, fetch if needed, update relation\n\
+                      4. Update the citations graph\n\n\
+                      STEP 2 — Link citations to ALL topic graph edges (MOST IMPORTANT):\n\
+                      1. For EACH topic graph, read EVERY edge\n\
+                      2. For edges with NO citations, add them: \
+                         {\"cite_id\": \"cite-<8hex>\", \"url\": \"...\", \"title\": \"...\", \
+                         \"ref_type\": \"...\", \"quality\": 0.0-1.0}\n\
+                      3. For web-sourced edges, use the source URL\n\
+                      4. For AI-inferred edges, use ref_type 'ai_inference'\n\
+                      5. Do NOT fabricate citations — but DO add ai_inference for your own reasoning\n\
+                      6. WRITE ALL updated topic graph files"),
                 ];
 
                 for (title, body) in tasks {
@@ -1770,32 +1762,31 @@ async fn handle_web_command(
                     .unwrap_or_default()
                     .subsec_nanos();
                 let prompt = "RUMINATION — CITATION CONSOLIDATION\n\n\
-                     Read the citations graph (memory/graphs/citations.cbor or any graph with \
-                     citation edges). Also read the topic graphs in memory/graphs/.\n\n\
-                     STEP 1 — Resolve unknown citation links:\n\
-                     1. Find edges in the citations graph with relation '?'\n\
-                     2. For each '?' edge, look at the citation's url, title, and snippet\n\
-                     3. If there is a URL:\n\
-                        a. FIRST check files/ to see if the content has already been downloaded \
-                           (match by filename derived from the URL or cite_id)\n\
-                        b. If NOT already in files/, fetch the URL and save the content to files/ \
-                           so it does not need to be downloaded again in future. Use a descriptive \
-                           filename based on the URL path or title (e.g. files/cite-a1b2c3d4.html \
-                           or files/paper-title.pdf)\n\
-                        c. Read the downloaded content to determine the core idea\n\
-                     4. If it is a PDF or file, check files/ first, then read it to determine the core idea\n\
-                     5. Replace the '?' relation with a description of what the citation is about\n\
-                     6. Update the citations graph\n\n\
-                     STEP 2 — Link citations to topic graph edges:\n\
-                     1. For each citation, identify which edges in the topic graphs it supports\n\
-                     2. Check the citation's cite_id (format: cite-<8hex>)\n\
-                     3. If a topic graph edge is supported by this citation but does not have it \
-                        in its citations list, add it: {\"cite_id\": \"<the cite_id>\", \"url\": \"...\", \
-                        \"title\": \"...\", \"ref_type\": \"...\", \"quality\": ...}\n\
-                     4. Do NOT fabricate citations — only link citations that genuinely support the edge\n\
-                     5. Update the topic graph files\n\n\
-                     IMPORTANT: Complete this specific task, update the graph files, \
-                     output a brief summary of what you changed, and STOP. \
+                     Your PRIMARY goal: ensure every edge in every topic graph has proper citations \
+                     in its 'citations' field. Citations are MANDATORY for well-evidenced knowledge.\n\n\
+                     Read the citations graph (memory/graphs/citations.cbor or .json). \
+                     If it doesn't exist, create it. Also read ALL topic graphs in memory/graphs/.\n\n\
+                     STEP 1 — Build/update the citations graph:\n\
+                     1. Scan all topic graph edges for their 'citations' field\n\
+                     2. For each unique citation source, ensure a node exists in the citations graph\n\
+                     3. For '?' edges in the citations graph, resolve them:\n\
+                        a. Check the citation's url, title, and snippet\n\
+                        b. If URL exists: check files/ first, else fetch and save to files/\n\
+                        c. Replace '?' with a description of what the citation is about\n\
+                     4. Update the citations graph\n\n\
+                     STEP 2 — Link citations to topic graph edges (THIS IS THE MOST IMPORTANT STEP):\n\
+                     1. For EACH topic graph, read EVERY edge\n\
+                     2. For edges that have NO citations or incomplete citations, add them:\n\
+                        {\"cite_id\": \"cite-<8hex>\", \"url\": \"...\", \"title\": \"...\", \
+                        \"ref_type\": \"peer_reviewed|official_report|book|news|blog|website|personal|ant_knowledge|ai_inference\", \
+                        \"quality\": 0.0-1.0}\n\
+                     3. For edges based on web sources, use the source URL as the citation\n\
+                     4. For edges based on AI inference, use ref_type 'ai_inference'\n\
+                     5. Do NOT fabricate citations — but DO add ai_inference citations for edges \
+                        that came from your own reasoning\n\
+                     6. WRITE the updated topic graph files — every graph must be saved\n\n\
+                     IMPORTANT: Complete this specific task, update ALL graph files, \
+                     output a brief summary of what you changed (how many citations added), and STOP. \
                      Do not ask follow-up questions.".to_string();
                 let _ = handle.request_tx.send(crate::ai_worker::CliRequest {
                     chat_id,
