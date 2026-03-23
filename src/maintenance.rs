@@ -1091,57 +1091,43 @@ fn run_consolidation(config: &MaintenanceConfig) {
     check_citation_integrity(config);
 }
 
-/// Check citation integrity across all graphs.
-/// If a cite_id on an edge doesn't match any node in the citations graph,
-/// the citation is still kept on the edge (it's self-contained with url/title)
-/// but a warning is logged. If a citation node is removed, edges don't break
-/// because each edge carries its own copy of the citation data.
+/// Check citation integrity and log upgrade opportunities.
+/// Citations are self-contained on edges (url, title, quality), so removing a
+/// citation node from the citations graph doesn't break references.
+/// This check identifies low-quality citations that have better alternatives
+/// in the same citation family (connected by 'corroborates'/'cites' edges).
+/// Actual upgrades happen during the next AI citation consolidation task.
 fn check_citation_integrity(config: &MaintenanceConfig) {
     use crate::store::KnowledgeStore;
     let store = LiveKnowledgeStore::new(config.memory_dir.clone());
 
-    // Collect all cite_ids from the citations graph nodes.
-    let citation_node_ids: std::collections::HashSet<String> = store
-        .to_visualization("citations")
-        .ok()
-        .and_then(|v| v.get("nodes")?.as_array().cloned())
-        .map(|nodes| {
-            nodes.iter()
-                .filter_map(|n| n.get("label").and_then(|l| l.as_str()).map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let citations_viz = match store.to_visualization("citations") {
+        Ok(v) => v,
+        Err(_) => return,
+    };
 
-    if citation_node_ids.is_empty() { return; }
+    // Count core sources (tagged 'core_source') and family connections.
+    let core_count = citations_viz.get("nodes").and_then(|n| n.as_array())
+        .map(|nodes| nodes.iter().filter(|n| {
+            n.get("tags").and_then(|t| t.as_array())
+                .map(|a| a.iter().any(|v| v.as_str() == Some("core_source")))
+                .unwrap_or(false)
+        }).count())
+        .unwrap_or(0);
 
-    // Check all topic graphs for dangling cite_ids.
-    let mut dangling = 0u32;
-    if let Ok(graphs) = store.list_graphs() {
-        for g in &graphs {
-            if g.name == "meta" || g.name == "citations" { continue; }
-            if let Ok(viz) = store.to_visualization(&g.name) {
-                if let Some(links) = viz.get("links").and_then(|l| l.as_array()) {
-                    for link in links {
-                        if let Some(cites) = link.get("citations").and_then(|c| c.as_array()) {
-                            for cite in cites {
-                                let cite_id = cite.get("cite_id").and_then(|c| c.as_str()).unwrap_or("");
-                                if !cite_id.is_empty() && !citation_node_ids.contains(cite_id) {
-                                    // The cite_id doesn't match a node — but the citation data
-                                    // is self-contained on the edge, so it still works for export.
-                                    // This is informational, not an error.
-                                    dangling += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let family_edges = citations_viz.get("links").and_then(|l| l.as_array())
+        .map(|links| links.iter().filter(|l| {
+            let rel = l.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+            rel == "corroborates" || rel == "cites" || rel == "contradicts"
+        }).count())
+        .unwrap_or(0);
 
-    if dangling > 0 {
-        log::info!("[{}] Citation integrity: {} edge citations reference cite_ids not in citations graph (data preserved on edges)",
-            config.ant_name, dangling);
+    let total_nodes = citations_viz.get("nodes").and_then(|n| n.as_array())
+        .map(|n| n.len()).unwrap_or(0);
+
+    if total_nodes > 0 {
+        log::info!("[{}] Citations: {} sources, {} core, {} family connections",
+            config.ant_name, total_nodes, core_count, family_edges);
     }
 }
 

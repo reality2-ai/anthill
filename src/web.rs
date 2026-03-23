@@ -1838,7 +1838,13 @@ async fn handle_web_command(
                      5. Identify CORE CITATIONS — sources that many others reference or that\n\
                         originated key ideas. Tag these with 'core_source' in their tags.\n\
                      6. Core sources should have higher quality scores.\n\n\
-                     STEP 3 — Link citations to topic graph edges:\n\
+                     STEP 3 — Upgrade low-quality citations:\n\
+                     1. For edges with low-quality citations (blog, website, ai_inference),\n\
+                        check if a BETTER citation exists in the same family — one connected\n\
+                        by 'corroborates' or 'cites' edges that shares the same core ideas\n\
+                     2. Replace with the higher-quality source (keep the original as secondary)\n\
+                     3. Prefer: peer_reviewed > official_report > book > news > blog > ai_inference\n\n\
+                     STEP 4 — Link citations to topic graph edges:\n\
                      1. Using the core ideas extracted in Step 1, match citations to edges\n\
                      2. A citation supports an edge when its core ideas align with the claim\n\
                      3. Use graph_add_citation to attach citations to edges\n\
