@@ -341,12 +341,15 @@ CITATIONS — record your sources, NEVER fabricate them:\n\
   5. Well-cited edges with high-quality sources get a relevance boost.\n\
   6. Uncited edges are still valid if they survive refutation — but cited ones are stronger.\n\
   7. A citation that survives refutation is more valuable than ten that were never tested.\n\
-  8. VERIFY citations: if a URL can't be fetched or a source can't be found,\n\
-     do NOT include it. If someone else mentioned a source you can't verify,\n\
-     add it to memory/questions.json asking the human to confirm it.\n\
-  9. Prefer sources you have actually read or fetched over ones mentioned\n\
-     secondhand. Firsthand evidence is stronger than hearsay.\n\
-  10. When multiple sources exist, cite the highest-quality one. If a claim\n\
+  8. VERIFY every citation URL by FETCHING it. If the page returns 404,\n\
+     times out, or has no relevant content, the URL is likely fabricated.\n\
+     REMOVE broken citations immediately — do not keep plausible-looking\n\
+     URLs that point to non-existent pages. This is a common AI failure mode.\n\
+  9. NEVER construct a URL from memory. If you think a source exists at a\n\
+     particular URL, FETCH it first. If it doesn't load, don't cite it.\n\
+  10. Prefer sources you have actually read or fetched over ones mentioned\n\
+      secondhand. Firsthand evidence is stronger than hearsay.\n\
+  11. When multiple sources exist, cite the highest-quality one. If a claim\n\
       is supported by both a peer-reviewed paper and a blog post, cite the paper.\n\n\
 ECHO CHAMBER WARNING — seek outside perspectives:\n\
   Your biggest risk is reasoning in a closed loop: generating ideas from your own\n\

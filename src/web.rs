@@ -1769,20 +1769,19 @@ async fn handle_web_command(
                       4. Add any new conjectures with appropriate basis and confidence\n\
                       5. Update the topic graph files"),
                     ("RUMINATION — CITATION ANALYSIS",
-                     "Analyse and strengthen the citation network.\n\n\
+                     "Verify, analyse and strengthen the citation network.\n\n\
                       Read the citations graph and ALL topic graphs.\n\n\
-                      1. For each citation with a URL, fetch it (check files/ first) and extract\n\
-                         the TOP 3 CORE IDEAS. Store as the node summary.\n\
-                      2. Check what each source itself CITES — follow references upstream to find\n\
-                         more authoritative sources (peer-reviewed papers, official reports).\n\
-                      3. Add 'corroborates' edges between citations with overlapping core ideas.\n\
-                         Add 'contradicts' edges between those that disagree.\n\
-                         Add 'cites' edges when one source references another.\n\
-                      4. Identify CORE CITATIONS — sources many others reference. Tag as 'core_source'.\n\
-                      5. Link citations to topic graph edges using graph_add_citation.\n\
-                         Match by core ideas, prefer core sources over derivative ones.\n\
-                      6. For edges with only ai_inference citations, search for real sources.\n\
-                      7. WRITE ALL updated graph files."),
+                      1. VERIFY: For each citation with a URL, FETCH it (check files/ first).\n\
+                         If the page returns 404 or doesn't exist, REMOVE the citation from\n\
+                         the citations graph AND from any edges that reference it. Broken URLs\n\
+                         are likely fabricated — do not keep them.\n\
+                      2. For verified citations, extract the TOP 3 CORE IDEAS. Store as summary.\n\
+                      3. Follow upstream references to find more authoritative sources.\n\
+                      4. Add 'corroborates'/'contradicts'/'cites' edges between related citations.\n\
+                      5. Identify CORE CITATIONS — tag as 'core_source'.\n\
+                      6. Link citations to topic graph edges using graph_add_citation.\n\
+                      7. For edges with only ai_inference, search for real sources.\n\
+                      8. WRITE ALL updated graph files."),
                 ];
 
                 for (title, body) in tasks {
@@ -1819,18 +1818,19 @@ async fn handle_web_command(
                 let prompt = "CITATION ANALYSIS AND CONSOLIDATION\n\n\
                      Read the citations graph (memory/graphs/citations.cbor or .json). \
                      If it doesn't exist, create it. Also read ALL topic graphs in memory/graphs/.\n\n\
-                     STEP 1 — Deep analysis of each citation source:\n\
+                     STEP 1 — Verify and analyse each citation source:\n\
                      For each citation node in the citations graph:\n\
-                     1. If it has a URL: check files/ first, otherwise fetch and save to files/\n\
-                     2. Read the actual content of the source\n\
-                     3. Extract the TOP 3 CORE IDEAS from the source — the key claims or findings\n\
-                     4. Store these as the node's summary in the format:\n\
-                        'Core ideas: (1) ... (2) ... (3) ...'\n\
-                     5. Check what REFERENCES the source itself cites — look at its bibliography,\n\
-                        footnotes, or links to other works. These upstream sources may be more\n\
-                        authoritative than the source itself.\n\
-                     6. If you find important upstream references, add them as new citation nodes\n\
-                        and fetch them too. Prefer peer-reviewed papers and official reports.\n\n\
+                     1. If it has a URL: FETCH IT. If the page returns 404 or doesn't exist,\n\
+                        the citation is BROKEN — remove it from the citations graph AND from\n\
+                        any topic graph edges that reference it. Do NOT keep broken URLs.\n\
+                     2. If the fetch succeeds, save the content to files/ for future reference\n\
+                     3. Read the actual content and extract the TOP 3 CORE IDEAS\n\
+                     4. Store these as the node's summary: 'Core ideas: (1) ... (2) ... (3) ...'\n\
+                     5. Check what REFERENCES the source itself cites — follow upstream to find\n\
+                        more authoritative sources (peer-reviewed papers, official reports)\n\
+                     6. Add verified upstream references as new citation nodes\n\n\
+                     CRITICAL: If a URL looks plausible but the page doesn't exist (404, timeout,\n\
+                     or no relevant content), it was likely fabricated. REMOVE it immediately.\n\n\
                      STEP 2 — Find citation clusters and core sources:\n\
                      1. Compare core ideas across citations — which sources say similar things?\n\
                      2. Add 'corroborates' edges between citations that support the same ideas\n\

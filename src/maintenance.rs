@@ -806,20 +806,17 @@ fn run_citation_consolidation(
         let prompt = format!(
             "RUMINATION — CITATION ANALYSIS\n\n\
              Currently {} of {} edges lack citations. Topic graphs: {}.\n\n\
-             1. For each citation in the citations graph that has a URL:\n\
-                - Check files/ first, otherwise fetch and save to files/\n\
-                - Extract the TOP 3 CORE IDEAS from the source content\n\
-                - Store as the node summary: 'Core ideas: (1) ... (2) ... (3) ...'\n\
-                - Check what the source itself CITES — follow upstream to find\n\
-                  more authoritative sources (peer-reviewed papers, official reports)\n\
-             2. Compare core ideas across citations:\n\
-                - Add 'corroborates' edges between citations with overlapping ideas\n\
-                - Add 'cites' edges when one source references another\n\
-                - Identify CORE CITATIONS that others reference — tag as 'core_source'\n\
-             3. Link citations to topic graph edges using graph_add_citation:\n\
-                - Match by core ideas, prefer core/upstream sources\n\
-                - For edges with only ai_inference, search for real sources\n\
-             4. WRITE ALL updated graph files{}",
+             1. VERIFY: For each citation with a URL, FETCH it (check files/ first).\n\
+                If the page returns 404 or doesn't exist, REMOVE the citation from\n\
+                the citations graph AND from any edges that reference it.\n\
+                Broken/fabricated URLs must be pruned — do not keep them.\n\
+             2. For verified citations, extract TOP 3 CORE IDEAS as the node summary.\n\
+             3. Follow upstream references to find more authoritative sources.\n\
+             4. Add 'corroborates'/'contradicts'/'cites' edges between related citations.\n\
+             5. Identify CORE CITATIONS — tag as 'core_source'.\n\
+             6. Link citations to topic graph edges using graph_add_citation.\n\
+             7. For edges with only ai_inference, search for real sources.\n\
+             8. WRITE ALL updated graph files{}",
             uncited_edges, total_edges, topics_list, RUMINATION_STOP_DIRECTIVE
         );
 
