@@ -393,9 +393,10 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         raw_insights = raw_insights,
     );
 
-    // Cap prompt size. Claude Code handles large prompts well, but very large
-    // ones can slow response or cause truncation. 30000 chars ~= 8000 tokens.
-    let max_prompt_chars = 30000;
+    // Cap prompt size. Claude Code has a 1M token context window, so we can
+    // be generous. 100000 chars ~= 25000 tokens — plenty of room for citations
+    // and data while leaving space for the AI's response.
+    let max_prompt_chars = 100000;
     let prompt = if prompt.len() > max_prompt_chars {
         let truncated = &prompt[..prompt[..max_prompt_chars].rfind('\n').unwrap_or(max_prompt_chars)];
         format!("{}\n\n[... data truncated for length — focus on the topics and beliefs shown above ...]", truncated)
