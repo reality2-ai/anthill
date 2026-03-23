@@ -1807,6 +1807,34 @@ async fn handle_web_command(
             }
             Some("📚 Starting citation consolidation — resolving unknown links and cross-referencing...".into())
         },
+        "/reflect" => {
+            // Consolidate all graphs: dedup, link orphans, backfill.
+            let memory_dir = handle.working_dir.join("memory");
+            drop(bots);
+
+            use crate::store::KnowledgeStore;
+            let store = crate::store::live::LiveKnowledgeStore::new(memory_dir);
+            let mut processed = 0;
+            let mut total_merged = 0;
+            let mut total_edges_merged = 0;
+
+            if let Ok(graphs) = store.list_graphs() {
+                for g in &graphs {
+                    if let Ok(report) = store.consolidate(&g.name) {
+                        let _ = store.backfill_thurisaz(&g.name);
+                        let _ = store.link_orphans(&g.name);
+                        total_merged += report.nodes_merged;
+                        total_edges_merged += report.edges_merged;
+                        processed += 1;
+                    }
+                }
+            }
+
+            Some(format!(
+                "Reflected on {} graph(s): {} nodes merged, {} edges merged, orphans linked.",
+                processed, total_merged, total_edges_merged
+            ))
+        },
         _ => None,
     };
 
