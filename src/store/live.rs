@@ -66,40 +66,29 @@ impl LiveKnowledgeStore {
                 cbor_exists
             };
 
-            let kg = if use_cbor {
+            // If CBOR exists but has no citations, and JSON does, prefer JSON
+            // (the AI may have added citations directly to JSON).
+            let prefer_json = if use_cbor && json_exists {
+                let cbor_has_cites = std::fs::read(&cbor_path).ok()
+                    .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok())
+                    .map(|d| d.edges.iter().any(|(_, _, e)| !e.citations.is_empty()))
+                    .unwrap_or(false);
+                let json_has_cites = std::fs::read_to_string(&json_path).ok()
+                    .and_then(|c| serde_json::from_str::<crate::knowledge::GraphData>(&c).ok())
+                    .map(|d| d.edges.iter().any(|(_, _, e)| !e.citations.is_empty()))
+                    .unwrap_or(false);
+                !cbor_has_cites && json_has_cites
+            } else {
+                false
+            };
+
+            let load_from_cbor = use_cbor && !prefer_json;
+
+            let kg = if load_from_cbor {
                 match std::fs::read(&cbor_path) {
                     Ok(bytes) => {
                         match ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&bytes[..]) {
-                            Ok(mut data) => {
-                                // Migration: if CBOR has no citations but JSON does, merge them in.
-                                let has_any_citations = data.edges.iter().any(|(_, _, e)| !e.citations.is_empty());
-                                if !has_any_citations && json_exists {
-                                    if let Ok(contents) = std::fs::read_to_string(&json_path) {
-                                        if let Ok(json_data) = serde_json::from_str::<crate::knowledge::GraphData>(&contents) {
-                                            let mut migrated = 0usize;
-                                            for (cbor_edge, json_edge) in data.edges.iter_mut().zip(json_data.edges.iter()) {
-                                                if cbor_edge.2.citations.is_empty() && !json_edge.2.citations.is_empty() {
-                                                    cbor_edge.2.citations = json_edge.2.citations.clone();
-                                                    migrated += 1;
-                                                }
-                                            }
-                                            if migrated > 0 {
-                                                log::info!("Migrated {} citations from JSON for graph '{}'", migrated, name);
-                                                // Persist immediately so we don't lose them.
-                                                let mut buf = Vec::new();
-                                                if ciborium::ser::into_writer(&data, &mut buf).is_ok() {
-                                                    use std::io::Write;
-                                                    let tmp = cbor_path.with_extension("cbor.tmp");
-                                                    if let Ok(mut f) = std::fs::File::create(&tmp) {
-                                                        if f.write_all(&buf).is_ok() && f.sync_all().is_ok() {
-                                                            let _ = std::fs::rename(&tmp, &cbor_path);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            Ok(data) => {
                                 let mut kg = KnowledgeGraph::empty(cbor_path);
                                 kg.load_from_data(&data);
                                 kg
@@ -116,7 +105,23 @@ impl LiveKnowledgeStore {
                     }
                 }
             } else if json_exists {
+                log::info!("Loading '{}' from JSON (has citations that CBOR lacks)", name);
                 KnowledgeGraph::load(&json_path)
+            } else if cbor_exists {
+                // CBOR exists but no JSON — just load CBOR.
+                match std::fs::read(&cbor_path) {
+                    Ok(bytes) => {
+                        match ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&bytes[..]) {
+                            Ok(data) => {
+                                let mut kg = KnowledgeGraph::empty(cbor_path.clone());
+                                kg.load_from_data(&data);
+                                kg
+                            }
+                            Err(_) => KnowledgeGraph::empty(cbor_path)
+                        }
+                    }
+                    Err(_) => KnowledgeGraph::empty(cbor_path)
+                }
             } else {
                 // Neither exists — empty graph.
                 KnowledgeGraph::empty(cbor_path)
