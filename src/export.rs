@@ -565,7 +565,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
         // Cap at 30 highest-quality citations to keep the prompt manageable.
         let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
         sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
-        let cites_to_include = &sorted_cites[..sorted_cites.len().min(30)];
+        let cites_to_include = &sorted_cites[..sorted_cites.len().min(50)];
         for cite in cites_to_include {
             raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
                 cite.cite_id,

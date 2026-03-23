@@ -993,6 +993,14 @@ impl KnowledgeGraph {
             {
                 let mut edge = edge.clone();
                 edge.ensure_log_odds();
+                // Fix float16 corruption from CBOR — clamp values to valid ranges.
+                edge.confidence = edge.confidence.clamp(0.0, 1.0);
+                edge.importance = edge.importance.clamp(0.0, 1.0);
+                edge.beneficial_impact = edge.beneficial_impact.clamp(-1.0, 1.0);
+                edge.corroboration_strength = edge.corroboration_strength.clamp(0.0, 1.0);
+                for cite in &mut edge.citations {
+                    cite.quality = cite.quality.clamp(0.0, 1.0);
+                }
                 self.graph.add_edge(*from_idx, *to_idx, edge);
             }
         }
@@ -1863,7 +1871,7 @@ impl KnowledgeGraph {
                 "source": src.index(),
                 "target": tgt.index(),
                 "relation": edge.relation,
-                "confidence": edge.confidence,
+                "confidence": edge.confidence.clamp(0.0, 1.0),
                 "log_odds": edge.log_odds,
                 "importance": edge.importance,
                 "basis": format!("{:?}", edge.basis).to_lowercase(),
@@ -1879,7 +1887,7 @@ impl KnowledgeGraph {
                 "citations": edge.citations.iter().map(|c| serde_json::json!({
                     "cite_id": c.cite_id, "url": c.url, "title": c.title, "author": c.author,
                     "date": c.date, "ref_type": format!("{:?}", c.ref_type).to_lowercase(),
-                    "quality": c.quality,
+                    "quality": c.quality.clamp(0.0, 1.0),
                 })).collect::<Vec<_>>(),
             }))
         }).collect();
