@@ -546,7 +546,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
             Sources are listed highest quality first.\n\n");
         let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
         sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
-        let citation_budget = max_prompt_chars / 2;
+        let citation_budget = 50000; // half of the 100K prompt budget
         let mut citation_chars = 0usize;
         let mut included = 0usize;
         for cite in &sorted_cites {
