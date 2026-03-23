@@ -60,33 +60,16 @@ The fitness landscape is biased toward ideas that are good for people and the pl
 
 ### Anti-Confirmation Bias
 
-AI systems are trained to agree. Anthill pushes back with structural enforcement:
+AI systems are trained to agree. Anthill pushes back structurally — not through prompting, but in the mathematics:
 
-- **Evidence diversity ceiling** — an idea supported by only one kind of evidence (e.g. repeated corroborations) can never exceed 70% confidence. Two kinds reach 85%, three reach 92%, four or more reach 99%. An idea needs DIFFERENT kinds of evidence to reach high confidence.
-- **Consecutive-confirmation dampening** — if the last 5+ evidence entries are all positive, the system dampens the update. Real knowledge encounters friction.
-- **Confirmation bias detection** — the system warns when an edge's evidence trail looks suspiciously one-sided: all positive with zero negative, or high positive rate with low type diversity.
-- **InconsequentialSearch (BF=1.0)** — searching for counter-evidence and finding nothing does NOT strengthen a belief. Absence of evidence is NOT evidence of absence. Only active, failed refutation (RefutationSurvived, BF=2.5) strengthens a claim.
+- An idea supported by only one kind of evidence can never exceed 70% confidence, no matter how often it's confirmed
+- Repeated confirmations without any challenge are dampened automatically
+- Searching for counter-evidence and finding nothing does NOT strengthen a belief — only surviving genuine refutation does
+- The system warns when an evidence trail looks suspiciously one-sided
 
 ### Evidence Diversity
 
-The system tracks evidence types with predefined Bayes factors:
-
-| Evidence Type | Bayes Factor | Meaning |
-|---|---|---|
-| RefutationSurvived | 2.5 | Actively tried to disprove, claim held |
-| RefutationFailed | 0.1 | Actively tried to disprove, claim failed |
-| CompetitionWon | 2.0 | Won head-to-head against a rival hypothesis |
-| Corroboration | 2.0 | Supporting evidence found in another source |
-| PatternTransfer | 1.8 | Cross-domain insight strengthens this idea |
-| HumanAttestation | 1.5 | User confirmed or corrected |
-| Consistency | 1.5 | Consistent with existing knowledge graph |
-| Synthesis | 1.2 | Transitive inference from two strong edges |
-| InconsequentialSearch | 1.0 | Searched but found nothing (no change) |
-| Inconsistency | 0.4 | Inconsistent with existing knowledge graph |
-| CompetitionLost | 0.3 | Lost head-to-head against a rival hypothesis |
-| Contradiction | 0.3 | Contradicting evidence found |
-
-All Bayes factors are reputation-adjusted: BF_adj = BF_base^(0.5 + 0.5r), where r is the source's reputation score. Untrusted sources have their evidence dampened; trusted sources get full weight.
+The system tracks 12 distinct evidence types — from active refutation (strongest) through corroboration and pattern transfer to contradiction (weakest). Evidence from different sources is weighted by the source's reputation. An idea needs diverse evidence from multiple independent sources to reach high confidence.
 
 ### Self-Modification
 
@@ -94,17 +77,7 @@ Each ANT maintains a `thinking_process.md` file — its own evolved methodology 
 
 ### Fading Foundations
 
-Beliefs decay toward uncertainty (p=0.5) without fresh evidence, following the formula: `log_odds(t) = log_odds(t0) * 2^(-elapsed / half_life)`. This resolves Agrippa's trilemma — you don't need an absolute foundation if foundations fade. Epistemic chains converge without requiring certainty at any point.
-
-Decay rates depend on the category of knowledge:
-
-| Category | Half-life | Example |
-|---|---|---|
-| Fact | 30 days | "Anthill is written in Rust" |
-| Decision | 14 days | "We chose petgraph over SurrealDB" |
-| Observation | 7 days | "Alfred is running v0.4.0" |
-| Inference | 3 days | "This architecture seems scalable" |
-| Assumption | 1 day | "The user probably wants X" |
+Beliefs decay toward uncertainty without fresh evidence. Facts fade slowly (30-day half-life), while assumptions fade quickly (1 day). This resolves a deep philosophical problem: you don't need absolute foundations if foundations fade gracefully. An ANT's knowledge stays fresh and relevant — stale beliefs weaken naturally, making room for updated understanding.
 
 ---
 
@@ -171,9 +144,10 @@ The AI interacts through MCP tools that call `KnowledgeStore` methods. It cannot
 
 Git is not just backup — it is an epistemic instrument:
 
-- **Commits as thinking journal** — every graph mutation is auto-committed with a message describing what changed and why. The git log is a narrative of the ANT's evolving understanding.
-- **Diff as reasoning trace** — `git diff` between any two points shows exactly which beliefs changed, which evidence was applied, and how confidence moved.
-- **Recovery as resilience** — if the ANT's reasoning goes wrong, you can revert to any prior state of knowledge. Conjectures are never truly lost.
+- **Thinking journal** — every graph mutation is auto-committed with a descriptive message. The git log is a narrative of how the ANT's understanding evolved.
+- **Reasoning trace** — `git diff` between any two points shows exactly which beliefs changed, which evidence was applied, and how confidence moved.
+- **Idea recovery** — abandoned conjectures are never truly lost. The ANT can revisit earlier states of knowledge, recover ideas that were weakened or removed, and bring them back with new evidence. Every thought the ANT has ever had is in the history.
+- **Side-track exploration** — the ANT can explore speculative ideas on branches without risking its main body of knowledge, merging only what survives scrutiny.
 
 ---
 
@@ -187,8 +161,9 @@ When idle, ANTs **think autonomously**. The rumination engine runs a cycle of ep
 4. **Cross-domain pattern transfer** — find structural similarities between topic graphs. When an insight applies across domains, award PatternTransfer evidence (BF=1.8).
 5. **Active refutation** — select important but uncertain edges and actively try to disprove them. Edges that survive are strengthened (RefutationSurvived, BF=2.5). Edges that fail are sharply penalised (RefutationFailed, BF=0.1).
 6. **Contradiction resolution** — find edge pairs where both cannot be true. Send to the AI for resolution with evidence.
-7. **Autonomous initiative** — the ANT identifies gaps in its knowledge and asks questions. Questions it cannot answer itself are written to `questions.json` for the human.
-8. **Meta-rumination** — the ANT reviews its own thinking process. It reads `thinking_process.md`, evaluates whether its recent reasoning was effective, and can modify its own methodology. The thinking process is itself a conjecture.
+7. **Citation consolidation** — ensure every edge has proper source citations. Build and maintain a citations graph linking sources to the claims they support. Edges without citations get `ai_inference` references.
+8. **Autonomous initiative** — the ANT identifies gaps in its knowledge and asks questions. Questions it cannot answer itself are written to `questions.json` for the human.
+9. **Meta-rumination** — the ANT reviews its own thinking process. It reads `thinking_process.md`, evaluates whether its recent reasoning was effective, and can modify its own methodology. The thinking process is itself a conjecture.
 
 After each cycle, the engine consolidates the graph (dedup, merge, decay) and commits to git.
 
@@ -220,7 +195,7 @@ anthill --qr-join                # show QR code — scan with phone to join
 - **Reputation-weighted evidence** — source reliability modulates evidence strength via BF_adj = BF_base^(0.5+0.5r)
 - **Beneficial impact** — fitness landscape biased toward ideas good for people and planet
 - **Self-modification** — ANTs evolve their own thinking process through meta-rumination
-- **Rumination** — autonomous thinking: synthesis, refutation, competition, pattern transfer, meta-cognition
+- **Rumination** — autonomous thinking: synthesis, refutation, competition, pattern transfer, citation consolidation, meta-cognition
 
 **Memory and knowledge:**
 - **CBOR+Git backend** — compact binary storage (~46% smaller than JSON), atomic writes, auto-commit on every mutation
@@ -228,6 +203,7 @@ anthill --qr-join                # show QR code — scan with phone to join
 - **Multiple named graphs** — meta-graph plus topic-specific graphs, all independently managed
 - **Graph query API** — traversal, path-finding, kind filtering, uncertainty queries, justification chains
 - **Episodic memory** — conversation summaries capture narrative, not just facts
+- **Citation tracking** — every edge can carry source citations with quality scores; citations graph tracks all sources across topics
 - **Questions queue** — rumination generates questions for the human when it encounters gaps
 - **Corroboration strength** — measures how strongly an edge is supported by its network neighbourhood
 
@@ -236,6 +212,8 @@ anthill --qr-join                # show QR code — scan with phone to join
 - **Specification generation** — extract formal specs from code
 - **Test vector generation** — generate test cases from code or specs
 - **Graph reflection** — the AI reviews and refines its own knowledge
+- **Knowledge export** — self-contained HTML reports with AI-written insights, interactive 3D graphs, numbered citations, and optional user guidance for the report writer
+- **Git as cognitive architecture** — every mutation is auto-committed; the ANT can explore side-track thoughts on branches and recover abandoned ideas from history
 
 **AI and workers:**
 - **Multi-backend AI** — Claude Code, OpenAI Codex, Ollama (local). Automatic fallback on failure/rate limits
@@ -320,7 +298,7 @@ The **web dashboard** carries all seven layers — use it for sensitive operatio
 | **Anti-confirmation bias** — diversity ceiling, dampening | Enforced in the math, not just prompts | No | No | No | No |
 | **Fading foundations** — chain confidence converges | Yes — Peijnenburg & Atkinson model | No | No | No | No |
 | **Self-modification** — evolves own thinking process | thinking_process.md + meta-rumination | No | No | No | No |
-| **Autonomous rumination** — thinks when idle | 9 rumination modes | No | No | No | No |
+| **Autonomous rumination** — thinks when idle | 10 rumination modes | No | No | No | No |
 | **Inter-ANT communication** — communities of practice | Real interaction, not just file reading | No | No | No | No |
 | **Knowledge graph** — Popperian with evidence trails | CBOR + git auto-commit | No | No | No | No |
 | **Git as cognitive architecture** — thought branches | Branches, diffs, semantic changelog | No | No | No | No |

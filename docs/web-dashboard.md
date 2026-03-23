@@ -52,14 +52,33 @@ HTTPS is recommended because:
 - **Cross-device sync** — messages from Telegram appear in the web UI and vice versa
 - **Auto-reconnecting WebSocket** — reconnects with exponential backoff
 - **Responsive** — scales fonts for mobile/tablet/desktop
-- **Slash command autocomplete** — type `/` to see all commands with descriptions, arrow keys to navigate, Tab/Enter to select. Includes `/help`, `/status`, `/usage`, `/ants`, `/cancel`, `/analyse`, `/reflect`, `/specify`, `/test-vectors`, and more
-- **Web command routing** — `/help`, `/status`, `/usage`, `/ants`, `/cancel` work directly from the web (previously only Telegram/Slack)
+- **Knowledge graph export** — export a single graph or all graphs as a self-contained HTML file with AI-written insights, interactive 3D graph, citations, and "View graph →" links. Optional guidance text shapes the AI report writer's focus and tone
+- **Citation tracking** — citations are collected from graph edges and displayed as numbered references in exported reports. The `/citations` command consolidates sources across all topic graphs
+- **Slash command autocomplete** — type `/` to see all commands with descriptions, arrow keys to navigate, Tab/Enter to select. Includes `/help`, `/status`, `/usage`, `/ants`, `/cancel`, `/analyse`, `/ruminate`, `/citations`, `/reflect`, and more
+- **Web command routing** — `/help`, `/status`, `/usage`, `/ants`, `/cancel`, `/reflect`, `/ruminate`, `/citations`, `/reprocess-graphs` work directly from the web
 - **Auto-followup** — when one task is running, new messages auto-queue as follow-ups instead of spawning concurrent tasks
 - **Interrupt (`!`)** — prefix a message with `!` to cancel the running task and restart with combined context
 - **ANT not-running feedback** — sending to a stopped or unconfigured ANT shows an error instead of silently dropping the message
 - **Supervisor status events** — ANT crash and restart events are broadcast to the web UI in real time
 - **Workers tab focus fix** — follow-up input no longer loses focus when the elapsed timer re-renders
 - **Keyboard shortcuts** — Escape closes modals, Enter submits join/create dialogs
+
+## Knowledge Export
+
+Export an ANT's knowledge as a self-contained HTML file that can be opened in any browser — no server needed.
+
+From the **Graph tab**, click:
+- **Export** — export the currently selected graph
+- **Export All** — export all graphs for this ANT
+
+When exporting, you can optionally provide **guidance text** to shape the AI report writer's output — for example, "Focus on practical applications" or "Write for a beginner audience".
+
+The exported file includes:
+- **Insights tab** (default view) — AI-written narrative summary with numbered citations and "View graph →" links to jump to the relevant 3D visualisation
+- **Graph tab** — interactive 3D force-directed graph with search, node details, and confidence-weighted edges
+- **References section** — numbered citations linked to the claims they support
+
+Exports are also automatically published as GitHub Gists when `gh` is authenticated.
 
 ## Install as a PWA
 

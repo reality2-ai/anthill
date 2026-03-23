@@ -17,6 +17,11 @@ Handled locally by the conductor — always responsive, even while workers are r
 | `/cancel all` | Cancel all running workers |
 | `/followup <text>` | Queue a message for when the current task finishes (session continuity) |
 | `/new` | Start a fresh conversation |
+| `/reprocess-graphs` | Consolidate all graphs — dedup nodes, link orphans, backfill metadata |
+| `/reflect` | Review and consolidate all knowledge graphs (same as `/reprocess-graphs`) |
+| `/ruminate` | Start a full rumination cycle — 4 focused tasks: refutation, connections, improvement, citation consolidation |
+| `/citations` | Consolidate citations — resolve unknown links, cross-reference citations to topic graph edges |
+| `/export` | Export knowledge as a self-contained HTML report (available from Graph tab buttons) |
 
 ## Analysis commands
 
@@ -25,7 +30,6 @@ AI-driven pipelines using thematic analysis methodology.
 | Command | Description |
 |---|---|
 | `/analyse <file>` | Run thematic analysis on a document — extract entities, themes, relationships → knowledge graph |
-| `/reflect` | Meta-analysis of the knowledge graph itself — find patterns, test conjectures, consolidate |
 | `/specify <file>` | Generate a formal specification (RFC 2119 style) from source code |
 | `/test-vectors <file>` | Generate test cases from source code or a specification |
 
@@ -40,7 +44,7 @@ All four follow the same thematic analysis pattern (Braun & Clarke, 2022):
 5. **Refine** — name, merge, build relationships
 6. **Integrate** — write to knowledge graph, spec file, or test file
 
-`/analyse` and `/reflect` update the knowledge graph. `/specify` writes a spec to `specs/`. `/test-vectors` outputs test cases and Rust `#[test]` stubs.
+`/analyse` updates the knowledge graph. `/specify` writes a spec to `specs/`. `/test-vectors` outputs test cases and Rust `#[test]` stubs.
 
 ## AI backend commands
 
