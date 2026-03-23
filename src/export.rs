@@ -352,6 +352,16 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         .map(|g| format!("\n\nADDITIONAL DIRECTION FROM THE USER:\n{}\n\nFollow this guidance \
             to shape the tone, focus, and structure of the report.", g))
         .unwrap_or_default();
+    let has_citations = raw_insights.contains("[cite-");
+    let citation_instruction = if has_citations {
+        "\n\nCITATIONS ARE MANDATORY. A list of sources with citation codes like [cite-xxxx] is \
+         provided at the end of the data. You MUST cite these sources throughout your text using \
+         their codes in square brackets (e.g. [cite-a1b2c3d4]) wherever a claim, fact, or \
+         relationship is supported by that source. Every section should have at least one citation. \
+         The citations will be automatically renumbered to [1], [2], etc. in the final output. \
+         ONLY use citation codes from the provided list — never fabricate one. \
+         If a claim has no supporting citation, do not add one — just state the claim without a reference."
+    } else { "" };
     let prompt = format!(
         "Rewrite the following knowledge graph summary as a clear, accessible, well-written \
          document of 1-2 pages. Write it for a general reader who wants to learn about these topics. \
@@ -360,11 +370,9 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
          (use markdown ## headings), then a conclusion highlighting what is well-established \
          and what needs further investigation. \
          Include specific facts and descriptions from the data. \
-         If references are provided, cite them as numbered references [1], [2] etc. in the text \
-         where they support specific claims. ONLY cite references that are listed — never fabricate one. \
-         Write in third person, referring to the knowledge as belonging to '{}'.{}\n\n\
+         Write in third person, referring to the knowledge as belonging to '{}'.{}{}\n\n\
          Raw summary data:\n\n{}",
-        ant_name, guidance_text, raw_insights
+        ant_name, citation_instruction, guidance_text, raw_insights
     );
 
     // Try claude CLI directly.
@@ -529,9 +537,10 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     // Include citations for the AI to reference.
     // Use cite_id codes so we can post-process the AI output to renumber them.
     if !insights.all_citations.is_empty() {
-        raw_text.push_str("\nSources and references. Use the citation code in square brackets \
-            (e.g. [cite-0001]) wherever a claim is supported by that source. ONLY use codes \
-            from this list — never invent a citation.\n");
+        raw_text.push_str("\n\nSOURCES AND REFERENCES — YOU MUST CITE THESE IN YOUR TEXT.\n\
+            Each source has a citation code in square brackets. Use these codes (e.g. [cite-a1b2c3d4]) \
+            inline in your text wherever you make a claim supported by that source. \
+            Every topic section must include at least one citation. ONLY use codes from this list.\n\n");
         for cite in &insights.all_citations {
             raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
                 cite.cite_id,
