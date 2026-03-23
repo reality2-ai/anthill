@@ -2398,8 +2398,28 @@ impl KnowledgeGraph {
         // 6. Community detection (GraphRAG-inspired) — find disconnected clusters.
         let clusters = self.detect_communities();
 
+        // 7. Backfill missing cite_ids on citations.
+        self.backfill_cite_ids();
+
         self.rebuild_index();
         ConsolidationReport { nodes_merged, edges_merged, chains_collapsed, contradictions, clusters }
+    }
+
+    /// Ensure every citation has a cite_id. Older citations may be missing this field.
+    fn backfill_cite_ids(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let edge_indices: Vec<_> = self.graph.edge_indices().collect();
+        for eid in edge_indices {
+            let edge = &mut self.graph[eid];
+            for cite in &mut edge.citations {
+                if cite.cite_id.is_empty() {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    cite.url.hash(&mut h);
+                    cite.title.hash(&mut h);
+                    cite.cite_id = format!("cite-{:08x}", h.finish() as u32);
+                }
+            }
+        }
     }
 
     /// Clean up edge relations that start with '?' but contain a real title.
