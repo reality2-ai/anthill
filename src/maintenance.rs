@@ -557,25 +557,34 @@ fn run_refutation(
             "RUMINATION — ACTIVE REFUTATION\n\n\
              I currently believe: '{}' {} '{}' (confidence: {:.0}%)\n\
              This belief is in the topic graph: memory/graphs/{}.json\n\n\
-             Your task — ATTEMPT TO REFUTE THIS BELIEF:\n\
-             1. Formulate specific ways this could be WRONG\n\
-             2. Search for evidence that would DISPROVE this claim\n\
-             3. Check the knowledge graph for inconsistencies\n\n\
-             THREE POSSIBLE OUTCOMES (be honest about which applies):\n\n\
-             A) You found specific evidence that COULD have disproved this but DIDN'T:\n\
+             Your task — ATTEMPT TO REFUTE THIS BELIEF WITH EXTERNAL EVIDENCE:\n\n\
+             STEP 1 — Search for counter-evidence OUTSIDE the knowledge graph:\n\
+             - Use web search to find sources that CONTRADICT or CHALLENGE this claim\n\
+             - Look for recent research, news, or expert opinions that disagree\n\
+             - Search for exceptions, edge cases, or contexts where this doesn't hold\n\
+             - If you find a relevant source, fetch it and read it\n\
+             - Save useful sources to files/ for future reference\n\n\
+             STEP 2 — Also check WITHIN the knowledge graph:\n\
+             - Look for inconsistencies with other beliefs\n\
+             - Check if the evidence trail is one-sided (all confirmations, no challenges)\n\n\
+             STEP 3 — Evaluate honestly and record your findings:\n\n\
+             THREE POSSIBLE OUTCOMES:\n\n\
+             A) You found specific external evidence that COULD have disproved this but DIDN'T:\n\
                 → Use evidence_type 'refutation_survived' (BF=2.5 — genuinely strengthens)\n\
-                → Record WHAT you tested and WHY it failed to disprove\n\n\
+                → Record WHAT source you checked, WHAT it said, and WHY it failed to disprove\n\
+                → Add the source as a citation on the edge using graph_add_citation\n\n\
              B) You found evidence that DOES disprove or seriously undermine this:\n\
                 → Use evidence_type 'refutation_failed' (BF=0.1 — sharply weakens)\n\
-                → Record the contradicting evidence\n\n\
+                → Record the contradicting evidence and its source\n\
+                → Add the source as a citation\n\n\
              C) You searched but found NOTHING relevant either way:\n\
                 → Use evidence_type 'inconsequential_search' (BF=1.0 — NO CHANGE)\n\
                 → Absence of counter-evidence does NOT strengthen the belief\n\
                 → An untested idea remains untested\n\n\
              CRITICAL: Do NOT use 'refutation_survived' just because you didn't find \
-             anything wrong. That would be confirmation bias. Only use it when you found \
-             specific evidence that COULD HAVE refuted the idea but FAILED TO.\n\n\
-             Update the topic graph file with your findings.{}",
+             anything wrong in your own reasoning. That is confirmation bias — an echo \
+             chamber of self-agreement. Only use it when you found a SPECIFIC EXTERNAL \
+             source that COULD HAVE refuted the idea but FAILED TO.{}",
             from, relation, to, confidence * 100.0, topic, RUMINATION_STOP_DIRECTIVE
         );
 
@@ -702,13 +711,16 @@ fn run_initiative(
          This topic has {} uncertain edges that need attention.\n\n\
          Your task:\n\
          1. Read the topic graph file\n\
-         2. Identify gaps in reasoning chains — are there missing links?\n\
-         3. Look for edges that should exist but don't\n\
-         4. Can you infer new relationships from existing strong ones?\n\
-         5. Are there nodes that need better summaries or are miscategorised?\n\
-         6. Strengthen well-supported edges with 'consistency' evidence\n\
-         7. Weaken poorly-supported ones with 'inconsistency' evidence\n\n\
-         Focus on quality over quantity. Every change should be a testable conjecture.{}",
+         2. Identify gaps — are there missing relationships or concepts?\n\
+         3. For uncertain edges, search the web for evidence that supports OR refutes them\n\
+         4. If you find a useful source, fetch it, save it to files/, and add it as a citation\n\
+         5. Add new conjectures based on external evidence you find (not just inference)\n\
+         6. Strengthen edges where you find supporting external sources (use 'corroboration')\n\
+         7. Weaken edges where you find contradicting external sources (use 'inconsistency')\n\
+         8. For edges based purely on AI inference with no external backing, look for real sources\n\n\
+         IMPORTANT: Go beyond internal reasoning. Use web search to find real-world evidence. \
+         An idea backed by external sources is stronger than one backed only by AI inference. \
+         Every change should be a testable conjecture with provenance.{}",
         topic, uncertain_count, RUMINATION_STOP_DIRECTIVE
     );
 
