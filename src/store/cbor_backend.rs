@@ -347,6 +347,10 @@ impl StorageBackend for CborGitBackend {
                         }
                         if migrated > 0 {
                             log::info!("Migrated {} citations from JSON to CBOR for graph '{}'", migrated, name);
+                            // Persist the migration — save back to CBOR so we don't re-migrate every load.
+                            if let Err(e) = self.save_graph(name, &data) {
+                                log::warn!("Failed to persist citation migration for '{}': {}", name, e);
+                            }
                         }
                     }
                 }
