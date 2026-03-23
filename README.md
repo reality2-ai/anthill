@@ -21,7 +21,7 @@ A strong idea is not necessarily a good one — strength means it has survived s
 
 But no idea is invulnerable. Even long-held, well-tested beliefs may eventually be refuted by new evidence. Humans naturally resist this — we have vested interests in the status quo, careers built on existing frameworks, institutions designed around current assumptions. Yet when a new idea survives enough genuine challenges from enough independent sources, it eventually displaces the old. This is a paradigm shift — not a sudden revolution, but the gradual accumulation of evidence that the world has moved on.
 
-Anthill is built on this principle. It has no vested interests, no ego, and no beliefs — only conjectures with varying degrees of evidence. When the evidence says an idea is wrong, the idea weakens — automatically, structurally, without resistance.
+Anthill is built on this principle. It has no vested interests, no ego, and no beliefs — only conjectures with varying degrees of evidence. When the evidence weakens an idea, it fades — automatically, structurally, without resistance. Not because the idea is wrong, but because it is not yet strong enough.
 
 ## What is Anthill?
 
