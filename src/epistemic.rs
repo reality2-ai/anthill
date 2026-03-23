@@ -179,10 +179,11 @@ pub fn ff_convergence_limit(link_confidence: f64) -> f64 {
 /// Typed evidence for Bayesian updates.
 /// Each type has a predefined base Bayes factor from TH-WEAVE §3.2,
 /// adapted for Anthill's AI-knowledge context.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceType {
     /// Found supporting evidence in another source. BF = 2.0 × r
+    #[default]
     Corroboration,
     /// Found contradicting evidence. BF = 0.3 / r
     Contradiction,
@@ -280,22 +281,31 @@ impl EvidenceType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
     /// When this evidence was observed.
+    #[serde(default)]
     pub date: String,
     /// What type of evidence this is.
+    #[serde(default)]
     pub evidence_type: EvidenceType,
     /// What was tested or observed.
+    #[serde(default)]
     pub test: String,
     /// The evidence itself.
+    #[serde(default)]
     pub detail: String,
     /// Source identifier (links to reputation registry).
+    #[serde(default)]
     pub source_id: String,
     /// Source reputation at time of evidence (for audit).
+    #[serde(default)]
     pub source_reputation: f64,
     /// The effective Bayes factor applied.
+    #[serde(default)]
     pub bayes_factor: f64,
     /// Log-odds before this evidence.
+    #[serde(default)]
     pub log_odds_before: f64,
     /// Log-odds after this evidence.
+    #[serde(default)]
     pub log_odds_after: f64,
 }
 

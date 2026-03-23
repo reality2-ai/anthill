@@ -69,12 +69,14 @@ impl LiveKnowledgeStore {
             // If CBOR exists but has no citations, and JSON does, prefer JSON
             // (the AI may have added citations directly to JSON).
             let prefer_json = if use_cbor && json_exists {
-                let cbor_has_cites = std::fs::read(&cbor_path).ok()
-                    .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok())
+                let cbor_data = std::fs::read(&cbor_path).ok()
+                    .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok());
+                let cbor_has_cites = cbor_data.as_ref()
                     .map(|d| d.edges.iter().any(|(_, _, e)| !e.citations.is_empty()))
                     .unwrap_or(false);
-                let json_has_cites = std::fs::read_to_string(&json_path).ok()
-                    .and_then(|c| serde_json::from_str::<crate::knowledge::GraphData>(&c).ok())
+                let json_data = std::fs::read_to_string(&json_path).ok()
+                    .and_then(|c| serde_json::from_str::<crate::knowledge::GraphData>(&c).ok());
+                let json_has_cites = json_data.as_ref()
                     .map(|d| d.edges.iter().any(|(_, _, e)| !e.citations.is_empty()))
                     .unwrap_or(false);
                 !cbor_has_cites && json_has_cites
