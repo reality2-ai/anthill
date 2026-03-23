@@ -50,6 +50,22 @@ struct CollectedCitation {
 }
 
 /// Compute insights from the graph data.
+/// Check if a URL is reachable (HEAD request, 5s timeout).
+/// Returns true if the URL responds with 2xx/3xx, false for 404/timeout/error.
+fn url_exists(url: &str) -> bool {
+    if url.is_empty() { return false; }
+    let output = std::process::Command::new("curl")
+        .args(["-sI", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", "-L", url])
+        .output();
+    match output {
+        Ok(o) => {
+            let code = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            code.starts_with('2') || code.starts_with('3')
+        }
+        Err(_) => false,
+    }
+}
+
 fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
     let mut total_nodes = 0;
     let mut total_edges = 0;
@@ -122,13 +138,18 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                 *node_connections.entry(from.clone()).or_default() += 1;
                 *node_connections.entry(to.clone()).or_default() += 1;
 
-                // Collect citations from this edge.
+                // Collect citations from this edge, verifying URLs are reachable.
                 if let Some(cites) = link["citations"].as_array() {
                     for cite in cites {
                         let url = cite["url"].as_str().unwrap_or("").to_string();
                         let cite_id = cite["cite_id"].as_str().unwrap_or("").to_string();
                         let key = if !url.is_empty() { url.clone() } else { cite_id.clone() };
                         if !key.is_empty() && seen_urls.insert(key) {
+                            // Verify URL is reachable — skip broken/moved/fabricated links.
+                            if !url.is_empty() && !url_exists(&url) {
+                                eprintln!("  [export] Skipping broken URL: {}", url);
+                                continue;
+                            }
                             let final_cite_id = if cite_id.is_empty() {
                                 format!("cite-{:04x}", all_citations.len() + 1)
                             } else { cite_id };
