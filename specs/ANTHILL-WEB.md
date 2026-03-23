@@ -150,7 +150,15 @@ The web UI displays this as a system message in the chat.
 | POST | `/api/ants/{id}/chat` | Yes | Send a message to an ANT |
 | POST | `/api/ants/{id}/cancel/{task_id}` | Yes | Cancel a running task |
 
-### 5.3 Files
+### 5.3 Knowledge Graph
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/ants/{id}/graph?name=<topic>` | Yes | Get graph visualisation data (3D format). Empty or "meta" returns the meta-graph |
+| GET | `/api/ants/{id}/export?graph=<name>&guidance=<text>` | Yes | Export knowledge as self-contained HTML. Optional `graph` for single graph, optional `guidance` for AI report writer direction |
+| GET | `/api/ants/{id}/rumination` | Yes | Get rumination log |
+
+### 5.5 Files
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -161,7 +169,7 @@ The web UI displays this as a system message in the chat.
 
 File paths are validated against the working directory via `canonicalize()` to prevent path traversal.
 
-### 5.4 Authentication
+### 5.6 Authentication
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -172,7 +180,7 @@ File paths are validated against the working directory via `canonicalize()` to p
 | DELETE | `/api/auth/devices/{id}` | Yes | Revoke a device |
 | GET | `/api/auth/qr-join` | Yes | Generate QR code for device provisioning |
 
-### 5.5 Other
+### 5.7 Other
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -193,10 +201,10 @@ File paths are validated against the working directory via `canonicalize()` to p
 
 - Message history with markdown rendering (via marked.js)
 - Reply-to-message: hover → ↩ button → quote bar above input
-- Auto-scroll on new messages
-- Typing indicator
+- Auto-scroll on new messages; forced scroll to bottom when switching bots or reconnecting
+- **Tasks panel** — logically separate from chat scroll area; shows active workers with progress, or "Thinking..." when the bot is processing. Has its own scrollbar (max 120px). Appears/disappears without affecting chat scroll position.
 - **Slash command autocomplete**: typing `/` in the input opens a menu listing all available commands with descriptions. Arrow keys navigate, Tab or Enter selects. The menu filters as the user types.
-- **Web command routing**: `/help`, `/status`, `/usage`, `/ants`, and `/cancel` are handled locally and return responses as system messages — no AI backend needed.
+- **Web command routing**: `/help`, `/status`, `/usage`, `/ants`, `/cancel`, `/reflect`, `/ruminate`, `/citations`, `/reprocess-graphs` are handled locally and return responses as system messages — no AI backend needed.
 - **Auto-followup**: when one task is running, new messages auto-queue as follow-ups instead of starting concurrent tasks.
 - **Interrupt (`!`)**: prefixing a message with `!` cancels the running task and restarts with combined context.
 - **ANT not-running feedback**: sending a message to a stopped or unconfigured ANT displays an error message instead of silently dropping the message.
@@ -208,14 +216,28 @@ File paths are validated against the working directory via `canonicalize()` to p
 - Follow-up input per worker card (focus is preserved during timer re-renders)
 - Cancel button per worker
 
-### 6.4 Files Tab
+### 6.4 Graph Tab
+
+- Interactive 3D force-directed graph (ForceGraph3D + Three.js + SpriteText)
+- Graph selector dropdown for switching between meta-graph and topic graphs
+- Node labels with kind-based colouring, confidence-weighted opacity
+- Edge colouring by confidence: green (≥80%), yellow (≥50%), orange (≥30%), red (<30%)
+- Node click: details panel with connections, confidence, basis
+- Node right-click: update dialog for modifying node properties
+- Graph query bar: ask questions scoped to the current graph
+- **Export buttons**: "Export" (current graph) and "Export All" (all graphs) — triggers AI-written HTML report generation with optional guidance text
+- WebGL availability check with user-friendly fallback message
+- Warmup ticks for initial simulation before first render
+- Live graph refresh via WebSocket when graphs are updated
+
+### 6.5 Files Tab
 
 - Directory browser with breadcrumb navigation
 - File preview (text, images)
 - Upload and download (auth-aware)
 - Delete with confirmation
 
-### 6.5 Modals
+### 6.6 Modals
 
 - **Create ANT**: name, ID, Telegram token, working directory
 - **ANT Settings**: full config editor (backends, personality, sync, backups)

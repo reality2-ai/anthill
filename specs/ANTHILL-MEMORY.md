@@ -559,7 +559,12 @@ A chain is only as strong as its weakest link.
 
 ### 10.4 Schedule
 
-Consolidation SHOULD run after each rumination cycle and periodically during normal operation.
+Consolidation runs:
+
+- **Every 15 minutes** — automatic background maintenance (dedup, link orphans, backfill metadata)
+- **Every 50 AI requests** — inline maintenance including orphan linking and backfill
+- **After each rumination cycle** — full consolidation pass
+- **On `/reflect` or `/reprocess-graphs`** — manual trigger
 
 ---
 
@@ -580,10 +585,45 @@ A full rumination cycle includes, in order:
 5. **Cross-domain pattern transfer** — find structural similarities between topic graphs; award PatternTransfer evidence (BF=1.8)
 6. **Active refutation** — select important but uncertain edges; actively try to disprove them; award RefutationSurvived (BF=2.5) or RefutationFailed (BF=0.1)
 7. **Contradiction resolution** — find edge pairs where both cannot be true; send to AI for resolution
-8. **Autonomous initiative** — identify knowledge gaps; write questions to `questions.json`
-9. **Meta-rumination** — review the thinking process; potentially modify `thinking_process.md`
+8. **Citation consolidation** — ensure every edge has proper source citations; build and maintain the citations graph; add `ai_inference` references for AI-reasoned edges (see §11.5)
+9. **Autonomous initiative** — identify knowledge gaps; write questions to `questions.json`
+10. **Meta-rumination** — review the thinking process; potentially modify `thinking_process.md`
 
 After the cycle: consolidation, orphan linking, git commit.
+
+### 11.5 Citation Consolidation
+
+The citations graph is a **core graph** — automatically created and maintained during every rumination cycle. It tracks all sources used across topic graphs.
+
+During citation consolidation:
+
+1. All topic graph edges are scanned for their `citations` field
+2. Each unique citation source gets a node in `memory/graphs/citations.cbor`
+3. Unresolved `?` edges in the citations graph are investigated (URLs fetched and saved to `files/`)
+4. Topic graph edges lacking citations receive them — web-sourced edges get URL citations, AI-inferred edges get `ref_type: ai_inference`
+5. All updated graphs are written back
+
+Citation consolidation runs automatically when more than one-third of edges lack citations, or when the citations graph does not yet exist. It can also be triggered manually via `/citations`.
+
+#### Citation Schema
+
+Each edge's `citations` field is an array of:
+
+```json
+{
+  "cite_id": "cite-<8hex>",
+  "url": "https://...",
+  "title": "Source title",
+  "author": "",
+  "date": "",
+  "accessed": "YYYY-MM-DD",
+  "snippet": "Brief quote from source",
+  "ref_type": "peer_reviewed|official_report|book|news|blog|website|personal|ant_knowledge|ai_inference",
+  "quality": 0.0-1.0
+}
+```
+
+Citation quality provides a confidence bonus: well-cited edges receive up to 15% boost to effective confidence.
 
 ### 11.3 Questions Queue
 

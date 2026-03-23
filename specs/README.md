@@ -24,6 +24,9 @@ Anthill is built on [Reality2 (R2)](https://github.com/reality2-ai/r2-specificat
 ### Interfaces
 6. [ANTHILL-WEB](ANTHILL-WEB.md) — Web dashboard, WebSocket protocol, authentication
 
+### Export
+7. [ANTHILL-EXPORT](ANTHILL-EXPORT.md) — Knowledge export: self-contained HTML reports with AI insights and citations
+
 ## Specification Confidence
 
 How well-tested and stable is each area? Confidence grows through implementation, testing, and surviving real-world use — not through assertion.
@@ -37,13 +40,15 @@ How well-tested and stable is each area? Confidence grows through implementation
 | ANTHILL-MEMORY | Popperian confidence | ●●○○○ | Strengthen/weaken/contradict/decay | Implemented, not yet AI-exercised |
 | ANTHILL-MEMORY | Query API | ●●○○○ | About, Path, ByKind, Uncertain | Implemented, not yet prompt-integrated at scale |
 | ANTHILL-MEMORY | Episodic memory | ●○○○○ | Load/save/search | Implemented, AI not yet writing episodes |
-| ANTHILL-MEMORY | Consolidation | ●●○○○ | Dedup, merge, collapse, contradiction | Implemented, not yet run at scale |
+| ANTHILL-MEMORY | Consolidation | ●●●○○ | Dedup, merge, collapse, contradiction | Runs every 15min + every 50 requests |
+| ANTHILL-MEMORY | Citation consolidation | ●●○○○ | Citations graph, edge citation linking | Core rumination step; /citations command |
 | ANTHILL-MEMORY | Keyword extraction (i18n) | ●●●○○ | English, French, German tested | No CJK support |
 | ANTHILL-WORKER | Multi-backend fallback | ●●●○○ | Claude + Codex + Ollama tested | Ollama integrated, Gemini detection only |
 | ANTHILL-WORKER | Ollama embeddings | ●●○○○ | nomic-embed-text integration | Semantic search with keyword fallback |
 | ANTHILL-WORKER | Worker supervision | ●●●○○ | Timeout, stderr capture, stall detect | Running in production |
 | ANTHILL-WORKER | Follow-up queue | ●●●○○ | Auto-followup, ! interrupt | Auto-queue on message-while-running |
-| ANTHILL-WORKER | Web command routing | ●●●○○ | /help /status /usage /ants /cancel via web | Previously Telegram/Slack only |
+| ANTHILL-WORKER | Web command routing | ●●●○○ | /help /status /usage /ants /cancel /reflect /ruminate /citations via web | Extended with graph maintenance commands |
+| ANTHILL-WORKER | Maintenance daemon | ●●●○○ | 15min consolidation, 6hr cross-link, rumination when idle | Background maintenance loop per ANT |
 | ANTHILL-WORKER | Question relay | ●○○○○ | Implemented | Depends on AskUserQuestion usage |
 | ANTHILL-WORKER | Stream-json parsing | ●●●●○ | Claude + Codex formats | Text block fallback added |
 | ANTHILL-THEMATIC | Document chunking | ●●●○○ | Short/long docs, paragraph breaks | Overlap + progress guarantee |
@@ -55,6 +60,8 @@ How well-tested and stable is each area? Confidence grows through implementation
 | ANTHILL-WEB | WebSocket protocol | ●●●○○ | HMAC signing, snapshot, events | Unsigned fallback for HTTP |
 | ANTHILL-WEB | File management | ●●○○○ | Upload, download, delete | Auth-aware download fixed |
 | ANTHILL-WEB | Device QR provisioning | ●●●○○ | CLI + web QR, countdown timer | Tested on mobile |
+| ANTHILL-WEB | Knowledge graph tab | ●●●○○ | 3D graph, node click, search, live refresh | ForceGraph3D + Three.js + SpriteText |
+| ANTHILL-WEB | Knowledge export | ●●○○○ | AI-written report, citations, graph links, guidance | Self-contained HTML; ANTHILL-EXPORT spec |
 | ANTHILL-WEB | Slash command autocomplete | ●●●○○ | Menu renders, Tab/Enter selects | Web UI only |
 | ANTHILL-WEB | ANT not-running feedback | ●●●○○ | Error on send to stopped ANT | Prevents silent message loss |
 | ANTHILL-WORKER | UTF-8 safety | ●●●●○ | Char/word-boundary slicing | Māori macrons, emoji safe |

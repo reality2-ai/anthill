@@ -262,3 +262,30 @@ The system prompt sent to the AI backend is composed of:
 6. **[USER MEMORY]** — per-user freeform notes.
 
 Total prompt size SHOULD be monitored. Each section is capped (knowledge graph: 4096 chars, episodes: 2048 chars, user memory: 4096 chars).
+
+---
+
+## 10. Maintenance Daemon
+
+Each ANT runs a background maintenance loop alongside the AI worker.
+
+### 10.1 Periodic Operations
+
+| Operation | Interval | Description |
+|-----------|----------|-------------|
+| Graph consolidation | Every 15 minutes | Dedup nodes/edges, link orphans, backfill metadata |
+| Cross-linking | Every 6 hours | Find shared entities across topic graphs, add cross-reference edges in meta-graph |
+| Rumination | When idle (configurable) | Full autonomous thinking cycle (ANTHILL-MEMORY §11) |
+
+### 10.2 Inline Maintenance
+
+Every 50 AI requests, the worker performs inline maintenance: consolidate all graphs, link orphans, and backfill metadata. This ensures graphs stay well-connected during active conversations without waiting for the background cycle.
+
+### 10.3 Rumination Commands
+
+| Command | Behaviour |
+|---------|-----------|
+| `/ruminate` | Trigger 4 focused tasks: refutation, connections, improvement, citation consolidation |
+| `/citations` | Trigger citation consolidation only — resolve unknown links, cross-reference to topic graph edges |
+| `/reflect` | Consolidate all graphs: dedup, link orphans, backfill |
+| `/reprocess-graphs` | Same as `/reflect` plus file housekeeping (move stray graph files, clean temp files) |
