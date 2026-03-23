@@ -569,18 +569,43 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
              <div style='background:#1e293b;border-radius:8px;padding:24px 28px;margin:20px 0;line-height:1.8;font-size:14px'>\n",
             ant_name, snapshot_id, crate::dateutil::datetime_now()
         );
+        // Build a lookup from normalized topic names to graph indices for "View graph" links.
+        let topic_to_idx: std::collections::HashMap<String, usize> = insights.topic_summaries.iter()
+            .enumerate()
+            .map(|(i, (name, _, _, _))| (name.replace('-', " ").to_lowercase(), i))
+            .collect();
+
+        // Try to find a matching graph index for a heading.
+        let find_graph_link = |heading: &str| -> String {
+            let h = heading.to_lowercase();
+            for (topic, idx) in &topic_to_idx {
+                if h.contains(topic.as_str()) {
+                    return format!(
+                        " <a href='#' onclick='showTab(\"graph\",{});return false;' \
+                         style='font-size:12px;color:#60a5fa;text-decoration:none;margin-left:8px'>View graph →</a>",
+                        idx
+                    );
+                }
+            }
+            String::new()
+        };
+
         // Convert markdown-ish AI output to HTML paragraphs.
         for line in renumbered.lines() {
             let line = line.trim();
             if line.is_empty() { continue; }
             if line.starts_with("# ") {
-                html.push_str(&format!("<h3 style='margin-top:20px'>{}</h3>\n", &line[2..]));
+                let text = &line[2..];
+                html.push_str(&format!("<h3 style='margin-top:20px'>{}{}</h3>\n", text, find_graph_link(text)));
             } else if line.starts_with("## ") {
-                html.push_str(&format!("<h3 style='margin-top:20px'>{}</h3>\n", &line[3..]));
+                let text = &line[3..];
+                html.push_str(&format!("<h3 style='margin-top:20px'>{}{}</h3>\n", text, find_graph_link(text)));
             } else if line.starts_with("### ") {
-                html.push_str(&format!("<h4 style='margin-top:16px'>{}</h4>\n", &line[4..]));
+                let text = &line[4..];
+                html.push_str(&format!("<h4 style='margin-top:16px'>{}{}</h4>\n", text, find_graph_link(text)));
             } else if line.starts_with("**") && line.ends_with("**") {
-                html.push_str(&format!("<h4 style='margin-top:16px'>{}</h4>\n", &line[2..line.len()-2]));
+                let text = &line[2..line.len()-2];
+                html.push_str(&format!("<h4 style='margin-top:16px'>{}{}</h4>\n", text, find_graph_link(text)));
             } else {
                 // Convert inline **bold** to <b>.
                 let line = line.replace("**", "<b>").replace("**", "</b>");

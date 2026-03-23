@@ -1847,7 +1847,7 @@ impl KnowledgeGraph {
                 "evidence_count": edge.evidence_log.len(),
                 "is_orphan_link": is_orphan_link,
                 "citations": edge.citations.iter().map(|c| serde_json::json!({
-                    "url": c.url, "title": c.title, "author": c.author,
+                    "cite_id": c.cite_id, "url": c.url, "title": c.title, "author": c.author,
                     "date": c.date, "ref_type": format!("{:?}", c.ref_type).to_lowercase(),
                     "quality": c.quality,
                 })).collect::<Vec<_>>(),
