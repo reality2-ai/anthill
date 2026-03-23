@@ -361,11 +361,12 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
          - Example: 'According to recent analysis [cite-f5e6d7c8], the trend is accelerating.'\n\
          - You can cite multiple sources: 'This finding is well-supported [cite-a1b2c3d4] [cite-b2c3d4e5].'\n\n\
          RULES:\n\
-         - EVERY paragraph MUST have at least one citation where a relevant source exists.\n\
+         - Cite the source whenever you introduce a new idea, finding, or claim from the data.\n\
+         - If a claim has no supporting citation, it is SPECULATION — use language like \
+           'it appears that', 'this suggests', or 'further investigation is needed' to signal this.\n\
          - Use as MANY of the provided citations as are relevant — don't just pick a few.\n\
          - The [cite-xxxx] codes will be automatically renumbered to [1], [2], etc.\n\
-         - ONLY use codes from the provided list — NEVER invent a citation code.\n\
-         - If a claim genuinely has no supporting source, state it without a citation."
+         - ONLY use codes from the provided list — NEVER invent a citation code."
     } else { "" };
 
     // The user's guidance is the primary prompt. If none provided, use a sensible default.
