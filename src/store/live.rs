@@ -399,6 +399,24 @@ impl KnowledgeStore for LiveKnowledgeStore {
         })
     }
 
+    fn add_citation(
+        &self, graph: &str, from: &str, to: &str, relation: &str,
+        citation: crate::knowledge::Reference,
+    ) -> StoreResult<()> {
+        self.with_graph_mut(graph, |kg| {
+            let (_eid, edge) = find_edge_mut(kg, from, to, relation)?;
+            // Avoid duplicate citations (same cite_id or same URL).
+            let dominated = edge.citations.iter().any(|c|
+                (!c.cite_id.is_empty() && c.cite_id == citation.cite_id) ||
+                (!c.url.is_empty() && c.url == citation.url)
+            );
+            if !dominated {
+                edge.citations.push(citation);
+            }
+            Ok(())
+        })
+    }
+
     // ── Queries ──
 
     fn query_about(&self, graph: &str, entity: &str, depth: usize) -> StoreResult<QueryResult> {

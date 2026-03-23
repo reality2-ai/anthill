@@ -328,8 +328,30 @@ impl StorageBackend for CborGitBackend {
         if cbor_path.exists() {
             let bytes = std::fs::read(&cbor_path)
                 .map_err(|e| StoreError::Storage(format!("read {}: {}", cbor_path.display(), e)))?;
-            let data: GraphData = ciborium::de::from_reader(&bytes[..])
+            let mut data: GraphData = ciborium::de::from_reader(&bytes[..])
                 .map_err(|e| StoreError::Storage(format!("CBOR decode {}: {}", cbor_path.display(), e)))?;
+
+            // Migration: if CBOR edges have no citations but a JSON file exists with them,
+            // merge citations from JSON into the CBOR data.
+            let json_path = self.json_path(name);
+            let has_any_citations = data.edges.iter().any(|(_, _, e)| !e.citations.is_empty());
+            if !has_any_citations && json_path.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&json_path) {
+                    if let Ok(json_data) = serde_json::from_str::<GraphData>(&contents) {
+                        let mut migrated = 0usize;
+                        for (cbor_edge, json_edge) in data.edges.iter_mut().zip(json_data.edges.iter()) {
+                            if cbor_edge.2.citations.is_empty() && !json_edge.2.citations.is_empty() {
+                                cbor_edge.2.citations = json_edge.2.citations.clone();
+                                migrated += 1;
+                            }
+                        }
+                        if migrated > 0 {
+                            log::info!("Migrated {} citations from JSON to CBOR for graph '{}'", migrated, name);
+                        }
+                    }
+                }
+            }
+
             return Ok(Some(data));
         }
 

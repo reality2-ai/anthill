@@ -215,6 +215,26 @@ fn tool_definitions() -> Vec<serde_json::Value> {
             }
         }),
         serde_json::json!({
+            "name": "graph_add_citation",
+            "description": "Add a citation/reference to an existing edge. Every edge should have at least one citation for provenance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Source node label" },
+                    "to": { "type": "string", "description": "Target node label" },
+                    "relation": { "type": "string", "description": "Edge relation" },
+                    "url": { "type": "string", "description": "URL of the source (if web-based)" },
+                    "title": { "type": "string", "description": "Title or short description of the source" },
+                    "author": { "type": "string", "description": "Author(s) if known" },
+                    "date": { "type": "string", "description": "Publication date or year" },
+                    "ref_type": { "type": "string", "enum": ["peer_reviewed", "official_report", "book", "news", "blog", "website", "personal", "ant_knowledge", "ai_inference"], "description": "Type of source" },
+                    "quality": { "type": "number", "description": "Quality score 0.0-1.0 (default based on ref_type)" },
+                    "graph": { "type": "string" }
+                },
+                "required": ["from", "to", "relation", "ref_type"]
+            }
+        }),
+        serde_json::json!({
             "name": "graph_query_uncertain",
             "description": "List edges below a confidence threshold.",
             "inputSchema": {
@@ -476,6 +496,47 @@ fn handle_tool_call(
             match store.contradict(graph, from, to, relation, test, evidence) {
                 Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
                     from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Err(e) => format!("Error: {}", e),
+            }
+        }
+        "graph_add_citation" => {
+            let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
+            let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|u| u.as_str()).unwrap_or("");
+            let title = args.get("title").and_then(|t| t.as_str()).unwrap_or("");
+            let author = args.get("author").and_then(|a| a.as_str()).unwrap_or("");
+            let date = args.get("date").and_then(|d| d.as_str()).unwrap_or("");
+            let ref_type = args.get("ref_type").and_then(|r| r.as_str()).unwrap_or("website");
+            let quality = args.get("quality").and_then(|q| q.as_f64());
+
+            let citation = crate::knowledge::Reference {
+                cite_id: format!("cite-{:08x}", {
+                    use std::hash::{Hash, Hasher};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    url.hash(&mut h);
+                    title.hash(&mut h);
+                    h.finish() as u32
+                }),
+                url: url.into(),
+                title: title.into(),
+                author: author.into(),
+                date: date.into(),
+                accessed: crate::dateutil::today_string(),
+                snippet: String::new(),
+                ref_type: serde_json::from_value(serde_json::Value::String(ref_type.into()))
+                    .unwrap_or_default(),
+                quality: quality.unwrap_or_else(|| {
+                    let rt: crate::knowledge::ReferenceType = serde_json::from_value(
+                        serde_json::Value::String(ref_type.into())
+                    ).unwrap_or_default();
+                    rt.initial_quality()
+                }),
+            };
+
+            match store.add_citation(graph, from, to, relation, citation) {
+                Ok(()) => format!("Citation added to '{}' → {} → '{}': {}", from, relation, to,
+                    if !title.is_empty() { title } else { url }),
                 Err(e) => format!("Error: {}", e),
             }
         }

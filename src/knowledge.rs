@@ -2543,9 +2543,19 @@ impl KnowledgeGraph {
                 // Combine context from both sources.
                 if !edge.context.is_empty() && edge.context != kept_edge.context {
                     if kept_edge.context.is_empty() {
-                        kept_edge.context = edge.context;
+                        kept_edge.context = edge.context.clone();
                     } else {
                         kept_edge.context = format!("{}; {}", kept_edge.context, edge.context);
+                    }
+                }
+                // Merge citations (deduplicate by cite_id or URL).
+                for cite in &edge.citations {
+                    let dominated = kept_edge.citations.iter().any(|c|
+                        (!c.cite_id.is_empty() && c.cite_id == cite.cite_id) ||
+                        (!c.url.is_empty() && c.url == cite.url)
+                    );
+                    if !dominated {
+                        kept_edge.citations.push(cite.clone());
                     }
                 }
                 to_update.push((*kept_idx, kept_edge.clone()));

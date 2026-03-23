@@ -205,6 +205,12 @@ pub trait KnowledgeStore: Send + Sync {
     fn query_justification(&self, graph: &str, from: &str, to: &str, relation: &str)
         -> StoreResult<String>;
 
+    /// Add a citation to an existing edge.
+    fn add_citation(
+        &self, graph: &str, from: &str, to: &str, relation: &str,
+        citation: crate::knowledge::Reference,
+    ) -> StoreResult<()>;
+
     /// List orphan nodes (nodes with only '?' connections).
     fn list_orphans(&self, graph: &str) -> StoreResult<Vec<String>>;
 
