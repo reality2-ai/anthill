@@ -17,6 +17,7 @@ use crate::store::live::LiveKnowledgeStore;
 const THREE_JS: &str = include_str!("vendor/three.min.js");
 const SPRITETEXT_JS: &str = include_str!("vendor/three-spritetext.min.js");
 const FORCEGRAPH_JS: &str = include_str!("vendor/3d-force-graph.min.js");
+const FORCEGRAPH_2D_JS: &str = include_str!("vendor/force-graph.min.js");
 
 /// Pre-computed insights about a graph.
 struct GraphInsights {
@@ -488,6 +489,9 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, 
     let mut all_data = Vec::new();
 
     for g in &graphs {
+        // Skip the citations graph in "export all" — it's an internal index,
+        // not a topic. Citations are already attached to edges in topic graphs.
+        if g.name == "citations" || g.name == "uncategorised" { continue; }
         if let Ok(viz) = store.to_visualization(&g.name) {
             all_data.push(serde_json::json!({
                 "name": g.name,
@@ -679,6 +683,7 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
 <script>{three_js}</script>
 <script>{spritetext_js}</script>
 <script>{forcegraph_js}</script>
+<script>{forcegraph_2d_js}</script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ background: #0f172a; color: #e2e8f0; font-family: -apple-system, system-ui, sans-serif; }}
@@ -797,6 +802,31 @@ let firstNonEmpty = ALL_GRAPHS.findIndex(g => g.node_count > 0 && g.name !== 'me
 if (firstNonEmpty < 0) firstNonEmpty = 0;
 selector.value = firstNonEmpty;
 
+function hasWebGL() {{
+  try {{
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  }} catch(_) {{ return false; }}
+}}
+
+function nodeClickHandler(node, data) {{
+  const edges=data.links.filter(l=>(l.source.id||l.source)===node.id||(l.target.id||l.target)===node.id);
+  let h='<b>'+node.label+'</b> ('+node.kind+')';
+  if(node.summary) h+='<br>'+node.summary;
+  if(node.tags&&node.tags.length) h+='<br><span style="color:#64748b">Tags: '+node.tags.join(', ')+'</span>';
+  if(edges.length){{ h+='<br><br><b>Connections:</b>';
+    edges.forEach(e=>{{ const o=(e.source.id||e.source)===node.id?(data.nodes.find(n=>n.id===(e.target.id||e.target))||{{}}).label||'?':(data.nodes.find(n=>n.id===(e.source.id||e.source))||{{}}).label||'?';
+      const c=Math.round(e.confidence*100); const cls=c>=80?'conf-high':c>=50?'conf-mid':c>=30?'conf-low':'conf-weak';
+      h+='<br>→ '+e.relation+' → '+o+' <span class="'+cls+'">'+c+'%</span>';
+      if(e.basis) h+=' <span style="color:#64748b">('+e.basis+')</span>';
+    }});
+  }}
+  h+='<br><br><button onclick="document.getElementById(\'info\').style.display=\'none\'" style="background:#334155;color:#e2e8f0;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px">Close</button>';
+  document.getElementById('info').innerHTML=h; document.getElementById('info').style.display='block';
+}}
+
+const linkColor=l=>{{ if(l.is_orphan_link)return'#888'; if(l.confidence>=0.8)return'#4ade80'; if(l.confidence>=0.5)return'#fbbf24'; if(l.confidence>=0.3)return'#fb923c'; return'#f87171'; }};
+
 function loadGraph(idx) {{
   const g = ALL_GRAPHS[idx]; if (!g) return;
   const data = g.data; currentData = data;
@@ -809,37 +839,48 @@ function loadGraph(idx) {{
   const container = document.getElementById('graph-view');
   if (graphInstance) {{ graphInstance._destructor && graphInstance._destructor(); graphInstance=null; }}
   container.innerHTML='';
-  graphInstance = ForceGraph3D()(container).graphData(data)
-    .nodeLabel(n=>'<div style="background:rgba(15,23,42,0.95);padding:6px 10px;border-radius:6px;font-size:13px;color:#e2e8f0"><b>'+n.label+'</b> ('+n.kind+')<br>'+(n.summary||'')+'</div>')
-    .nodeColor(n=>{{ const c=n.confidence!==undefined?n.confidence:0.5; const a=Math.max(0.15,c); const h=NODE_COLORS[n.kind]||'#888'; const r=parseInt(h.slice(1,3),16)||136; const g=parseInt(h.slice(3,5),16)||136; const b=parseInt(h.slice(5,7),16)||136; return 'rgba('+r+','+g+','+b+','+a+')'; }})
-    .nodeOpacity(1).nodeVal(n=>n.is_hub?6:3).nodeResolution(12);
-  if(typeof SpriteText!=='undefined'){{
-    graphInstance.nodeThreeObjectExtend(true).nodeThreeObject(n=>{{ const s=new SpriteText(n.label); s.color=NODE_COLORS[n.kind]||'#ccc'; s.textHeight=2.5; s.position.set(0,5,0); return s; }})
-    .linkThreeObjectExtend(true).linkThreeObject(l=>{{ const s=new SpriteText(l.relation); s.color='#999'; s.textHeight=1.5; return s; }})
-    .linkPositionUpdate((s,{{start,end}})=>{{ if(s&&s.position&&start&&end) Object.assign(s.position,{{x:start.x+(end.x-start.x)/2,y:start.y+(end.y-start.y)/2,z:start.z+(end.z-start.z)/2}}); }});
+
+  if (hasWebGL()) {{
+    graphInstance = ForceGraph3D()(container).graphData(data)
+      .nodeLabel(n=>'<div style="background:rgba(15,23,42,0.95);padding:6px 10px;border-radius:6px;font-size:13px;color:#e2e8f0"><b>'+n.label+'</b> ('+n.kind+')<br>'+(n.summary||'')+'</div>')
+      .nodeColor(n=>{{ const c=n.confidence!==undefined?n.confidence:0.5; const a=Math.max(0.15,c); const h=NODE_COLORS[n.kind]||'#888'; const r=parseInt(h.slice(1,3),16)||136; const gg=parseInt(h.slice(3,5),16)||136; const b=parseInt(h.slice(5,7),16)||136; return 'rgba('+r+','+gg+','+b+','+a+')'; }})
+      .nodeOpacity(1).nodeVal(n=>n.is_hub?6:3).nodeResolution(12);
+    if(typeof SpriteText!=='undefined'){{
+      graphInstance.nodeThreeObjectExtend(true).nodeThreeObject(n=>{{ const s=new SpriteText(n.label); s.color=NODE_COLORS[n.kind]||'#ccc'; s.textHeight=2.5; s.position.set(0,5,0); return s; }})
+      .linkThreeObjectExtend(true).linkThreeObject(l=>{{ const s=new SpriteText(l.relation); s.color='#999'; s.textHeight=1.5; return s; }})
+      .linkPositionUpdate((s,{{start,end}})=>{{ if(s&&s.position&&start&&end) Object.assign(s.position,{{x:start.x+(end.x-start.x)/2,y:start.y+(end.y-start.y)/2,z:start.z+(end.z-start.z)/2}}); }});
+    }}
+    graphInstance.linkWidth(l=>l.is_orphan_link?0.3:Math.max(0.5,l.confidence*1.5)).linkOpacity(0.6)
+      .linkColor(linkColor)
+      .linkDirectionalArrowLength(6).linkDirectionalArrowRelPos(0.95)
+      .linkDirectionalArrowColor(linkColor)
+      .backgroundColor('#0f172a').enableNodeDrag(true)
+      .onNodeClick(node=>nodeClickHandler(node, data))
+      .warmupTicks(100).cooldownTime(3000);
+    setTimeout(()=>{{ if(graphInstance) graphInstance.zoomToFit(800,60); }},500);
+  }} else if (typeof ForceGraph !== 'undefined') {{
+    // 2D Canvas fallback.
+    graphInstance = ForceGraph()(container).graphData(data)
+      .nodeLabel(n=>'<div style="background:rgba(15,23,42,0.95);padding:6px 10px;border-radius:6px;font-size:13px;color:#e2e8f0"><b>'+n.label+'</b> ('+n.kind+')<br>'+(n.summary||'')+'</div>')
+      .nodeColor(n=>NODE_COLORS[n.kind]||'#888')
+      .nodeVal(n=>n.is_hub?12:5)
+      .nodeCanvasObject((n,ctx,gs)=>{{
+        const sz=n.is_hub?6:3; const col=NODE_COLORS[n.kind]||'#888';
+        ctx.beginPath(); ctx.arc(n.x,n.y,sz,0,2*Math.PI);
+        ctx.fillStyle=col; ctx.globalAlpha=n.confidence!==undefined?Math.max(0.3,n.confidence):0.7;
+        ctx.fill(); ctx.globalAlpha=1;
+        if(gs>0.8){{ ctx.font=Math.max(12/gs,3)+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillStyle=col; ctx.fillText(n.label,n.x,n.y+sz+2); }}
+      }})
+      .linkWidth(l=>l.is_orphan_link?0.3:Math.max(0.5,l.confidence*1.5))
+      .linkColor(linkColor)
+      .linkDirectionalArrowLength(6).linkDirectionalArrowRelPos(0.95)
+      .backgroundColor('#0f172a')
+      .onNodeClick(node=>nodeClickHandler(node, data))
+      .warmupTicks(50).cooldownTime(3000);
+    setTimeout(()=>{{ if(graphInstance) graphInstance.zoomToFit(400,40); }},800);
+  }} else {{
+    container.innerHTML='<div style="color:#64748b;text-align:center;padding:100px">Graph rendering unavailable.</div>';
   }}
-  graphInstance.linkWidth(l=>l.is_orphan_link?0.3:Math.max(0.5,l.confidence*1.5)).linkOpacity(0.6)
-    .linkColor(l=>{{ if(l.is_orphan_link)return'#888'; if(l.confidence>=0.8)return'#4ade80'; if(l.confidence>=0.5)return'#fbbf24'; if(l.confidence>=0.3)return'#fb923c'; return'#f87171'; }})
-    .linkDirectionalArrowLength(6).linkDirectionalArrowRelPos(0.95)
-    .linkDirectionalArrowColor(l=>{{ if(l.confidence>=0.8)return'#4ade80'; if(l.confidence>=0.5)return'#fbbf24'; if(l.confidence>=0.3)return'#fb923c'; return'#f87171'; }})
-    .backgroundColor('#0f172a').enableNodeDrag(true)
-    .onNodeClick(node=>{{
-      const edges=data.links.filter(l=>(l.source.id||l.source)===node.id||(l.target.id||l.target)===node.id);
-      let h='<b>'+node.label+'</b> ('+node.kind+')';
-      if(node.summary) h+='<br>'+node.summary;
-      if(node.tags&&node.tags.length) h+='<br><span style="color:#64748b">Tags: '+node.tags.join(', ')+'</span>';
-      if(edges.length){{ h+='<br><br><b>Connections:</b>';
-        edges.forEach(e=>{{ const o=(e.source.id||e.source)===node.id?(data.nodes.find(n=>n.id===(e.target.id||e.target))||{{}}).label||'?':(data.nodes.find(n=>n.id===(e.source.id||e.source))||{{}}).label||'?';
-          const c=Math.round(e.confidence*100); const cls=c>=80?'conf-high':c>=50?'conf-mid':c>=30?'conf-low':'conf-weak';
-          h+='<br>→ '+e.relation+' → '+o+' <span class="'+cls+'">'+c+'%</span>';
-          if(e.basis) h+=' <span style="color:#64748b">('+e.basis+')</span>';
-        }});
-      }}
-      h+='<br><br><button onclick="document.getElementById(\'info\').style.display=\'none\'" style="background:#334155;color:#e2e8f0;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px">Close</button>';
-      document.getElementById('info').innerHTML=h; document.getElementById('info').style.display='block';
-      const d=60,dr=1+d/Math.hypot(node.x,node.y,node.z);
-      graphInstance.cameraPosition({{x:node.x*dr,y:node.y*dr,z:node.z*dr}},{{x:node.x,y:node.y,z:node.z}},1500);
-    }});
 }}
 
 function searchNodes(q) {{
@@ -863,6 +904,7 @@ function searchNodes(q) {{
         three_js = THREE_JS,
         spritetext_js = SPRITETEXT_JS,
         forcegraph_js = FORCEGRAPH_JS,
+        forcegraph_2d_js = FORCEGRAPH_2D_JS,
     );
 
     std::fs::write(output_path, &html)?;
