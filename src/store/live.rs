@@ -70,7 +70,36 @@ impl LiveKnowledgeStore {
                 match std::fs::read(&cbor_path) {
                     Ok(bytes) => {
                         match ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&bytes[..]) {
-                            Ok(data) => {
+                            Ok(mut data) => {
+                                // Migration: if CBOR has no citations but JSON does, merge them in.
+                                let has_any_citations = data.edges.iter().any(|(_, _, e)| !e.citations.is_empty());
+                                if !has_any_citations && json_exists {
+                                    if let Ok(contents) = std::fs::read_to_string(&json_path) {
+                                        if let Ok(json_data) = serde_json::from_str::<crate::knowledge::GraphData>(&contents) {
+                                            let mut migrated = 0usize;
+                                            for (cbor_edge, json_edge) in data.edges.iter_mut().zip(json_data.edges.iter()) {
+                                                if cbor_edge.2.citations.is_empty() && !json_edge.2.citations.is_empty() {
+                                                    cbor_edge.2.citations = json_edge.2.citations.clone();
+                                                    migrated += 1;
+                                                }
+                                            }
+                                            if migrated > 0 {
+                                                log::info!("Migrated {} citations from JSON for graph '{}'", migrated, name);
+                                                // Persist immediately so we don't lose them.
+                                                let mut buf = Vec::new();
+                                                if ciborium::ser::into_writer(&data, &mut buf).is_ok() {
+                                                    use std::io::Write;
+                                                    let tmp = cbor_path.with_extension("cbor.tmp");
+                                                    if let Ok(mut f) = std::fs::File::create(&tmp) {
+                                                        if f.write_all(&buf).is_ok() && f.sync_all().is_ok() {
+                                                            let _ = std::fs::rename(&tmp, &cbor_path);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 let mut kg = KnowledgeGraph::empty(cbor_path);
                                 kg.load_from_data(&data);
                                 kg

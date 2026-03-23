@@ -1579,19 +1579,24 @@ async fn handle_web_command(
                     let cbor_path = path.with_extension("cbor");
                     if !cbor_path.exists() { continue; }
 
-                    // Compare edge counts: only remove JSON if CBOR has >= edges.
-                    let json_edges = std::fs::read_to_string(&path)
-                        .ok()
-                        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                        .and_then(|v| v.get("edges")?.as_array().map(|a| a.len()))
-                        .unwrap_or(0);
-                    let cbor_edges = std::fs::read(&cbor_path)
-                        .ok()
-                        .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok())
-                        .map(|d| d.edges.len())
+                    // Compare edge and citation counts: only remove JSON if CBOR has >= edges
+                    // and no citation data would be lost.
+                    let json_contents = std::fs::read_to_string(&path).ok();
+                    let json_data = json_contents.as_ref()
+                        .and_then(|c| serde_json::from_str::<crate::knowledge::GraphData>(c).ok());
+                    let json_edges = json_data.as_ref().map(|d| d.edges.len()).unwrap_or(0);
+                    let json_cited = json_data.as_ref()
+                        .map(|d| d.edges.iter().filter(|(_, _, e)| !e.citations.is_empty()).count())
                         .unwrap_or(0);
 
-                    if cbor_edges >= json_edges && cbor_edges > 0 {
+                    let cbor_data = std::fs::read(&cbor_path).ok()
+                        .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok());
+                    let cbor_edges = cbor_data.as_ref().map(|d| d.edges.len()).unwrap_or(0);
+                    let cbor_cited = cbor_data.as_ref()
+                        .map(|d| d.edges.iter().filter(|(_, _, e)| !e.citations.is_empty()).count())
+                        .unwrap_or(0);
+
+                    if cbor_edges >= json_edges && cbor_edges > 0 && cbor_cited >= json_cited {
                         let _ = std::fs::remove_file(&path);
                         json_removed += 1;
                         log::info!("Removed legacy JSON: {} (CBOR has {} edges, JSON had {})",
@@ -1603,20 +1608,22 @@ async fn handle_web_command(
             let meta_json = memory_dir.join("knowledge.json");
             let meta_cbor = memory_dir.join("knowledge.cbor");
             if meta_json.exists() && meta_cbor.exists() {
-                let json_edges = std::fs::read_to_string(&meta_json)
-                    .ok()
-                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                    .and_then(|v| v.get("edges")?.as_array().map(|a| a.len()))
+                let mj_data = std::fs::read_to_string(&meta_json).ok()
+                    .and_then(|c| serde_json::from_str::<crate::knowledge::GraphData>(&c).ok());
+                let mj_edges = mj_data.as_ref().map(|d| d.edges.len()).unwrap_or(0);
+                let mj_cited = mj_data.as_ref()
+                    .map(|d| d.edges.iter().filter(|(_, _, e)| !e.citations.is_empty()).count())
                     .unwrap_or(0);
-                let cbor_edges = std::fs::read(&meta_cbor)
-                    .ok()
-                    .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok())
-                    .map(|d| d.edges.len())
+                let mc_data = std::fs::read(&meta_cbor).ok()
+                    .and_then(|b| ciborium::de::from_reader::<crate::knowledge::GraphData, _>(&b[..]).ok());
+                let mc_edges = mc_data.as_ref().map(|d| d.edges.len()).unwrap_or(0);
+                let mc_cited = mc_data.as_ref()
+                    .map(|d| d.edges.iter().filter(|(_, _, e)| !e.citations.is_empty()).count())
                     .unwrap_or(0);
-                if cbor_edges >= json_edges && cbor_edges > 0 {
+                if mc_edges >= mj_edges && mc_edges > 0 && mc_cited >= mj_cited {
                     let _ = std::fs::remove_file(&meta_json);
                     json_removed += 1;
-                    log::info!("Removed legacy meta-graph JSON (CBOR has {} edges)", cbor_edges);
+                    log::info!("Removed legacy meta-graph JSON (CBOR has {} edges)", mc_edges);
                 }
             }
 
