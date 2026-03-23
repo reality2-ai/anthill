@@ -66,7 +66,7 @@ Competing hypotheses are grouped and forced to fight. When the ANT detects multi
 
 ### Beneficial Impact
 
-The fitness landscape is biased toward ideas that are good for people and the planet. Each conjecture carries a `beneficial_impact` score (-1.0 to 1.0). Beneficial ideas get an evolutionary advantage in relevance ranking — not censorship, but a fitness bias. Harmful ideas must work harder to survive.
+The fitness landscape is biased toward ideas that benefit people and the planet. Each conjecture carries a `beneficial_impact` score (-1.0 to 1.0). Ideas with positive impact get an evolutionary advantage in relevance ranking — not censorship, but a fitness bias. Ideas with negative impact must be stronger to survive.
 
 ### Anti-Confirmation Bias
 
@@ -203,7 +203,7 @@ anthill --qr-join                # show QR code — scan with phone to join
 - **Anti-confirmation bias** — evidence diversity ceiling, consecutive-confirmation dampening, bias detection warnings
 - **Fading foundations** — beliefs decay toward uncertainty without fresh evidence, by category-specific half-lives
 - **Reputation-weighted evidence** — source reliability modulates evidence strength via BF_adj = BF_base^(0.5+0.5r)
-- **Beneficial impact** — fitness landscape biased toward ideas good for people and planet
+- **Beneficial impact** — fitness landscape biased toward ideas that benefit people and planet
 - **Self-modification** — ANTs evolve their own thinking process through meta-rumination
 - **Rumination** — autonomous thinking: synthesis, refutation, competition, pattern transfer, citation consolidation, meta-cognition
 
