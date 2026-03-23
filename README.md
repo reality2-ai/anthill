@@ -293,28 +293,7 @@ The **web dashboard** carries all seven layers — use it for sensitive operatio
 
 ## How Anthill Compares
 
-| Capability | Anthill | OpenClaw / Manus | Goose | Aider | n8n |
-|---|---|---|---|---|---|
-| **Popperian reasoning** — conjecture and refutation | Yes — structural, in the math | No | No | No | No |
-| **Bayesian confidence** — log-odds with evidence types | 12 evidence types, Thurisaz engine | No | No | No | No |
-| **Darwinian competition** — ideas compete for survival | Yes — CompetitionWon/Lost evidence | No | No | No | No |
-| **Beneficial impact bias** — fitness advantage for good ideas | Yes — structural fitness modifier | No | No | No | No |
-| **Anti-confirmation bias** — diversity ceiling, dampening | Enforced in the math, not just prompts | No | No | No | No |
-| **Fading foundations** — chain confidence converges | Yes — Peijnenburg & Atkinson model | No | No | No | No |
-| **Self-modification** — evolves own thinking process | thinking_process.md + meta-rumination | No | No | No | No |
-| **Autonomous rumination** — thinks when idle | 10 rumination modes | No | No | No | No |
-| **Inter-ANT communication** — communities of practice | Real interaction, not just file reading | No | No | No | No |
-| **Knowledge graph** — Popperian with evidence trails | CBOR + git auto-commit | No | No | No | No |
-| **Git as cognitive architecture** — thought branches | Branches, diffs, semantic changelog | No | No | No | No |
-| **Multi-backend AI** — Claude, Codex, Ollama, Gemini | Automatic fallback chain | Some | No | Some | Via plugins |
-| **Multiple agents** — supervised with crash recovery | Supervisor with hot-add | No | No | No | Via workflows |
-| **Multi-channel** — Telegram, Slack, Web, MCP | All four + cross-channel sync | Web only | CLI only | CLI only | Various |
-| **Validated writes** — AI can't write invalid data | KnowledgeStore trait, MCP only | No validation | N/A | N/A | N/A |
-| **Trust group security** — Ed25519 + HMAC + XChaCha20 | 7-layer defence in depth | Exposed credentials | N/A | N/A | API keys |
-| **Self-hosted** — single binary, no cloud dependency | Yes — runs on your hardware | Cloud-dependent | Local | Local | Self-hosted |
-| **Open source** | AGPL-3.0 + Commercial | Partially open | Open | Open | Open |
-
-Most AI agent systems are sophisticated chat bots that accumulate knowledge by confirmation. Anthill is a reasoning engine where ideas earn their confidence through surviving genuine challenges.
+Each platform has genuine strengths. Anthill's niche is epistemological infrastructure — principled knowledge management with confidence tracking, citation provenance, and autonomous reasoning. Other platforms excel at breadth of integrations (OpenClaw), coding productivity (Claude Code, Aider), extensibility (Goose), or workflow automation (n8n). See [Comparison](docs/comparison.md) for a detailed, honest analysis.
 
 ---
 
