@@ -375,6 +375,17 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         ant_name, citation_instruction, guidance_text, raw_insights
     );
 
+    // Cap prompt size to avoid overwhelming the AI or hitting token limits.
+    // Keep the first 12000 chars of the prompt (instructions + key data),
+    // then truncate the raw data section if needed.
+    let max_prompt_chars = 12000;
+    let prompt = if prompt.len() > max_prompt_chars {
+        let truncated = &prompt[..prompt[..max_prompt_chars].rfind('\n').unwrap_or(max_prompt_chars)];
+        format!("{}\n\n[... data truncated for length — focus on the topics and beliefs shown above ...]", truncated)
+    } else {
+        prompt
+    };
+
     // Try claude CLI directly.
     let output = std::process::Command::new("claude")
         .args(["-p", "--max-turns", "1"])
@@ -541,7 +552,11 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
             Each source has a citation code in square brackets. Use these codes (e.g. [cite-a1b2c3d4]) \
             inline in your text wherever you make a claim supported by that source. \
             Every topic section must include at least one citation. ONLY use codes from this list.\n\n");
-        for cite in &insights.all_citations {
+        // Cap at 30 highest-quality citations to keep the prompt manageable.
+        let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
+        sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+        let cites_to_include = &sorted_cites[..sorted_cites.len().min(30)];
+        for cite in cites_to_include {
             raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
                 cite.cite_id,
                 if cite.title.is_empty() { &cite.url } else { &cite.title },
