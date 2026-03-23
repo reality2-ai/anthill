@@ -393,10 +393,9 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         raw_insights = raw_insights,
     );
 
-    // Cap prompt size to avoid overwhelming the AI or hitting token limits.
-    // Keep the first 12000 chars of the prompt (instructions + key data),
-    // then truncate the raw data section if needed.
-    let max_prompt_chars = 12000;
+    // Cap prompt size. Claude Code handles large prompts well, but very large
+    // ones can slow response or cause truncation. 30000 chars ~= 8000 tokens.
+    let max_prompt_chars = 30000;
     let prompt = if prompt.len() > max_prompt_chars {
         let truncated = &prompt[..prompt[..max_prompt_chars].rfind('\n').unwrap_or(max_prompt_chars)];
         format!("{}\n\n[... data truncated for length — focus on the topics and beliefs shown above ...]", truncated)
@@ -533,8 +532,33 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     let insights = compute_insights(all_data);
     let raw_insights_html = render_insights_html(&insights, ant_name, &snapshot_id);
 
-    // Try to get an AI-polished summary. Build plain text from the raw data.
+    // Build the raw text for the AI. Citations go FIRST so they're never truncated.
     let mut raw_text = format!("Knowledge summary for {}\n\n", ant_name);
+
+    // CITATIONS FIRST — these are the most important part for a referenced report.
+    if include_citations && !insights.all_citations.is_empty() {
+        raw_text.push_str("SOURCES AND REFERENCES — USE THESE IN YOUR TEXT.\n\
+            Each source below has a code like [cite-a1b2c3d4]. Place these codes in your text \
+            immediately after any claim that the source supports. For example:\n\
+            'The evidence suggests X [cite-a1b2c3d4] and this is consistent with Y [cite-b2c3d4e5].'\n\
+            Use as many as are relevant. Do not invent codes not on this list.\n\n");
+        let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
+        sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+        let cites_to_include = &sorted_cites[..sorted_cites.len().min(50)];
+        for cite in cites_to_include {
+            raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
+                cite.cite_id,
+                if cite.title.is_empty() { &cite.url } else { &cite.title },
+                if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
+                if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
+                cite.url,
+                cite.supports,
+            ));
+        }
+        raw_text.push('\n');
+    }
+
+    // Then the knowledge data.
     raw_text.push_str(&format!("Total: {} concepts, {} relationships, {:.0}% average confidence\n\n",
         insights.total_nodes, insights.total_edges, insights.avg_confidence * 100.0));
     for (name, nodes, edges, avg) in &insights.topic_summaries {
@@ -564,30 +588,6 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     for (label, summary) in insights.node_summaries.iter().take(15) {
         let short = if summary.len() > 200 { &summary[..200] } else { summary.as_str() };
         raw_text.push_str(&format!("  {}: {}\n", label, short));
-    }
-
-    // Include citations for the AI to reference.
-    // Use cite_id codes so we can post-process the AI output to renumber them.
-    if include_citations && !insights.all_citations.is_empty() {
-        raw_text.push_str("\n\nSOURCES AND REFERENCES — USE THESE IN YOUR TEXT.\n\
-            Each source below has a code like [cite-a1b2c3d4]. Place these codes in your text \
-            immediately after any claim that the source supports. For example:\n\
-            'The evidence suggests X [cite-a1b2c3d4] and this is consistent with Y [cite-b2c3d4e5].'\n\
-            Use as many as are relevant. Do not invent codes not on this list.\n\n");
-        // Cap at 30 highest-quality citations to keep the prompt manageable.
-        let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
-        sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
-        let cites_to_include = &sorted_cites[..sorted_cites.len().min(50)];
-        for cite in cites_to_include {
-            raw_text.push_str(&format!("  [{}] {} — {}{}{} (supports: {})\n",
-                cite.cite_id,
-                if cite.title.is_empty() { &cite.url } else { &cite.title },
-                if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
-                if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
-                cite.url,
-                cite.supports,
-            ));
-        }
     }
 
     // Ask AI to polish into readable prose.
