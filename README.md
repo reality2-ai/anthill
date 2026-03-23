@@ -17,6 +17,8 @@
 
 The strongest ideas are not the ones that go unchallenged — they are the ones that have been challenged from every angle and survived. A scientific theory that has withstood decades of attempts to disprove it is far more trustworthy than one that has simply been repeated many times. Diversity of thought is not a threat to strong ideas — it is what makes them strong. When an idea faces genuine adversity — scrutiny from different perspectives, contradiction from independent evidence, competition from rival explanations — and still stands, it has earned something that mere agreement can never provide: **confidence through resilience**.
 
+A strong idea is not necessarily a good one — strength means it has survived scrutiny, not that it is beneficial. History is full of strong ideas that caused harm. That is why Anthill separately tracks **beneficial impact** alongside confidence: an idea can be well-evidenced yet harmful, and the system should know the difference.
+
 But no idea is invulnerable. Even long-held, well-tested beliefs may eventually be refuted by new evidence. Humans naturally resist this — we have vested interests in the status quo, careers built on existing frameworks, institutions designed around current assumptions. Yet when a new idea survives enough genuine challenges from enough independent sources, it eventually displaces the old. This is a paradigm shift — not a sudden revolution, but the gradual accumulation of evidence that the world has moved on.
 
 Anthill is built on this principle. It has no vested interests, no ego, no attachment to its own beliefs. When the evidence says an idea is wrong, the idea weakens — automatically, structurally, without resistance.
