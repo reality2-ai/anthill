@@ -1651,17 +1651,26 @@ fn build_system_prompt(
 
     // Strict restriction on graph files — MCP tools only.
     prompt.push_str(
-        "CRITICAL RESTRICTION — KNOWLEDGE GRAPH FILES ARE READ-ONLY:\n\
+        "CRITICAL RESTRICTION — KNOWLEDGE GRAPH ACCESS:\n\
         You MUST NOT directly create, edit, or write to any file matching:\n\
           memory/knowledge.json, memory/knowledge.cbor\n\
-          memory/graphs/*.json, memory/graphs/*.cbor\n\
-        ALL knowledge graph modifications MUST go through the MCP tools:\n\
-          graph_add_node, graph_add_edge, graph_update_evidence,\n\
-          graph_strengthen, graph_weaken, graph_contradict\n\
-        If you edit graph files directly, your changes will be overwritten\n\
-        by the CBOR backend and you will lose your work.\n\
-        The MCP tools validate your input and maintain the Bayesian integrity\n\
-        of the knowledge store. Direct file editing bypasses all of this.\n\n"
+          memory/graphs/*.json, memory/graphs/*.cbor\n\n\
+        DO NOT use Python, jq, sed, or any script to read or modify graph files.\n\
+        DO NOT parse graph JSON/CBOR with code. The graph files are managed by the\n\
+        CBOR backend — direct edits are overwritten and lost.\n\n\
+        ALL knowledge graph operations MUST go through the MCP tools:\n\
+          graph_add_node       — add a concept\n\
+          graph_add_edge       — add a relationship\n\
+          graph_add_citation   — attach a source reference to an edge\n\
+          graph_update_evidence — add typed evidence (corroboration, refutation, etc.)\n\
+          graph_strengthen     — record survived refutation\n\
+          graph_weaken         — record inconsistency\n\
+          graph_contradict     — record failed refutation\n\
+          graph_query_about    — explore around an entity\n\
+          graph_query_uncertain — find low-confidence edges\n\
+          graph_list_nodes     — list all nodes in a graph\n\n\
+        These tools validate input, maintain Bayesian integrity, handle CBOR\n\
+        serialisation, and auto-commit to git. There is no reason to bypass them.\n\n"
     );
 
     // Fixed sections always included.
