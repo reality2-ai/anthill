@@ -804,26 +804,22 @@ fn run_citation_consolidation(
     if !has_citations_graph || uncited_edges > total_edges / 3 {
         let topics_list = topics_with_edges.join(", ");
         let prompt = format!(
-            "RUMINATION — CITATION CONSOLIDATION\n\n\
-             Your PRIMARY goal: ensure every edge in every topic graph has proper citations \
-             in its 'citations' field. Currently {} of {} edges lack citations.\n\n\
-             Read the citations graph (memory/graphs/citations.cbor or .json). \
-             If it doesn't exist yet, create it. Also read the topic graphs: {}.\n\n\
-             STEP 1 — Build/update the citations graph:\n\
-             1. Scan all topic graph edges for their 'citations' field\n\
-             2. For each unique citation source, ensure a node exists in the citations graph\n\
-             3. For '?' edges, resolve them: check url/title, fetch if needed, update relation\n\
-             4. Update the citations graph\n\n\
-             STEP 2 — Link citations to ALL topic graph edges (MOST IMPORTANT):\n\
-             1. For EACH topic graph, read EVERY edge\n\
-             2. For edges with NO citations, add them:\n\
-                {{\"cite_id\": \"cite-<8hex>\", \"url\": \"...\", \"title\": \"...\", \
-                \"ref_type\": \"peer_reviewed|official_report|book|news|blog|website|personal|ant_knowledge|ai_inference\", \
-                \"quality\": 0.0-1.0}}\n\
-             3. For web-sourced edges, use the source URL as the citation\n\
-             4. For AI-inferred edges, use ref_type 'ai_inference'\n\
-             5. Do NOT fabricate citations — but DO add ai_inference citations for your own reasoning\n\
-             6. WRITE ALL updated topic graph files — every graph must be saved{}",
+            "RUMINATION — CITATION ANALYSIS\n\n\
+             Currently {} of {} edges lack citations. Topic graphs: {}.\n\n\
+             1. For each citation in the citations graph that has a URL:\n\
+                - Check files/ first, otherwise fetch and save to files/\n\
+                - Extract the TOP 3 CORE IDEAS from the source content\n\
+                - Store as the node summary: 'Core ideas: (1) ... (2) ... (3) ...'\n\
+                - Check what the source itself CITES — follow upstream to find\n\
+                  more authoritative sources (peer-reviewed papers, official reports)\n\
+             2. Compare core ideas across citations:\n\
+                - Add 'corroborates' edges between citations with overlapping ideas\n\
+                - Add 'cites' edges when one source references another\n\
+                - Identify CORE CITATIONS that others reference — tag as 'core_source'\n\
+             3. Link citations to topic graph edges using graph_add_citation:\n\
+                - Match by core ideas, prefer core/upstream sources\n\
+                - For edges with only ai_inference, search for real sources\n\
+             4. WRITE ALL updated graph files{}",
             uncited_edges, total_edges, topics_list, RUMINATION_STOP_DIRECTIVE
         );
 

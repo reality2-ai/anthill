@@ -1767,24 +1767,21 @@ async fn handle_web_command(
                       3. Look for edges that should exist based on what you know\n\
                       4. Add any new conjectures with appropriate basis and confidence\n\
                       5. Update the topic graph files"),
-                    ("RUMINATION — CITATION CONSOLIDATION",
-                     "Your PRIMARY goal: ensure every edge in every topic graph has proper citations.\n\n\
-                      Read the citations graph (memory/graphs/citations.cbor or .json). \
-                      If it doesn't exist, create it. Also read ALL topic graphs in memory/graphs/.\n\n\
-                      STEP 1 — Build/update the citations graph:\n\
-                      1. Scan all topic graph edges for their 'citations' field\n\
-                      2. For each unique citation source, ensure a node exists in the citations graph\n\
-                      3. For '?' edges, resolve them: check url/title, fetch if needed, update relation\n\
-                      4. Update the citations graph\n\n\
-                      STEP 2 — Link citations to ALL topic graph edges (MOST IMPORTANT):\n\
-                      1. For EACH topic graph, read EVERY edge\n\
-                      2. For edges with NO citations, add them: \
-                         {\"cite_id\": \"cite-<8hex>\", \"url\": \"...\", \"title\": \"...\", \
-                         \"ref_type\": \"...\", \"quality\": 0.0-1.0}\n\
-                      3. For web-sourced edges, use the source URL\n\
-                      4. For AI-inferred edges, use ref_type 'ai_inference'\n\
-                      5. Do NOT fabricate citations — but DO add ai_inference for your own reasoning\n\
-                      6. WRITE ALL updated topic graph files"),
+                    ("RUMINATION — CITATION ANALYSIS",
+                     "Analyse and strengthen the citation network.\n\n\
+                      Read the citations graph and ALL topic graphs.\n\n\
+                      1. For each citation with a URL, fetch it (check files/ first) and extract\n\
+                         the TOP 3 CORE IDEAS. Store as the node summary.\n\
+                      2. Check what each source itself CITES — follow references upstream to find\n\
+                         more authoritative sources (peer-reviewed papers, official reports).\n\
+                      3. Add 'corroborates' edges between citations with overlapping core ideas.\n\
+                         Add 'contradicts' edges between those that disagree.\n\
+                         Add 'cites' edges when one source references another.\n\
+                      4. Identify CORE CITATIONS — sources many others reference. Tag as 'core_source'.\n\
+                      5. Link citations to topic graph edges using graph_add_citation.\n\
+                         Match by core ideas, prefer core sources over derivative ones.\n\
+                      6. For edges with only ai_inference citations, search for real sources.\n\
+                      7. WRITE ALL updated graph files."),
                 ];
 
                 for (title, body) in tasks {
@@ -1818,32 +1815,38 @@ async fn handle_web_command(
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .subsec_nanos();
-                let prompt = "RUMINATION — CITATION CONSOLIDATION\n\n\
-                     Your PRIMARY goal: ensure every edge in every topic graph has proper citations \
-                     in its 'citations' field. Citations are MANDATORY for well-evidenced knowledge.\n\n\
+                let prompt = "CITATION ANALYSIS AND CONSOLIDATION\n\n\
                      Read the citations graph (memory/graphs/citations.cbor or .json). \
                      If it doesn't exist, create it. Also read ALL topic graphs in memory/graphs/.\n\n\
-                     STEP 1 — Build/update the citations graph:\n\
-                     1. Scan all topic graph edges for their 'citations' field\n\
-                     2. For each unique citation source, ensure a node exists in the citations graph\n\
-                     3. For '?' edges in the citations graph, resolve them:\n\
-                        a. Check the citation's url, title, and snippet\n\
-                        b. If URL exists: check files/ first, else fetch and save to files/\n\
-                        c. Replace '?' with a description of what the citation is about\n\
-                     4. Update the citations graph\n\n\
-                     STEP 2 — Link citations to topic graph edges (THIS IS THE MOST IMPORTANT STEP):\n\
-                     1. For EACH topic graph, read EVERY edge\n\
-                     2. For edges that have NO citations or incomplete citations, add them:\n\
-                        {\"cite_id\": \"cite-<8hex>\", \"url\": \"...\", \"title\": \"...\", \
-                        \"ref_type\": \"peer_reviewed|official_report|book|news|blog|website|personal|ant_knowledge|ai_inference\", \
-                        \"quality\": 0.0-1.0}\n\
-                     3. For edges based on web sources, use the source URL as the citation\n\
-                     4. For edges based on AI inference, use ref_type 'ai_inference'\n\
-                     5. Do NOT fabricate citations — but DO add ai_inference citations for edges \
-                        that came from your own reasoning\n\
-                     6. WRITE the updated topic graph files — every graph must be saved\n\n\
-                     IMPORTANT: Complete this specific task, update ALL graph files, \
-                     output a brief summary of what you changed (how many citations added), and STOP. \
+                     STEP 1 — Deep analysis of each citation source:\n\
+                     For each citation node in the citations graph:\n\
+                     1. If it has a URL: check files/ first, otherwise fetch and save to files/\n\
+                     2. Read the actual content of the source\n\
+                     3. Extract the TOP 3 CORE IDEAS from the source — the key claims or findings\n\
+                     4. Store these as the node's summary in the format:\n\
+                        'Core ideas: (1) ... (2) ... (3) ...'\n\
+                     5. Check what REFERENCES the source itself cites — look at its bibliography,\n\
+                        footnotes, or links to other works. These upstream sources may be more\n\
+                        authoritative than the source itself.\n\
+                     6. If you find important upstream references, add them as new citation nodes\n\
+                        and fetch them too. Prefer peer-reviewed papers and official reports.\n\n\
+                     STEP 2 — Find citation clusters and core sources:\n\
+                     1. Compare core ideas across citations — which sources say similar things?\n\
+                     2. Add 'corroborates' edges between citations that support the same ideas\n\
+                     3. Add 'contradicts' edges between citations that disagree\n\
+                     4. Add 'cites' edges when one source references another\n\
+                     5. Identify CORE CITATIONS — sources that many others reference or that\n\
+                        originated key ideas. Tag these with 'core_source' in their tags.\n\
+                     6. Core sources should have higher quality scores.\n\n\
+                     STEP 3 — Link citations to topic graph edges:\n\
+                     1. Using the core ideas extracted in Step 1, match citations to edges\n\
+                     2. A citation supports an edge when its core ideas align with the claim\n\
+                     3. Use graph_add_citation to attach citations to edges\n\
+                     4. Prefer core citations over derivative ones\n\
+                     5. For edges with only ai_inference citations, try to find real sources\n\
+                     6. WRITE ALL updated graph files\n\n\
+                     IMPORTANT: Complete this task, update ALL graph files, \
+                     output a summary of what you found (core sources, clusters, citations added), and STOP. \
                      Do not ask follow-up questions.".to_string();
                 let _ = handle.request_tx.send(crate::ai_worker::CliRequest {
                     chat_id,
