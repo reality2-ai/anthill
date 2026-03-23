@@ -211,6 +211,10 @@ pub trait KnowledgeStore: Send + Sync {
         citation: crate::knowledge::Reference,
     ) -> StoreResult<()>;
 
+    /// Extract misplaced nodes from the meta-graph (non-topic nodes) and relocate
+    /// them to a holding topic graph. Returns number of nodes relocated.
+    fn extract_misplaced_meta_nodes(&self) -> StoreResult<usize>;
+
     /// List orphan nodes (nodes with only '?' connections).
     fn list_orphans(&self, graph: &str) -> StoreResult<Vec<String>>;
 

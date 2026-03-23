@@ -1047,6 +1047,13 @@ fn run_consolidation(config: &MaintenanceConfig) {
     let store = crate::store::live::LiveKnowledgeStore::new(config.memory_dir.clone());
 
     // Consolidate meta-graph.
+    // First, extract misplaced nodes (non-topic nodes that don't belong in meta).
+    if let Ok(relocated) = store.extract_misplaced_meta_nodes() {
+        if relocated > 0 {
+            log::info!("[{}] Relocated {} misplaced nodes from meta-graph to 'uncategorised' graph",
+                config.ant_name, relocated);
+        }
+    }
     if let Ok(report) = store.consolidate("meta") {
         let _ = store.backfill_thurisaz("meta");
         let _ = store.link_orphans("meta");

@@ -453,6 +453,34 @@ impl KnowledgeStore for LiveKnowledgeStore {
         })
     }
 
+    fn extract_misplaced_meta_nodes(&self) -> StoreResult<usize> {
+        // Extract non-topic nodes from the meta-graph.
+        let misplaced = self.with_graph_mut("meta", |kg| {
+            Ok(kg.extract_misplaced_meta_nodes())
+        })?;
+
+        if misplaced.is_empty() {
+            return Ok(0);
+        }
+
+        let count = misplaced.len();
+
+        // Relocate misplaced nodes to a holding graph called "uncategorised".
+        // They can be moved to proper topic graphs by the AI during rumination.
+        self.with_graph_mut("uncategorised", |kg| {
+            for (node, _edges) in &misplaced {
+                // Check if a node with this label already exists.
+                if kg.find_by_label(&node.label).is_none() {
+                    kg.graph.add_node(node.clone());
+                }
+            }
+            Ok(())
+        })?;
+
+        log::info!("Relocated {} misplaced nodes from meta-graph to 'uncategorised'", count);
+        Ok(count)
+    }
+
     // ── Queries ──
 
     fn query_about(&self, graph: &str, entity: &str, depth: usize) -> StoreResult<QueryResult> {

@@ -1702,6 +1702,36 @@ impl KnowledgeGraph {
         }
     }
 
+    /// Collect misplaced nodes from the meta-graph — nodes that aren't topic/hub/graph nodes.
+    /// Returns (label, kind, summary, tags, edges) for each misplaced node, then removes them.
+    /// The caller should relocate these to appropriate topic graphs.
+    pub fn extract_misplaced_meta_nodes(&mut self) -> Vec<(KnowledgeNode, Vec<KnowledgeEdge>)> {
+        let mut misplaced = Vec::new();
+        let to_remove: Vec<NodeIndex> = self.graph.node_indices()
+            .filter(|&idx| {
+                let node = &self.graph[idx];
+                let is_topic = node.tags.iter().any(|t| t == "topic" || t == "graph" || t == "hub");
+                !is_topic
+            })
+            .collect();
+
+        for idx in &to_remove {
+            let node = self.graph[*idx].clone();
+            let edges: Vec<KnowledgeEdge> = self.graph.edges(*idx)
+                .map(|e| e.weight().clone())
+                .collect();
+            misplaced.push((node, edges));
+        }
+
+        // Remove misplaced nodes (and their edges) from the graph.
+        // Remove in reverse order to avoid index invalidation.
+        for idx in to_remove.into_iter().rev() {
+            self.graph.remove_node(idx);
+        }
+
+        misplaced
+    }
+
     pub fn link_orphans(&mut self, graph_name: &str) {
         // Find or create the hub node.
         let hub_idx = self.find_by_label(graph_name).unwrap_or_else(|| {
