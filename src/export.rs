@@ -352,10 +352,15 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>) -> String {
     let has_citations = raw_insights.contains("[cite-");
     let citation_instruction = if has_citations {
-        "\n\nCITATIONS: A list of sources with citation codes like [cite-xxxx] is provided \
-         at the end of the data. Cite these sources inline using their codes in square brackets \
-         wherever a claim is supported. The codes will be renumbered to [1], [2] etc. automatically. \
-         ONLY use codes from the list — never fabricate one."
+        "\n\nCITATIONS ARE MANDATORY. A list of sources with [cite-xxxx] codes is provided at the \
+         end of the data. You MUST cite these sources throughout your text:\n\
+         - Use [cite-xxxx] codes inline wherever a claim, fact, or finding is supported\n\
+         - EVERY paragraph should have at least one citation where possible\n\
+         - EVERY section heading should be followed by cited evidence\n\
+         - Aim to use as many of the provided citations as are relevant\n\
+         - The codes will be renumbered to [1], [2] etc. automatically\n\
+         - ONLY use codes from the provided list — never fabricate one\n\
+         - If a claim has no supporting citation, state it without a reference"
     } else { "" };
 
     // The user's guidance is the primary prompt. If none provided, use a sensible default.
