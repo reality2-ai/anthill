@@ -269,55 +269,64 @@ fn run_undetermined_connections(
 ) {
     let mut sent = 0u32;
 
+    // Collect all undetermined connections across all topics.
+    let mut all_undetermined: Vec<(String, String, String)> = Vec::new();
     for topic in filtered_topics(config, store) {
-        let undetermined = match store.undetermined_connections(&topic, 3) {
+        let undetermined = match store.undetermined_connections(&topic, 10) {
             Ok(u) => u,
             Err(_) => continue,
         };
-
-        for (from, to) in &undetermined {
-            let prompt = format!(
-                "RUMINATION — UNDETERMINED CONNECTION\n\n\
-                 In the topic graph 'memory/graphs/{}.json', there is a '?' connection \
-                 between '{}' and '{}'. This means these entities are in the graph but \
-                 their relationship hasn't been established yet.\n\n\
-                 Your task:\n\
-                 1. Consider what relationship might exist between '{}' and '{}'\n\
-                 2. Look at their other connections in the graph for clues\n\
-                 3. If you can determine a relationship:\n\
-                    - Replace the '?' edge with a proper relation name\n\
-                    - Set basis to 'inferred', confidence based on how certain you are\n\
-                    - Add an evidence_log entry explaining your reasoning\n\
-                 4. If you cannot determine a relationship:\n\
-                    - Leave it as '?' — don't make something up\n\
-                    - Consider adding a question to memory/questions.json for the human\n\
-                 5. Update the topic graph file{}",
-                topic, from, to, from, to, RUMINATION_STOP_DIRECTIVE
-            );
-
-            let _ = request_tx.send(CliRequest {
-                chat_id: RUMINATION_CHAT_ID,
-                message: prompt,
-                new_session: true,
-                task_id: 0,
-                source: "rumination".into(),
-            });
-
-            log.append(RuminationEntry {
-                timestamp: chrono_now(),
-                kind: "undetermined".into(),
-                topic: topic.clone(),
-                description: format!("Investigating '?' connection: {} ↔ {}", from, to),
-                edges_created: 0,
-                edges_updated: 0,
-            }, &config.memory_dir);
-
-            sent += 1;
-            if sent >= 2 { break; }
+        for (from, to) in undetermined {
+            all_undetermined.push((topic.clone(), from, to));
         }
-
-        if sent >= 2 { break; }
     }
+
+    if all_undetermined.is_empty() { return; }
+
+    // Batch multiple ? edges into a single prompt for efficiency.
+    let batch_size = all_undetermined.len().min(8);
+    let batch = &all_undetermined[..batch_size];
+
+    let mut edge_list = String::new();
+    for (topic, from, to) in batch {
+        edge_list.push_str(&format!("  - '{}' ↔ '{}' (in {})\n", from, to, topic));
+    }
+
+    let prompt = format!(
+        "RUMINATION — UNDETERMINED CONNECTIONS\n\n\
+         The following {} connections have relation '?' — they exist in the graph but \
+         their relationship hasn't been established:\n\n{}\n\
+         For EACH connection:\n\
+         1. Search the web or your knowledge for how these concepts relate\n\
+         2. Look at their other connections in the graph for context\n\
+         3. If you can determine a relationship:\n\
+            - Replace the '?' edge with a proper relation name\n\
+            - Set basis to 'inferred' or 'observed' (if you found a source)\n\
+            - Add a citation if you found an external source\n\
+         4. If they genuinely don't relate, REMOVE the '?' edge entirely —\n\
+            don't leave meaningless connections cluttering the graph\n\
+         5. Update all affected topic graph files{}",
+        batch_size, edge_list, RUMINATION_STOP_DIRECTIVE
+    );
+
+    let _ = request_tx.send(CliRequest {
+        chat_id: RUMINATION_CHAT_ID,
+        message: prompt,
+        new_session: true,
+        task_id: 0,
+        source: "rumination".into(),
+    });
+
+    log.append(RuminationEntry {
+        timestamp: chrono_now(),
+        kind: "undetermined".into(),
+        topic: "multiple".into(),
+        description: format!("Investigating {} undetermined connections", batch_size),
+        edges_created: 0,
+        edges_updated: 0,
+    }, &config.memory_dir);
+
+    sent = batch_size as u32;
 }
 
 // ── Darwinian Competition ───────────────────────────────────────────
