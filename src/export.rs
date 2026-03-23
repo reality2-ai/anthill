@@ -352,15 +352,20 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>) -> String {
     let has_citations = raw_insights.contains("[cite-");
     let citation_instruction = if has_citations {
-        "\n\nCITATIONS ARE MANDATORY. A list of sources with [cite-xxxx] codes is provided at the \
-         end of the data. You MUST cite these sources throughout your text:\n\
-         - Use [cite-xxxx] codes inline wherever a claim, fact, or finding is supported\n\
-         - EVERY paragraph should have at least one citation where possible\n\
-         - EVERY section heading should be followed by cited evidence\n\
-         - Aim to use as many of the provided citations as are relevant\n\
-         - The codes will be renumbered to [1], [2] etc. automatically\n\
-         - ONLY use codes from the provided list — never fabricate one\n\
-         - If a claim has no supporting citation, state it without a reference"
+        "\n\nCITATIONS ARE MANDATORY.\n\
+         At the end of the data you will find a SOURCES AND REFERENCES section listing \
+         citation codes like [cite-a1b2c3d4]. You MUST use these codes inline in your text.\n\n\
+         HOW TO CITE:\n\
+         - Write a claim, then put the citation code immediately after it in square brackets.\n\
+         - Example: 'Research has shown that early intervention significantly improves outcomes [cite-a1b2c3d4].'\n\
+         - Example: 'According to recent analysis [cite-f5e6d7c8], the trend is accelerating.'\n\
+         - You can cite multiple sources: 'This finding is well-supported [cite-a1b2c3d4] [cite-b2c3d4e5].'\n\n\
+         RULES:\n\
+         - EVERY paragraph MUST have at least one citation where a relevant source exists.\n\
+         - Use as MANY of the provided citations as are relevant — don't just pick a few.\n\
+         - The [cite-xxxx] codes will be automatically renumbered to [1], [2], etc.\n\
+         - ONLY use codes from the provided list — NEVER invent a citation code.\n\
+         - If a claim genuinely has no supporting source, state it without a citation."
     } else { "" };
 
     // The user's guidance is the primary prompt. If none provided, use a sensible default.
@@ -563,10 +568,11 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     // Include citations for the AI to reference.
     // Use cite_id codes so we can post-process the AI output to renumber them.
     if include_citations && !insights.all_citations.is_empty() {
-        raw_text.push_str("\n\nSOURCES AND REFERENCES — YOU MUST CITE THESE IN YOUR TEXT.\n\
-            Each source has a citation code in square brackets. Use these codes (e.g. [cite-a1b2c3d4]) \
-            inline in your text wherever you make a claim supported by that source. \
-            Every topic section must include at least one citation. ONLY use codes from this list.\n\n");
+        raw_text.push_str("\n\nSOURCES AND REFERENCES — USE THESE IN YOUR TEXT.\n\
+            Each source below has a code like [cite-a1b2c3d4]. Place these codes in your text \
+            immediately after any claim that the source supports. For example:\n\
+            'The evidence suggests X [cite-a1b2c3d4] and this is consistent with Y [cite-b2c3d4e5].'\n\
+            Use as many as are relevant. Do not invent codes not on this list.\n\n");
         // Cap at 30 highest-quality citations to keep the prompt manageable.
         let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
         sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
