@@ -27,6 +27,9 @@ Anthill is built on [Reality2 (R2)](https://github.com/reality2-ai/r2-specificat
 ### Export
 7. [ANTHILL-EXPORT](ANTHILL-EXPORT.md) — Knowledge export: self-contained HTML reports with AI insights and citations
 
+### Conformance
+8. [R2-CONFORMANCE](R2-CONFORMANCE.md) — Reality2 specification conformance analysis
+
 ## Specification Confidence
 
 How well-tested and stable is each area? Confidence grows through implementation, testing, and surviving real-world use — not through assertion.
