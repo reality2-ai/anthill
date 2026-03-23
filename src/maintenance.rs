@@ -560,9 +560,12 @@ fn run_refutation(
              Your task — ATTEMPT TO REFUTE THIS BELIEF WITH EXTERNAL EVIDENCE:\n\n\
              STEP 1 — Search for counter-evidence OUTSIDE the knowledge graph:\n\
              - Use web search to find sources that CONTRADICT or CHALLENGE this claim\n\
-             - Look for recent research, news, or expert opinions that disagree\n\
+             - PRIORITISE high-quality sources: peer-reviewed papers, official reports,\n\
+               authoritative books. These carry more weight than blog posts or opinions.\n\
+             - Look for recent research, expert analysis, or data that disagrees\n\
              - Search for exceptions, edge cases, or contexts where this doesn't hold\n\
-             - If you find a relevant source, fetch it and read it\n\
+             - If you find a relevant source, fetch it and read the actual content —\n\
+               what matters is the IDEAS within the source and whether they hold up\n\
              - Save useful sources to files/ for future reference\n\n\
              STEP 2 — Also check WITHIN the knowledge graph:\n\
              - Look for inconsistencies with other beliefs\n\
