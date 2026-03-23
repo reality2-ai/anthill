@@ -13,6 +13,12 @@
 
 ---
 
+## Building Stronger Ideas
+
+The strongest ideas are not the ones that go unchallenged — they are the ones that have been challenged from every angle and survived. A scientific theory that has withstood decades of attempts to disprove it is far more trustworthy than one that has simply been repeated many times. Diversity of thought is not a threat to good ideas — it is what makes them good. When an idea faces genuine adversity — scrutiny from different perspectives, contradiction from independent evidence, competition from rival explanations — and still stands, it has earned something that mere agreement can never provide: **confidence through resilience**.
+
+This is the principle behind Anthill.
+
 ## What is Anthill?
 
 Anthill is a **reasoning engine** — a system where ideas compete for survival.
