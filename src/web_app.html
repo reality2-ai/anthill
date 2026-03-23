@@ -1146,11 +1146,6 @@ async function exportGraph(mode) {
       const msg = 'Knowledge graph exported as: ' + filename + '\n\nOpen the downloaded file in your browser to explore the 3D graph.';
       alert(msg);
     }, 500);
-    // Show GitHub gist URL if published.
-    const gistUrl = resp.headers.get('X-Gist-Url');
-    if (gistUrl) {
-      setTimeout(() => alert('Also published to GitHub!\n\n' + gistUrl), 500);
-    }
   } catch (e) {
     alert('Export error: ' + e.message);
   } finally {

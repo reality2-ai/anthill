@@ -566,31 +566,17 @@ async fn export_graph(
     };
     match export_result {
         Ok(()) => {
-            // Try to publish to GitHub if gh is available.
-            let gist_url = crate::export::publish_to_github(&tmp_path, &display_name).ok();
-            if let Some(ref url) = gist_url {
-                log::info!("[{}] Knowledge snapshot published to GitHub: {}", id, url);
-            }
-
             match std::fs::read(&tmp_path) {
                 Ok(html_bytes) => {
                     let _ = std::fs::remove_file(&tmp_path);
-                    let mut response = (
+                    (
                         StatusCode::OK,
                         [
                             ("Content-Type", "text/html; charset=utf-8"),
                             ("Content-Disposition", &format!("attachment; filename=\"{}\"", filename)),
                         ],
                         html_bytes,
-                    ).into_response();
-                    // Add gist URL as header if published.
-                    if let Some(url) = gist_url {
-                        response.headers_mut().insert(
-                            "X-Gist-Url",
-                            url.parse().unwrap_or_else(|_| "".parse().unwrap()),
-                        );
-                    }
-                    response
+                    ).into_response()
                 }
                 Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Read error: {}", e)).into_response(),
             }
