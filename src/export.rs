@@ -709,7 +709,7 @@ a {{ color: #60a5fa; }}
   <span class="subtitle">Knowledge Snapshot — {timestamp}</span>
   <div id="tabs">
     <button class="active" onclick="showTab('insights')">Insights</button>
-    <button onclick="showTab('graph')">Graph</button>
+    <button onclick="showTab('graph')">{graph_tab_label}</button>
   </div>
   <select id="selector" onchange="loadGraph(this.value)"></select>
   <input id="search" type="text" placeholder="Search nodes..." oninput="searchNodes(this.value)">
@@ -844,6 +844,7 @@ function searchNodes(q) {{
         insights_html = insights_html,
         graphs_json = graphs_json,
         version = env!("CARGO_PKG_VERSION"),
+        graph_tab_label = if all_data.len() > 1 { "Graphs" } else { "Graph" },
         three_js = THREE_JS,
         spritetext_js = SPRITETEXT_JS,
         forcegraph_js = FORCEGRAPH_JS,

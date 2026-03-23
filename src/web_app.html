@@ -1180,6 +1180,9 @@ async function loadGraph(graphName) {
       selector.innerHTML = data.available_graphs.map(g =>
         `<option value="${g}" ${g === currentVal ? 'selected' : ''}>${g === 'meta' ? 'Meta-graph (index)' : g}</option>`
       ).join('');
+      // Update tab label: "Graph" for single, "Graphs" for multiple.
+      const tabBtn = document.getElementById('tab-graph');
+      if (tabBtn) tabBtn.textContent = data.available_graphs.length > 1 ? 'Graphs' : 'Graph';
     }
 
     if (!data.nodes || data.nodes.length === 0) {
@@ -1388,13 +1391,12 @@ async function loadGraph(graphName) {
       .distance(l => l.is_orphan_link ? 120 : 60)    // orphans drift far out
       .strength(l => l.is_orphan_link ? 0.05 : 0.8);  // barely held
 
-    // After warmup ticks complete, zoom to fit so camera isn't inside the graph.
-    let initialFitDone = false;
+    // After warmup + a short settle, smoothly zoom out to show the entire graph.
+    setTimeout(() => {
+      if (graphInstance) graphInstance.zoomToFit(800, 60);
+    }, 500);
+
     graphInstance.onEngineTick(() => {
-      if (!initialFitDone) {
-        graphInstance.zoomToFit(0, 80);
-        initialFitDone = true;
-      }
       const t = Date.now() * 0.001;
       for (const n of data.nodes) {
         const tb = tumble[n.id];
@@ -1624,6 +1626,9 @@ function selectBot(id) {
   document.getElementById('bot-title').textContent = bot ? bot.name : id;
   document.getElementById('tab-bar').style.display = 'flex';
   document.getElementById('no-bot').style.display = 'none';
+  // Reset graph selector so the new bot loads its own graphs.
+  const selector = document.getElementById('graph-selector');
+  if (selector) selector.innerHTML = '';
   // Reset to chat tab.
   switchTab('chat');
   document.getElementById('input').focus();
