@@ -976,7 +976,7 @@ pub async fn ai_worker_loop(
         let etx = event_tx.clone();
         let bname = Arc::clone(&bot_name);
         let rq_tx = request_tx.clone();
-        let timeout_secs = if config.worker_timeout_secs > 0 { config.worker_timeout_secs } else { 600 };
+        let _timeout_secs = if config.worker_timeout_secs > 0 { config.worker_timeout_secs } else { 600 };
 
         // Broadcast user message (for history and cross-device sync).
         // Skip for rumination — autonomous thinking is not user-facing.

@@ -4,10 +4,12 @@
 //!   anthill --config bot.toml              # single bot
 //!   anthill --supervise ~/.config/anthill # multi-bot + web dashboard
 
+#[allow(dead_code)]
 mod ai_backends;
 mod backup;
 mod bot;
 mod ai_worker;
+#[allow(dead_code)]
 mod backends;
 mod config;
 mod dateutil;
@@ -26,6 +28,7 @@ mod specgen;
 mod plugins;
 mod registry;
 mod sentants;
+#[allow(dead_code)]
 mod relay;
 mod trust;
 mod supervisor;
