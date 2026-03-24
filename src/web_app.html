@@ -369,8 +369,17 @@
       z-index: 100;
       transition: left 0.2s;
     }
-
     #sidebar.open { left: 0; }
+
+    /* Backdrop overlay when sidebar is open */
+    #sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 99;
+    }
+    #sidebar-backdrop.visible { display: block; }
 
     #menu-btn {
       display: block !important;
@@ -379,13 +388,32 @@
       color: var(--text);
       font-size: 24px;
       cursor: pointer;
+      padding: 8px;
+      min-width: 44px;
+      min-height: 44px;
     }
 
     .msg { max-width: 95%; }
+
+    /* Config modal: less padding on mobile */
+    .config-inner { padding: 16px !important; }
+
+    /* Tabs: smaller on mobile */
+    .tab { padding: 6px 10px; font-size: 12px; }
+
+    /* Tasks panel: full width */
+    #tasks-panel { font-size: 12px; }
+
+    /* Graph legend: hidden on very small screens */
+    #graph-legend { display: none; }
+
+    /* Touch targets: minimum 44px */
+    .task-cancel, .file-delete, .copy-btn { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
   }
 
   @media (min-width: 769px) {
     #menu-btn { display: none; }
+    #sidebar-backdrop { display: none !important; }
   }
 
   /* Form fields */
@@ -490,6 +518,7 @@
   </div>
 </div>
 
+<div id="sidebar-backdrop" onclick="closeSidebar()"></div>
 <div id="app-container" style="display:none;width:100%;height:100%">
 
 <div id="sidebar">
@@ -581,7 +610,7 @@
 
 <!-- Settings modal -->
 <div id="config-modal" style="display:none;position:fixed;inset:0;background:var(--overlay);z-index:200;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto">
+  <div class="config-inner" style="background:var(--surface);border-radius:12px;padding:24px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto">
     <h2 style="margin-bottom:16px" id="config-title">Settings</h2>
 
     <div class="field">
@@ -589,46 +618,26 @@
       <input id="c-name" class="field-input">
     </div>
 
-    <h3 class="section-title">AI Backend Strategy</h3>
+    <h3 class="section-title">AI Engine</h3>
     <div class="field">
-      <select id="c-backend-strategy" class="field-input" style="margin-bottom:8px" onchange="updateBackendVisibility()">
-        <option value="cost_optimized">Cost Optimized — prefer local models (Ollama, DeepSeek)</option>
-        <option value="capability_optimized">Capability Optimized — prefer Claude, Grok</option>
-        <option value="speed_optimized">Speed Optimized — prefer fastest models</option>
-        <option value="balanced">Balanced — mix of cost and capability</option>
-        <option value="reliability_optimized">Reliability Optimized — prioritize success rate</option>
-        <option value="manual">Manual — specify exact backend order</option>
+      <select id="c-ai-category" class="field-input" style="margin-bottom:8px;cursor:pointer" onchange="updateBackendVisibility()">
+        <option value="balanced">Balanced — good mix of speed, cost, and quality</option>
+        <option value="intellectual">Intellectual — best reasoning / most capable</option>
+        <option value="fast">Fast — fastest response time</option>
+        <option value="cost_effective">Cost-effective — prefer local and cheap models</option>
+        <option value="local">Local only — no data leaves the machine</option>
+        <option value="specialized:coding">Specialized: Coding</option>
+        <option value="manual">Manual — specify exact backend order below</option>
       </select>
-      <div style="font-size:11px;color:var(--text-dim)">
-        Strategy determines which AI backend to use based on task type and priorities.
-        <a href="https://github.com/reality2-ai/anthill/blob/main/docs/prerequisites.md#2-ai-backend-at-least-one" style="color:var(--accent)" target="_blank">How to install AI backends</a>
+      <div style="font-size:12px;color:var(--text-dim)">
+        Controls which AI backend is used. Type <code>/model</code> in chat to see engines at runtime.
+        <a href="https://github.com/reality2-ai/anthill/blob/main/docs/prerequisites.md#2-ai-backend-at-least-one" style="color:var(--accent)" target="_blank">Install backends</a>
       </div>
     </div>
 
     <div id="manual-backends-section" style="display:none">
-      <h3 class="section-title">AI Backends (manual)</h3>
+      <span class="field-label" style="margin-bottom:4px;display:block">Backends <span style="color:var(--text-dim)">(order = fallback priority)</span></span>
       <div id="c-backends" style="margin-bottom:8px"></div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">
-        Select specific backends to use (only when strategy is "manual")
-      </div>
-    </div>
-
-    <h3 class="section-title">AI Engine Category (advanced)</h3>
-    <div class="field" style="margin-bottom:8px">
-      <span class="field-label">Default Category <span style="color:var(--text-dim)">(overrides strategy above when set)</span></span>
-      <select id="c-ai-category" class="field-input" style="padding:8px 10px;cursor:pointer">
-        <option value="">Use backend strategy above</option>
-        <option value="balanced">Balanced — good mix of speed, cost, and quality</option>
-        <option value="intellectual">Intellectual — best reasoning capability</option>
-        <option value="fast">Fast — fastest response time</option>
-        <option value="cost_effective">Cost-effective — lowest cost per request</option>
-        <option value="local">Local — on-premise only (privacy, no data leaves machine)</option>
-        <option value="specialized:coding">Specialized: Coding</option>
-      </select>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
-        When set, uses the pluggable AI backend registry with API backends (OpenAI, Anthropic, etc.) and category-based selection.
-        Type <code>/model</code> in chat to see available engines at runtime.
-      </div>
     </div>
 
     <h3 class="section-title">Telegram (optional)</h3>
@@ -812,21 +821,21 @@
   </div>
   <div id="graph-panel" style="display:none;flex:1;position:relative;overflow:hidden">
     <div id="graph-container" style="width:100%;height:100%"></div>
-    <div id="graph-toolbar" style="position:absolute;top:10px;left:10px;display:flex;gap:8px;align-items:center">
-      <select id="graph-selector" onchange="loadGraph(this.value)" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer"></select>
+    <div id="graph-toolbar" style="position:absolute;top:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+      <select id="graph-selector" onchange="loadGraph(this.value)" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:13px;cursor:pointer;max-width:50%"></select>
       <button onclick="showExportDialog()" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer" title="Export knowledge report">Export</button>
-      <div style="background:var(--overlay);padding:8px 12px;border-radius:8px;font-size:11px;color:var(--text-dim)">
-        <span style="color:#e94560">●</span> person
-        <span style="color:#4ade80">●</span> project
-        <span style="color:#fbbf24">●</span> tool
-        <span style="color:#60a5fa">●</span> concept
-        <span style="color:#c084fc">●</span> decision
-        <span style="color:#f472b6">●</span> server
-        <span style="color:#fb923c">●</span> event
-        <span style="color:#94a3b8">●</span> fact
-        &nbsp;| Edge: green=high conf, yellow=med, red=low
-      </div>
       <button onclick="toggleTheme()" id="theme-toggle" style="background:var(--overlay);color:var(--text);border:1px solid var(--border-light);border-radius:6px;width:32px;height:32px;font-size:16px;cursor:pointer;line-height:1" title="Toggle light/dark theme">☀</button>
+      <div id="graph-legend" style="background:var(--overlay);padding:6px 10px;border-radius:8px;font-size:11px;color:var(--text-dim);line-height:1.6">
+        <span style="color:#e94560">●</span>person
+        <span style="color:#4ade80">●</span>project
+        <span style="color:#fbbf24">●</span>tool
+        <span style="color:#60a5fa">●</span>concept
+        <span style="color:#c084fc">●</span>decision
+        <span style="color:#f472b6">●</span>server
+        <span style="color:#fb923c">●</span>event
+        <span style="color:#94a3b8">●</span>fact
+        | Edge: <span style="color:#4ade80">green</span>=high <span style="color:#fbbf24">yellow</span>=med <span style="color:#e94560">red</span>=low
+      </div>
     </div>
     <div id="graph-query-bar" style="position:absolute;bottom:10px;left:10px;right:10px;display:flex;gap:8px;z-index:10">
       <input id="graph-query-input" placeholder="Ask about this graph..." style="flex:1;background:var(--overlay-strong);color:var(--text);border:1px solid var(--border-light);border-radius:8px;padding:10px 14px;font-size:14px;font-family:var(--font)" onkeydown="if(event.key==='Enter'){event.preventDefault();submitGraphQuery()}">
@@ -1821,6 +1830,7 @@ function renderBotList() {
 }
 
 function selectBot(id) {
+  closeSidebar(); // Auto-close on mobile.
   state.activeBot = id;
   const bot = state.bots[id];
   document.getElementById('bot-title').textContent = bot ? bot.name : id;
@@ -1994,7 +2004,15 @@ function addCopyButtons() {
 }
 
 function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('open');
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const isOpen = sidebar.classList.toggle('open');
+  if (backdrop) backdrop.classList.toggle('visible', isOpen);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  if (backdrop) backdrop.classList.remove('visible');
 }
 
 // Auto-resize textarea
@@ -2388,9 +2406,21 @@ async function showConfigModal(antId) {
     if (resp.ok) {
       const cfg = await resp.json();
       document.getElementById('c-name').value = cfg.name || '';
-      document.getElementById('c-backend-strategy').value = cfg.backend_strategy || 'cost_optimized';
+      // Load the unified AI engine category.
+      // Prefer ai_default_category; fall back to mapping legacy backend_strategy.
+      const strategyMap = {
+        'cost_optimized': 'cost_effective',
+        'capability_optimized': 'intellectual',
+        'speed_optimized': 'fast',
+        'reliability_optimized': 'balanced',
+        'balanced': 'balanced',
+        'manual': 'manual',
+      };
+      const cat = cfg.ai_default_category
+        || strategyMap[cfg.backend_strategy]
+        || 'balanced';
+      document.getElementById('c-ai-category').value = cat;
       updateBackendVisibility();
-      document.getElementById('c-ai-category').value = cfg.ai_default_category || '';
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
@@ -2443,9 +2473,9 @@ async function showConfigModal(antId) {
 }
 
 function updateBackendVisibility() {
-  const strategy = document.getElementById('c-backend-strategy').value;
+  const cat = document.getElementById('c-ai-category').value;
   const manualSection = document.getElementById('manual-backends-section');
-  manualSection.style.display = strategy === 'manual' ? 'block' : 'none';
+  manualSection.style.display = cat === 'manual' ? 'block' : 'none';
 }
 
 function hideConfigModal() {
@@ -2461,14 +2491,23 @@ async function saveConfig() {
   const allow = allowStr ? allowStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
 
   const backends = Array.from(document.querySelectorAll('.backend-cb:checked')).map(cb => cb.value);
-  const strategy = document.getElementById('c-backend-strategy').value;
+  const aiCategory = document.getElementById('c-ai-category').value;
+  // Map category back to legacy backend_strategy for backward compat.
+  const categoryToStrategy = {
+    'cost_effective': 'cost_optimized',
+    'intellectual': 'capability_optimized',
+    'fast': 'speed_optimized',
+    'balanced': 'balanced',
+    'local': 'cost_optimized',
+    'specialized:coding': 'capability_optimized',
+    'manual': 'manual',
+  };
 
   const body = {
     name: document.getElementById('c-name').value.trim(),
-    backend_strategy: strategy,
-    // Only include backends when using manual strategy
-    backends: strategy === 'manual' ? (backends.length > 0 ? backends : ['claude']) : null,
-    ai_default_category: document.getElementById('c-ai-category').value,
+    backend_strategy: categoryToStrategy[aiCategory] || 'balanced',
+    backends: aiCategory === 'manual' ? (backends.length > 0 ? backends : ['claude']) : null,
+    ai_default_category: aiCategory === 'manual' ? '' : aiCategory,
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),
