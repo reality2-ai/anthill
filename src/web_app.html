@@ -591,7 +591,7 @@
 
     <h3 class="section-title">AI Backend Strategy</h3>
     <div class="field">
-      <select id="c-backend-strategy" class="field-input" style="margin-bottom:8px">
+      <select id="c-backend-strategy" class="field-input" style="margin-bottom:8px" onchange="updateBackendVisibility()">
         <option value="cost_optimized">Cost Optimized — prefer local models (Ollama, DeepSeek)</option>
         <option value="capability_optimized">Capability Optimized — prefer Claude, Grok</option>
         <option value="speed_optimized">Speed Optimized — prefer fastest models</option>
@@ -605,10 +605,12 @@
       </div>
     </div>
 
-    <h3 class="section-title">AI Backends (manual override)</h3>
-    <div id="c-backends" style="margin-bottom:8px"></div>
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">
-      Select specific backends to use (only used when strategy is "manual")
+    <div id="manual-backends-section" style="display:none">
+      <h3 class="section-title">AI Backends (manual)</h3>
+      <div id="c-backends" style="margin-bottom:8px"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">
+        Select specific backends to use (only when strategy is "manual")
+      </div>
     </div>
 
     <h3 class="section-title">Telegram (optional)</h3>
@@ -2369,6 +2371,7 @@ async function showConfigModal(antId) {
       const cfg = await resp.json();
       document.getElementById('c-name').value = cfg.name || '';
       document.getElementById('c-backend-strategy').value = cfg.backend_strategy || 'cost_optimized';
+      updateBackendVisibility();
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
@@ -2420,6 +2423,12 @@ async function showConfigModal(antId) {
   }
 }
 
+function updateBackendVisibility() {
+  const strategy = document.getElementById('c-backend-strategy').value;
+  const manualSection = document.getElementById('manual-backends-section');
+  manualSection.style.display = strategy === 'manual' ? 'block' : 'none';
+}
+
 function hideConfigModal() {
   document.getElementById('config-modal').style.display = 'none';
   editingAntId = null;
@@ -2438,7 +2447,8 @@ async function saveConfig() {
   const body = {
     name: document.getElementById('c-name').value.trim(),
     backend_strategy: strategy,
-    backends: backends.length > 0 ? backends : ['claude'],
+    // Only include backends when using manual strategy
+    backends: strategy === 'manual' ? (backends.length > 0 ? backends : ['claude']) : null,
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),
