@@ -296,10 +296,47 @@ async fn run_cli_backend(
         stderr_text
     });
 
+    // Stall watchdog — warns after 2 min idle, kills after 10 min.
+    let child_id = child.id();
+    let watchdog_activity = Arc::clone(&last_activity);
+    let watchdog_ptx = progress_tx.clone();
+    let watchdog_handle = tokio::spawn(async move {
+        let stall_warn_secs = 120u64;
+        let hard_timeout_secs = 600u64;
+        let mut warned = false;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            let idle_secs = watchdog_activity.lock()
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+
+            if !warned && idle_secs > stall_warn_secs {
+                warned = true;
+                let _ = watchdog_ptx.send(AiProgress {
+                    task_id,
+                    kind: "warning".into(),
+                    detail: format!("No output for {}s — worker may be stalled", idle_secs),
+                });
+            }
+            if warned && idle_secs < stall_warn_secs {
+                warned = false;
+            }
+
+            if idle_secs > hard_timeout_secs {
+                #[cfg(unix)]
+                if let Some(pid) = child_id {
+                    unsafe { libc::killpg(pid as i32, libc::SIGKILL); }
+                }
+                break;
+            }
+        }
+    });
+
     // Wait for completion.
     let (stdout_result, stderr_result, status) = tokio::join!(
         stdout_handle, stderr_handle, child.wait()
     );
+    watchdog_handle.abort();
 
     let result_text = stdout_result.unwrap_or_default();
     let stderr_text = stderr_result.unwrap_or_default();

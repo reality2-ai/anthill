@@ -1,82 +1,7 @@
-//! Unified AI backend abstraction.
+//! Backend detection — enumerates known AI backends and checks availability.
 //!
-//! This module provides backend detection and shared types for AI backends.
-//! Current backends: Claude, Codex, Gemini, Ollama, OpenCode.
-
-#![allow(dead_code)]
-
-use std::path::PathBuf;
-
-#[derive(Debug, Clone)]
-pub struct BackendConfig {
-    pub working_dir: String,
-    pub memory_dir: PathBuf,
-    pub repos_dir: PathBuf,
-    pub skip_permissions: bool,
-    pub allow_base_code_changes: bool,
-    pub continue_session: bool,
-}
-
-impl BackendConfig {
-    pub fn new(
-        working_dir: String,
-        memory_dir: PathBuf,
-        repos_dir: PathBuf,
-        skip_permissions: bool,
-        allow_base_code_changes: bool,
-        continue_session: bool,
-    ) -> Self {
-        Self {
-            working_dir,
-            memory_dir,
-            repos_dir,
-            skip_permissions,
-            allow_base_code_changes,
-            continue_session,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProgressEvent {
-    pub kind: String,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct BackendResponse {
-    pub text: String,
-    pub backend_name: String,
-}
-
-#[derive(Debug)]
-pub enum BackendError {
-    Retriable { message: String },
-    NonRetriable { message: String },
-    Empty,
-}
-
-impl BackendError {
-    pub fn message(&self) -> String {
-        match self {
-            BackendError::Retriable { message } => message.clone(),
-            BackendError::NonRetriable { message } => message.clone(),
-            BackendError::Empty => "Empty response".to_string(),
-        }
-    }
-
-    pub fn is_retriable(&self) -> bool {
-        matches!(self, BackendError::Retriable { .. })
-    }
-}
-
-impl std::fmt::Display for BackendError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message())
-    }
-}
-
-impl std::error::Error for BackendError {}
+//! This module provides `BackendKind` (the canonical list of backends)
+//! and `detect_backends()`.  Execution is handled by `ai_backends/`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
@@ -90,48 +15,77 @@ pub enum BackendKind {
     LMStudio,
 }
 
+/// All known backend kinds in canonical order.
+pub const ALL_BACKENDS: &[BackendKind] = &[
+    BackendKind::Claude,
+    BackendKind::Codex,
+    BackendKind::Gemini,
+    BackendKind::Ollama,
+    BackendKind::OpenCode,
+    BackendKind::Grok,
+    BackendKind::DeepSeek,
+    BackendKind::LMStudio,
+];
+
 impl BackendKind {
-    fn name(&self) -> &'static str {
+    /// Short name (used in config files and as the CLI binary name).
+    pub fn name(&self) -> &'static str {
         match self {
-            BackendKind::Claude => "claude",
-            BackendKind::Codex => "codex",
-            BackendKind::Gemini => "gemini",
-            BackendKind::Ollama => "ollama",
-            BackendKind::OpenCode => "opencode",
-            BackendKind::Grok => "grok",
-            BackendKind::DeepSeek => "deepseek",
-            BackendKind::LMStudio => "lmstudio",
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+            Self::Ollama => "ollama",
+            Self::OpenCode => "opencode",
+            Self::Grok => "grok",
+            Self::DeepSeek => "deepseek",
+            Self::LMStudio => "lmstudio",
         }
     }
 
-    fn from_str(s: &str) -> Option<Self> {
+    /// Human-readable display name.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "OpenAI Codex",
+            Self::Gemini => "Google Gemini",
+            Self::Ollama => "Ollama (local)",
+            Self::OpenCode => "OpenCode",
+            Self::Grok => "Grok",
+            Self::DeepSeek => "DeepSeek",
+            Self::LMStudio => "LM Studio",
+        }
+    }
+
+    /// Parse from a string (case-insensitive).
+    pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "claude" => Some(BackendKind::Claude),
-            "codex" => Some(BackendKind::Codex),
-            "gemini" => Some(BackendKind::Gemini),
-            "ollama" => Some(BackendKind::Ollama),
-            "opencode" => Some(BackendKind::OpenCode),
-            "grok" => Some(BackendKind::Grok),
-            "deepseek" => Some(BackendKind::DeepSeek),
-            "lmstudio" | "lm-studio" | "lm_studio" => Some(BackendKind::LMStudio),
-            s if s.starts_with("ollama:") => Some(BackendKind::Ollama),
-            s if s.starts_with("grok:") => Some(BackendKind::Grok),
-            s if s.starts_with("deepseek:") => Some(BackendKind::DeepSeek),
-            s if s.starts_with("lmstudio:") => Some(BackendKind::LMStudio),
+            "claude" => Some(Self::Claude),
+            "codex" => Some(Self::Codex),
+            "gemini" => Some(Self::Gemini),
+            "ollama" => Some(Self::Ollama),
+            "opencode" => Some(Self::OpenCode),
+            "grok" => Some(Self::Grok),
+            "deepseek" => Some(Self::DeepSeek),
+            "lmstudio" | "lm-studio" | "lm_studio" => Some(Self::LMStudio),
+            s if s.starts_with("ollama:") => Some(Self::Ollama),
+            s if s.starts_with("grok:") => Some(Self::Grok),
+            s if s.starts_with("deepseek:") => Some(Self::DeepSeek),
+            s if s.starts_with("lmstudio:") => Some(Self::LMStudio),
             _ => None,
         }
     }
 
+    /// Check if the backend's CLI binary is installed.
     pub fn is_installed(&self) -> bool {
         let cmd = match self {
-            BackendKind::Claude => "claude",
-            BackendKind::Codex => "codex",
-            BackendKind::Gemini => "gemini",
-            BackendKind::Ollama => "ollama",
-            BackendKind::OpenCode => "opencode",
-            BackendKind::Grok => "grok",
-            BackendKind::DeepSeek => "deepseek",
-            BackendKind::LMStudio => "lm-studio",
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+            Self::Ollama => "ollama",
+            Self::OpenCode => "opencode",
+            Self::Grok => "grok",
+            Self::DeepSeek => "deepseek",
+            Self::LMStudio => "lm-studio",
         };
         std::process::Command::new("which")
             .arg(cmd)
@@ -141,21 +95,12 @@ impl BackendKind {
     }
 }
 
+/// Detect which backends are installed.  Returns `(name, installed)` for
+/// all installed backends.
 pub fn detect_backends() -> Vec<(String, bool)> {
-    let backends = [
-        ("claude", BackendKind::Claude.is_installed()),
-        ("codex", BackendKind::Codex.is_installed()),
-        ("gemini", BackendKind::Gemini.is_installed()),
-        ("ollama", BackendKind::Ollama.is_installed()),
-        ("opencode", BackendKind::OpenCode.is_installed()),
-        ("grok", BackendKind::Grok.is_installed()),
-        ("deepseek", BackendKind::DeepSeek.is_installed()),
-        ("lmstudio", BackendKind::LMStudio.is_installed()),
-    ];
-
-    backends
+    ALL_BACKENDS
         .iter()
-        .filter(|(_, installed)| *installed)
-        .map(|(name, _)| (name.to_string(), true))
+        .filter(|k| k.is_installed())
+        .map(|k| (k.name().to_string(), true))
         .collect()
 }

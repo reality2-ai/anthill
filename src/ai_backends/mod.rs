@@ -111,22 +111,13 @@ pub fn legacy_name_to_id(name: &str) -> String {
     }
 }
 
-/// Detect all AI backends available on this system (for /doctor).
-/// Returns a list of (id, display_name, available).
+/// Detect all AI backends available on this system.
+///
+/// Uses the canonical `BackendKind` list from `backends/mod.rs` so the
+/// web UI, doctor check, and runtime all agree.
+/// Returns `(id, display_name, available)`.
 pub fn detect_all_backends() -> Vec<(String, String, bool)> {
-    let mut results: Vec<(String, String, bool)> = Vec::new();
-
-    for (id, name, avail) in cli_backend::detect_cli_backends() {
-        results.push((id.to_string(), name.to_string(), avail));
-    }
-
-    // Check Ollama.
-    let ollama_available = std::process::Command::new("which")
-        .arg("ollama")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    results.push(("ollama".into(), "Ollama (local)".into(), ollama_available));
-
-    results
+    crate::backends::ALL_BACKENDS.iter()
+        .map(|k| (k.name().to_string(), k.display_name().to_string(), k.is_installed()))
+        .collect()
 }
