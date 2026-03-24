@@ -7,6 +7,7 @@
 mod backup;
 mod bot;
 mod ai_worker;
+mod backends;
 mod config;
 mod dateutil;
 mod epistemic;
@@ -416,6 +417,26 @@ pub fn run_doctor_checks() -> Vec<DoctorCheck> {
     checks.push(check_command("codex", &["--version"],
         "OpenAI Codex (AI backend)", "optional",
         "https://github.com/openai/codex",
+    ));
+    checks.push(check_command("gemini", &["--version"],
+        "Google Gemini CLI (AI backend)", "optional",
+        "https://ai.google.dev/gemini-cli",
+    ));
+    checks.push(check_command("opencode", &["--version"],
+        "OpenCode (multi-provider AI agent)", "optional",
+        "npm i -g @opencode/cli",
+    ));
+    checks.push(check_command("grok", &["--version"],
+        "Grok CLI (xAI backend)", "optional",
+        "npm i -g grok-cli",
+    ));
+    checks.push(check_command("deepseek", &["--version"],
+        "DeepSeek CLI (AI backend)", "optional",
+        "npm i -g run-deepseek-cli",
+    ));
+    checks.push(check_command("lm-studio", &["--version"],
+        "LM Studio (local AI backend)", "optional",
+        "https://lmstudio.ai",
     ));
 
     // Ollama.

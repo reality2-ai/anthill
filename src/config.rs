@@ -75,10 +75,220 @@ impl Default for RuminationConfig {
     }
 }
 
+/// Backend selection strategy.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendStrategy {
+    /// Prefer cheapest backend (Ollama > DeepSeek > Gemini > Claude)
+    #[default]
+    CostOptimized,
+    /// Prefer most capable backend (Claude > Grok > Gemini > Codex > DeepSeek)
+    CapabilityOptimized,
+    /// Prefer fastest response (Ollama > LM Studio > cloud)
+    SpeedOptimized,
+    /// Prefer most reliable (based on recent success rate)
+    ReliabilityOptimized,
+    /// Balanced mix of cost and capability
+    Balanced,
+    /// Manual list of backends in priority order
+    Manual(Vec<String>),
+}
+
+impl BackendStrategy {
+    /// Get ordered list of backends based on strategy.
+    pub fn get_backends(&self, available: &[(String, bool)]) -> Vec<String> {
+        let available: Vec<&str> = available
+            .iter()
+            .filter(|(_, installed)| *installed)
+            .map(|(name, _)| name.as_str())
+            .collect();
+
+        match self {
+            BackendStrategy::CostOptimized => {
+                let mut backends: Vec<_> = available
+                    .iter()
+                    .filter(|&&b| {
+                        matches!(b, "ollama" | "lmstudio" | "deepseek" | "gemini" | "claude")
+                    })
+                    .copied()
+                    .collect();
+                backends.sort_by_key(|b| match *b {
+                    "ollama" | "lmstudio" => 0,
+                    "deepseek" => 1,
+                    "gemini" => 2,
+                    "claude" => 3,
+                    "grok" => 4,
+                    "codex" => 5,
+                    "opencode" => 6,
+                    _ => 99,
+                });
+                backends.into_iter().map(|s| s.to_string()).collect()
+            }
+            BackendStrategy::CapabilityOptimized => {
+                let mut backends: Vec<_> = available
+                    .iter()
+                    .filter(|&&b| {
+                        matches!(
+                            b,
+                            "claude" | "grok" | "gemini" | "codex" | "deepseek" | "ollama"
+                        )
+                    })
+                    .copied()
+                    .collect();
+                backends.sort_by_key(|b| match *b {
+                    "claude" => 0,
+                    "grok" => 1,
+                    "gemini" => 2,
+                    "codex" => 3,
+                    "deepseek" => 4,
+                    "ollama" | "lmstudio" => 5,
+                    _ => 99,
+                });
+                backends.into_iter().map(|s| s.to_string()).collect()
+            }
+            BackendStrategy::SpeedOptimized => {
+                let mut backends: Vec<_> = available
+                    .iter()
+                    .filter(|&&b| {
+                        matches!(
+                            b,
+                            "ollama" | "lmstudio" | "deepseek" | "gemini" | "claude" | "grok"
+                        )
+                    })
+                    .copied()
+                    .collect();
+                backends.sort_by_key(|b| match *b {
+                    "ollama" | "lmstudio" => 0,
+                    "deepseek" => 1,
+                    "gemini" => 2,
+                    "claude" | "grok" => 3,
+                    _ => 99,
+                });
+                backends.into_iter().map(|s| s.to_string()).collect()
+            }
+            BackendStrategy::ReliabilityOptimized => {
+                available.iter().map(|s| s.to_string()).collect()
+            }
+            BackendStrategy::Balanced => {
+                let mut backends: Vec<_> = available.iter().copied().collect();
+                backends.sort_by_key(|b| match *b {
+                    "ollama" | "lmstudio" => 0,
+                    "deepseek" => 1,
+                    "gemini" => 2,
+                    "claude" => 3,
+                    "grok" => 4,
+                    "codex" => 5,
+                    "opencode" => 6,
+                    _ => 99,
+                });
+                backends.into_iter().map(|s| s.to_string()).collect()
+            }
+            BackendStrategy::Manual(backends) => backends.clone(),
+        }
+    }
+
+    /// Classify a message to determine the task type.
+    pub fn classify_message(message: &str) -> TaskType {
+        let msg_lower = message.to_lowercase();
+        let msg_len = message.len();
+
+        // Code-related patterns
+        if msg_lower.contains("write code")
+            || msg_lower.contains("implement")
+            || msg_lower.contains("function")
+            || msg_lower.contains("debug")
+            || msg_lower.contains("fix this")
+            || msg_lower.contains("refactor")
+            || msg_lower.contains(".py")
+            || msg_lower.contains(".rs")
+            || msg_lower.contains(".js")
+            || msg_lower.contains(".ts")
+            || msg_lower.contains("git ")
+            || msg_lower.contains("test ")
+            || msg_lower.contains("import ")
+        {
+            return TaskType::Coding;
+        }
+
+        // Analysis/reasoning patterns
+        if msg_lower.contains("analyze")
+            || msg_lower.contains("why")
+            || msg_lower.contains("how does")
+            || msg_lower.contains("explain")
+            || msg_lower.contains("compare")
+            || msg_lower.contains("what's the difference")
+            || msg_lower.contains("evaluate")
+            || msg_lower.contains("assess")
+        {
+            return TaskType::Reasoning;
+        }
+
+        // Simple query - short messages
+        if msg_len < 100 && !msg_lower.starts_with('/') {
+            return TaskType::Simple;
+        }
+
+        // Default based on length
+        if msg_len > 2000 {
+            TaskType::Complex
+        } else {
+            TaskType::General
+        }
+    }
+}
+
+/// Task type classification for dynamic backend selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskType {
+    /// Simple question or command
+    Simple,
+    /// General conversation
+    General,
+    /// Complex reasoning or analysis
+    Reasoning,
+    /// Coding task
+    Coding,
+    /// Very long or complex task
+    Complex,
+}
+
+/// Dynamic backend selection based on task type.
+impl BackendStrategy {
+    /// Get best backend for a specific task type.
+    pub fn backend_for_task(&self, task: TaskType) -> &'static str {
+        match task {
+            TaskType::Simple => {
+                // Prefer fastest/cheapest for simple tasks
+                "ollama"
+            }
+            TaskType::General => {
+                // Balanced choice
+                "ollama"
+            }
+            TaskType::Reasoning => {
+                // Need strong reasoning - prefer Claude or Grok
+                "claude"
+            }
+            TaskType::Coding => {
+                // Coding tasks - prefer specialized coders
+                "deepseek"
+            }
+            TaskType::Complex => {
+                // Complex tasks need best capability
+                "claude"
+            }
+        }
+    }
+}
+
 /// AI and workspace configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClaudeConfig {
+    /// Backend selection strategy.
+    /// Default: cost_optimized
+    pub backend_strategy: BackendStrategy,
+    /// Deprecated: Use backend_strategy instead.
     /// AI backends: ["claude"], ["codex"], ["claude", "codex"], etc.
     /// When multiple are listed, responses are returned from whichever finishes first.
     /// Default: ["claude"]
@@ -114,6 +324,7 @@ pub struct ClaudeConfig {
 impl Default for ClaudeConfig {
     fn default() -> Self {
         Self {
+            backend_strategy: BackendStrategy::default(),
             backends: vec!["claude".into()],
             working_dir: None,
             memory_dir: "memory".into(),

@@ -313,6 +313,7 @@ async fn get_config(
 #[allow(dead_code)]
 struct ConfigUpdate {
     name: Option<String>,
+    backend_strategy: Option<crate::config::BackendStrategy>,
     backends: Option<Vec<String>>,
     telegram_token: Option<String>,
     telegram_allow: Option<Vec<i64>>,
@@ -348,6 +349,7 @@ async fn put_config(
             app_token: req.slack_app_token.clone().filter(|s| !s.is_empty()),
         },
         claude: crate::config::ClaudeConfig {
+            backend_strategy: req.backend_strategy.clone().unwrap_or_default(),
             backends: req.backends.clone().unwrap_or_else(|| vec!["claude".into()]),
             working_dir: req.working_dir.clone().filter(|s| !s.is_empty()),
             system_prompt: req.system_prompt.clone().filter(|s| !s.is_empty()),

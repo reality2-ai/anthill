@@ -126,6 +126,7 @@ pub async fn run_bot(
         skip_permissions: cfg.claude.skip_permissions,
         sync_channels: cfg.claude.sync_channels,
         backends: cfg.claude.backends.clone(),
+        backend_strategy: cfg.claude.backend_strategy.clone(),
         worker_timeout_secs: cfg.claude.worker_timeout_secs,
         allow_base_code_changes: cfg.claude.allow_base_code_changes,
     };

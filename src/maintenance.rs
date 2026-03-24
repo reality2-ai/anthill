@@ -8,6 +8,8 @@
 //! - Detect contradictions and clusters
 //! - Log all changes
 //!
+
+#![allow(unused_assignments)]
 //! Rumination engine (when enabled):
 //! - Active refutation — challenge existing beliefs
 //! - Idea synthesis — conjecture transitive relationships
@@ -267,6 +269,7 @@ fn run_undetermined_connections(
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
+    #[allow(unused_variables)]
     let mut sent = 0u32;
 
     // Collect all undetermined connections across all topics.
@@ -338,6 +341,7 @@ fn run_competition(
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
+    #[allow(unused_variables)]
     let mut sent = 0u32;
 
     for topic in filtered_topics(config, store) {
@@ -631,6 +635,7 @@ fn run_contradiction_resolution(
     request_tx: &mpsc::UnboundedSender<CliRequest>,
     log: &mut RuminationLog,
 ) {
+    #[allow(unused_variables)]
     let mut sent = 0u32;
 
     for topic in filtered_topics(config, store) {

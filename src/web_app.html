@@ -589,10 +589,26 @@
       <input id="c-name" class="field-input">
     </div>
 
-    <h3 class="section-title">AI Backends</h3>
+    <h3 class="section-title">AI Backend Strategy</h3>
+    <div class="field">
+      <select id="c-backend-strategy" class="field-input" style="margin-bottom:8px">
+        <option value="cost_optimized">Cost Optimized — prefer local models (Ollama, DeepSeek)</option>
+        <option value="capability_optimized">Capability Optimized — prefer Claude, Grok</option>
+        <option value="speed_optimized">Speed Optimized — prefer fastest models</option>
+        <option value="balanced">Balanced — mix of cost and capability</option>
+        <option value="reliability_optimized">Reliability Optimized — prioritize success rate</option>
+        <option value="manual">Manual — specify exact backend order</option>
+      </select>
+      <div style="font-size:11px;color:var(--text-dim)">
+        Strategy determines which AI backend to use based on task type and priorities.
+        <a href="https://github.com/reality2-ai/anthill/blob/main/docs/prerequisites.md#2-ai-backend-at-least-one" style="color:var(--accent)" target="_blank">How to install AI backends</a>
+      </div>
+    </div>
+
+    <h3 class="section-title">AI Backends (manual override)</h3>
     <div id="c-backends" style="margin-bottom:8px"></div>
     <div style="font-size:11px;color:var(--text-dim);margin-bottom:12px">
-      <a href="https://github.com/reality2-ai/anthill/blob/main/docs/prerequisites.md#2-ai-backend-at-least-one" style="color:var(--accent)" target="_blank">How to install AI backends</a>
+      Select specific backends to use (only used when strategy is "manual")
     </div>
 
     <h3 class="section-title">Telegram (optional)</h3>
@@ -2352,6 +2368,7 @@ async function showConfigModal(antId) {
     if (resp.ok) {
       const cfg = await resp.json();
       document.getElementById('c-name').value = cfg.name || '';
+      document.getElementById('c-backend-strategy').value = cfg.backend_strategy || 'cost_optimized';
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
@@ -2416,9 +2433,11 @@ async function saveConfig() {
   const allow = allowStr ? allowStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
 
   const backends = Array.from(document.querySelectorAll('.backend-cb:checked')).map(cb => cb.value);
+  const strategy = document.getElementById('c-backend-strategy').value;
 
   const body = {
     name: document.getElementById('c-name').value.trim(),
+    backend_strategy: strategy,
     backends: backends.length > 0 ? backends : ['claude'],
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,

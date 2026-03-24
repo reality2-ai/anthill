@@ -19,7 +19,7 @@ fn truncate_safe(s: &str, max_bytes: usize) -> String {
 }
 
 /// Slice a string at a char boundary (no suffix added).
-fn slice_safe(s: &str, max_bytes: usize) -> &str {
+pub fn slice_safe(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes { return s; }
     let mut end = max_bytes.min(s.len());
     while end > 0 && !s.is_char_boundary(end) { end -= 1; }
@@ -58,6 +58,7 @@ pub struct CliWorkerConfig {
     pub skip_permissions: bool,
     pub sync_channels: bool,
     pub backends: Vec<String>,
+    pub backend_strategy: crate::config::BackendStrategy,
     /// Worker timeout in seconds (0 = no timeout). Default: 600 (10 minutes).
     pub worker_timeout_secs: u64,
     /// Allow the AI to modify files outside the working directory. Default: false.
@@ -71,6 +72,44 @@ pub struct UserStats {
     pub input_chars: u64,
     pub output_chars: u64,
     pub started: Option<Instant>,
+}
+
+/// Tracks backend session state for continuity.
+#[derive(Debug, Default)]
+pub struct BackendSessions {
+    /// Last backend used per chat_id
+    last_backend: std::collections::HashMap<i64, String>,
+    /// Conversation summary for when we switch backends
+    summaries: std::collections::HashMap<i64, String>,
+}
+
+impl BackendSessions {
+    /// Record which backend was used for a chat
+    pub fn record_backend(&mut self, chat_id: i64, backend: &str) {
+        self.last_backend.insert(chat_id, backend.to_string());
+    }
+
+    /// Get the last backend used for a chat
+    pub fn last_backend(&self, chat_id: i64) -> Option<&str> {
+        self.last_backend.get(&chat_id).map(|s| s.as_str())
+    }
+
+    /// Check if we're switching backends (need to inject context)
+    pub fn is_switching(&self, chat_id: i64, new_backend: &str) -> bool {
+        self.last_backend.get(&chat_id)
+            .map(|last| last != new_backend)
+            .unwrap_or(true)
+    }
+
+    /// Store conversation summary for context injection when switching
+    pub fn set_summary(&mut self, chat_id: i64, summary: String) {
+        self.summaries.insert(chat_id, summary);
+    }
+
+    /// Get stored summary for context injection
+    pub fn get_summary(&self, chat_id: i64) -> Option<&str> {
+        self.summaries.get(&chat_id).map(|s| s.as_str())
+    }
 }
 
 /// Task lifecycle state.
@@ -566,31 +605,10 @@ fn build_rumination_followup(previous_response: &str) -> String {
 
 /// Detect which AI backends are installed on this system.
 pub fn detect_backends() -> Vec<(String, bool)> {
-    let backends = [
-        ("claude", "claude"),
-        ("codex", "codex"),
-        ("gemini", "gemini"),
-        ("ollama", "ollama"),
-    ];
-    backends
-        .iter()
-        .map(|(name, cmd)| {
-            let installed = std::process::Command::new("which")
-                .arg(cmd)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            (name.to_string(), installed)
-        })
-        .collect()
+    crate::backends::detect_backends()
 }
 
 /// Build command and args for a specific backend.
-///
-/// To add a new backend:
-/// 1. Add a match arm here
-/// 2. Add a parse case in `parse_backend_line`
-/// 3. Add detection in `detect_backends`
 fn build_backend_command(
     backend: &str,
     message: &str,
@@ -606,7 +624,6 @@ fn build_backend_command(
             ("codex".to_string(), args)
         }
         "gemini" => {
-            // Google Gemini CLI.
             let mut args = vec![
                 "-p".to_string(),
                 "--output-format".to_string(),
@@ -618,7 +635,6 @@ fn build_backend_command(
             ("gemini".to_string(), args)
         }
         _ => {
-            // Claude (default) — also handles "claude" explicitly.
             let mut args = vec![
                 "-p".to_string(),
                 "--verbose".to_string(),
@@ -631,7 +647,6 @@ fn build_backend_command(
             if continue_session {
                 args.push("-c".to_string());
             }
-            // Explicitly grant access to the working directory.
             if !working_dir.is_empty() {
                 args.push("--add-dir".to_string());
                 args.push(working_dir.to_string());
@@ -644,7 +659,7 @@ fn build_backend_command(
     }
 }
 
-/// Parse a response line from any backend. Returns (progress_detail, result_text) if applicable.
+/// Parse a response line from any backend.
 fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(String, String)>, Option<String>) {
     match backend {
         "codex" => {
@@ -679,13 +694,11 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
             }
         }
         _ => {
-            // Claude stream-json parsing.
             let msg_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
             match msg_type {
                 "assistant" => {
                     if let Some(content) = json.pointer("/message/content") {
                         if let Some(arr) = content.as_array() {
-                            // Collect text blocks as partial result (in case no "result" event follows).
                             let mut text_parts = Vec::new();
                             for block in arr {
                                 let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -722,7 +735,7 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                                             let question = block.pointer("/input/question")
                                                 .and_then(|q| q.as_str())
                                                 .unwrap_or("needs input");
-                                            return (Some(("question".into(), format!("❓ {}", question))), None);
+                                            return (Some(("question".into(), format!("? {}", question))), None);
                                         }
                                         _ => format!("Using: {}", tool),
                                     };
@@ -730,7 +743,6 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                                     return (Some((kind.into(), detail)), None);
                                 }
                             }
-                            // Return text content as partial result (backup if no "result" event).
                             if !text_parts.is_empty() {
                                 return (None, Some(text_parts.join("\n")));
                             }
@@ -740,7 +752,6 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                 }
                 "result" => {
                     let text = json.get("result").and_then(|r| r.as_str()).unwrap_or("");
-                    // Check for permission denials — append to result so user knows.
                     let denials = json.get("permission_denials")
                         .and_then(|d| d.as_array())
                         .map(|arr| arr.iter()
@@ -749,7 +760,7 @@ fn parse_backend_line(backend: &str, json: &serde_json::Value) -> (Option<(Strin
                             .join(", "))
                         .filter(|s| !s.is_empty());
                     let result_text = if let Some(denied) = denials {
-                        format!("{}\n\n⚠️ Permission denied: {}", text, denied)
+                        format!("{}\n\nPermission denied: {}", text, denied)
                     } else {
                         text.to_string()
                     };
@@ -845,6 +856,9 @@ pub async fn ai_worker_loop(
     // Persistent embedding cache stored in the memory directory.
     let embed_cache_path = config.memory_dir.join("embeddings.json");
     let ollama_client = crate::ollama::OllamaClient::with_cache(None, None, embed_cache_path);
+
+    // Backend session tracker for continuity.
+    let backend_sessions: Arc<Mutex<BackendSessions>> = Arc::new(Mutex::new(BackendSessions::default()));
 
     // Episodic memory file.
     let episodes_file = config.memory_dir.join("episodes.json");
@@ -1014,6 +1028,61 @@ pub async fn ai_worker_loop(
         let relevant_episodes = episodes_mem.search(&actual_message, 5);
         let episodes_rendered = episodes_mem.render(&relevant_episodes, 2048);
 
+        // Classify the task for dynamic backend selection.
+        let task_type = crate::config::BackendStrategy::classify_message(&actual_message);
+        log::debug!("[{}] Task classified as: {:?}", bot_name, task_type);
+
+        // Get available backends and select based on strategy + task type.
+        let available = crate::backends::detect_backends();
+        let base_backends = if !config.backends.is_empty() {
+            config.backends.clone()
+        } else {
+            config.backend_strategy.get_backends(&available)
+        };
+
+        // Dynamic per-message backend selection based on task type.
+        let backend_for_this_message = if base_backends.is_empty() {
+            vec!["claude".to_string()]
+        } else if base_backends.len() == 1 {
+            base_backends.clone()
+        } else {
+            // Select primary backend based on task type, with fallbacks
+            let preferred = config.backend_strategy.backend_for_task(task_type);
+            
+            // Check if preferred is available, otherwise use first available
+            if available.iter().any(|(name, _)| name == preferred) {
+                // Insert preferred at front, remove duplicates, keep order
+                let mut ordered = vec![preferred.to_string()];
+                ordered.extend(base_backends.iter()
+                    .filter(|b| b.as_str() != preferred)
+                    .cloned());
+                ordered
+            } else {
+                base_backends.clone()
+            }
+        };
+
+        // Session continuity: prefer same backend for conversation continuity
+        let primary_backend = backend_for_this_message[0].clone();
+        let req_chat_id = req.chat_id;
+        let is_switching = backend_sessions.lock().unwrap().is_switching(req_chat_id, &primary_backend);
+        
+        // Get context injection BEFORE the spawn closure if switching
+        let _context_injection = if is_switching {
+            backend_sessions.lock().unwrap().get_summary(req_chat_id).map(|s| {
+                format!("\n\n[CONTEXT from previous conversation - inject into your response naturally]:\n{}\n\n", s)
+            })
+        } else {
+            None
+        };
+        
+        if is_switching {
+            log::info!("[{}] Switching backend for chat {}: {} -> {}", 
+                bot_name, req_chat_id, 
+                backend_sessions.lock().unwrap().last_backend(req_chat_id).unwrap_or("none"),
+                primary_backend);
+        }
+
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
             &knowledge_file,
@@ -1087,6 +1156,7 @@ pub async fn ai_worker_loop(
         let task_live_progress = Arc::clone(&live_progress);
         let task_live_backend = Arc::clone(&live_backend);
         let follow_ups_clone = Arc::clone(&follow_ups);
+        let backend_sessions_clone = Arc::clone(&backend_sessions);
 
         // Spawn the task concurrently.
         let handle = tokio::spawn(async move {
@@ -1101,13 +1171,21 @@ pub async fn ai_worker_loop(
                 }
             });
 
-            // Try each backend in order — fallback on failure.
-            let backend_list = if cfg.backends.is_empty() {
-                vec!["claude".to_string()]
-            } else {
+            // Determine backend list based on strategy.
+            let available = crate::backends::detect_backends();
+            let backend_list = if !cfg.backends.is_empty() {
+                // Legacy: explicit backend list
                 cfg.backends.clone()
+            } else {
+                // Use strategy-based selection
+                cfg.backend_strategy.get_backends(&available)
             };
-            let mut response_text = String::new();
+            let mut response_text = if backend_list.is_empty() {
+                log::warn!("[{}] No backends available", bname);
+                "No AI backends available. Install Claude, Ollama, or another supported CLI.".to_string()
+            } else {
+                String::new()
+            };
             let mut _used_backend = String::new();
 
             for (idx, backend) in backend_list.iter().enumerate() {
@@ -1527,9 +1605,22 @@ pub async fn ai_worker_loop(
                 if let Ok(mut q) = rq.lock() {
                     q.push_back(CliResponse {
                         chat_id,
-                        text: response_text,
+                        text: response_text.clone(),
                         task_id,
                     });
+                }
+
+                // Record backend session for continuity tracking
+                backend_sessions_clone.lock().unwrap().record_backend(chat_id, &primary_backend);
+                
+                // Store response summary for context injection when switching backends
+                if !response_text.is_empty() {
+                    let summary = if response_text.len() > 500 {
+                        format!("{}... ({} chars)", &response_text[..500], response_text.len())
+                    } else {
+                        response_text.clone()
+                    };
+                    backend_sessions_clone.lock().unwrap().set_summary(chat_id, summary);
                 }
             } else {
                 log::info!("[{}] Rumination task #{} complete ({} chars)",
