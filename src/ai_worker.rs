@@ -1045,10 +1045,13 @@ pub async fn ai_worker_loop(
             let mut _used_backend = String::new();
 
             let used_registry = if let Some(ref registry) = cfg.backend_registry {
-                // Resolve backends: prefer [ai] config, fall back to legacy list.
+                // Resolve backends: prefer [ai] config, fall back to legacy list,
+                // fall back to all registered backends.
                 let backends_to_try: Vec<_> = if let Some(ref ai_cfg) = cfg.ai_config {
+                    // [ai] section exists — use category/explicit resolution.
                     let ids = ai_cfg.resolve_backends("");
                     if ids.is_empty() {
+                        // [ai] exists but no category/backends set — map legacy names.
                         cfg.backends.iter()
                             .map(|b| crate::ai_backends::legacy_name_to_id(b))
                             .flat_map(|id| registry.resolve(&id))
@@ -1058,13 +1061,22 @@ pub async fn ai_worker_loop(
                             .flat_map(|id| registry.resolve(&id))
                             .collect()
                     }
-                } else {
-                    // No [ai] config — map legacy backend names through registry.
+                } else if !cfg.backends.is_empty() {
+                    // No [ai] config, but explicit [claude].backends list — map through registry.
                     cfg.backends.iter()
                         .map(|b| crate::ai_backends::legacy_name_to_id(b))
                         .flat_map(|id| registry.resolve(&id))
                         .collect()
+                } else {
+                    // No [ai] config AND no explicit backends list.
+                    // Use all registered backends (auto-detected CLIs + ollama).
+                    registry.all()
                 };
+
+                let backend_names: Vec<String> = backends_to_try.iter()
+                    .map(|b| b.id().to_string()).collect();
+                log::info!("[{}] Registry resolved {} backends: [{}]",
+                    bname, backends_to_try.len(), backend_names.join(", "));
 
                 if backends_to_try.is_empty() {
                     false
