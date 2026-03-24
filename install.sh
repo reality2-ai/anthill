@@ -118,17 +118,35 @@ if [ "$OS" = "Darwin" ]; then
     echo "    launchctl kill SIGTERM gui/$(id -u)/$PLIST_NAME # stop"
     echo "    launchctl bootout gui/$(id -u)/$PLIST_NAME     # unload"
     echo ""
-    echo "  Logs:"
-    echo "    tail -f $CONFIG_DIR/anthill.log"
-    echo "    tail -f $CONFIG_DIR/anthill.err"
-    echo ""
-    echo "  Add a device:"
-    echo "    anthill --qr-join                 Show QR code to scan with phone"
-    echo "    anthill --join-code               Generate a text join code"
-    echo ""
-    echo "  Web dashboard:"
-    echo "    http://localhost:3000"
-    echo ""
+
+    if [ "$MODE" = "dev" ]; then
+        echo "  DEV mode — debug logging enabled."
+        echo "  Re-install without 'dev' for production: ./install.sh"
+        echo ""
+        echo "  Add a device:"
+        echo "    anthill --qr-join                 Show QR code to scan with phone"
+        echo "    anthill --join-code               Generate a text join code"
+        echo ""
+        echo "  Web dashboard:"
+        echo "    http://localhost:3000"
+        echo ""
+        echo "  Starting log tail (Ctrl+C to exit)..."
+        echo "============================================"
+        echo ""
+        exec tail -f "$CONFIG_DIR/anthill.log" "$CONFIG_DIR/anthill.err"
+    else
+        echo "  Logs:"
+        echo "    tail -f $CONFIG_DIR/anthill.log"
+        echo "    tail -f $CONFIG_DIR/anthill.err"
+        echo ""
+        echo "  Add a device:"
+        echo "    anthill --qr-join                 Show QR code to scan with phone"
+        echo "    anthill --join-code               Generate a text join code"
+        echo ""
+        echo "  Web dashboard:"
+        echo "    http://localhost:3000"
+        echo ""
+    fi
 
 elif [ "$OS" = "FreeBSD" ] || [ "$OS" = "OpenBSD" ] || [ "$OS" = "NetBSD" ]; then
     # BSD — rc.d
@@ -224,11 +242,27 @@ else
     echo "    anthill --qr-join                 Show QR code to scan with phone"
     echo "    anthill --join-code               Generate a text join code"
     echo ""
-    echo "  Check logs:"
-    echo "    journalctl -u anthill -f"
-    echo "    journalctl -u anthill -n 200 | grep -i 'registry\|backend\|AI config'"
     if [ "$MODE" = "dev" ]; then
+        echo "  DEV mode — debug logging enabled."
+        echo "  Re-install without 'dev' for production: ./install.sh"
         echo ""
+        echo "  Web dashboard:"
+        echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
+        echo ""
+        echo "  Starting log tail (Ctrl+C to exit)..."
+        echo "============================================"
+        echo ""
+        sleep 1
+        exec journalctl -u anthill -f
+    else
+        echo "  Check logs:"
+        echo "    journalctl -u anthill -f"
+        echo "    journalctl -u anthill -n 200 | grep -i 'registry\|backend\|AI config'"
+        echo ""
+        echo "  Web dashboard:"
+        echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
+        echo ""
+    fi
         echo "  DEV mode — debug logging enabled."
         echo "  Re-install without 'dev' for production: ./install.sh"
     fi
