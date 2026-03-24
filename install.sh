@@ -4,16 +4,26 @@
 #
 # Usage:
 #   cd anthill
-#   ./install.sh
+#   ./install.sh            # production — info-level logging
+#   ./install.sh dev        # development — debug-level logging
 
 set -e
 
+MODE="${1:-prod}"
 USER_NAME="$(whoami)"
 USER_HOME="$HOME"
 CONFIG_DIR="$USER_HOME/.config/anthill"
 OS="$(uname -s)"
 
-echo "Installing for user: $USER_NAME ($USER_HOME)"
+if [ "$MODE" = "dev" ]; then
+    RUST_LOG_LEVEL="debug"
+    echo "Installing in DEV mode (debug logging)"
+else
+    RUST_LOG_LEVEL="info"
+    echo "Installing in production mode"
+fi
+
+echo "User: $USER_NAME ($USER_HOME)"
 echo "Platform: $OS"
 echo ""
 
@@ -65,11 +75,12 @@ if [ "$OS" = "Darwin" ]; then
     PLIST_FILE="$PLIST_DIR/$PLIST_NAME.plist"
 
     echo ""
-    echo "Generating launchd plist..."
+    echo "Generating launchd plist (RUST_LOG=$RUST_LOG_LEVEL)..."
     mkdir -p "$PLIST_DIR"
     sed -e "s|@@BINARY@@|$INSTALL_DIR/anthill|g" \
         -e "s|@@CONFIG@@|$CONFIG_DIR|g" \
         -e "s|@@HOME@@|$USER_HOME|g" \
+        -e "s|<string>info</string>|<string>$RUST_LOG_LEVEL</string>|g" \
         anthill.plist.template > "$PLIST_FILE"
 
     # Unload if already loaded, then load.
@@ -160,9 +171,10 @@ elif [ "$OS" = "FreeBSD" ] || [ "$OS" = "OpenBSD" ] || [ "$OS" = "NetBSD" ]; the
 else
     # Linux — systemd
     echo ""
-    echo "Generating systemd service for user '$USER_NAME'..."
+    echo "Generating systemd service for user '$USER_NAME' (RUST_LOG=$RUST_LOG_LEVEL)..."
     sed -e "s|@@USER@@|$USER_NAME|g" \
         -e "s|@@HOME@@|$USER_HOME|g" \
+        -e "s|RUST_LOG=info|RUST_LOG=$RUST_LOG_LEVEL|g" \
         anthill.service.template > /tmp/anthill.service
     sudo cp /tmp/anthill.service /etc/systemd/system/anthill.service
     rm /tmp/anthill.service
@@ -214,6 +226,12 @@ else
     echo ""
     echo "  Check logs:"
     echo "    journalctl -u anthill -f"
+    echo "    journalctl -u anthill -n 200 | grep -i 'registry\|backend\|AI config'"
+    if [ "$MODE" = "dev" ]; then
+        echo ""
+        echo "  DEV mode — debug logging enabled."
+        echo "  Re-install without 'dev' for production: ./install.sh"
+    fi
     echo ""
     echo "  Web dashboard:"
     echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
