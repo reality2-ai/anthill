@@ -325,7 +325,7 @@ impl Default for ClaudeConfig {
     fn default() -> Self {
         Self {
             backend_strategy: BackendStrategy::default(),
-            backends: vec!["claude".into()],
+            backends: vec![],
             working_dir: None,
             memory_dir: "memory".into(),
             repos_dir: "repos".into(),

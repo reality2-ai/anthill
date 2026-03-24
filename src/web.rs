@@ -351,7 +351,7 @@ async fn put_config(
         },
         claude: crate::config::ClaudeConfig {
             backend_strategy: req.backend_strategy.clone().unwrap_or_default(),
-            backends: req.backends.clone().unwrap_or_else(|| vec!["claude".into()]),
+            backends: req.backends.clone().unwrap_or_default(),
             working_dir: req.working_dir.clone().filter(|s| !s.is_empty()),
             system_prompt: req.system_prompt.clone().filter(|s| !s.is_empty()),
             sync_channels: req.sync_channels.unwrap_or(false),
