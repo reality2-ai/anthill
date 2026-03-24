@@ -1030,17 +1030,23 @@ pub async fn ai_worker_loop(
 
         // Classify the task for dynamic backend selection.
         let task_type = crate::config::BackendStrategy::classify_message(&actual_message);
-        log::debug!("[{}] Task classified as: {:?}", bot_name, task_type);
+        log::info!("[{}] Task classified as: {:?}, message preview: {}", bot_name, task_type, 
+            if actual_message.len() > 50 { format!("{}...", &actual_message[..50]) } else { actual_message.clone() });
 
         // Get available backends and select based on strategy + task type.
         let available = crate::backends::detect_backends();
+        log::info!("[{}] Available backends: {:?}", bot_name, available);
         
         // Use strategy if backends is empty or only contains default "claude"
         let use_strategy = config.backends.is_empty() 
             || (config.backends.len() == 1 && config.backends[0] == "claude");
         
+        log::info!("[{}] Using strategy: {}, config.backends: {:?}", bot_name, use_strategy, config.backends);
+        
         let base_backends = if use_strategy {
-            config.backend_strategy.get_backends(&available)
+            let strategy_backends = config.backend_strategy.get_backends(&available);
+            log::info!("[{}] Strategy {:?} returned backends: {:?}", bot_name, config.backend_strategy, strategy_backends);
+            strategy_backends
         } else {
             config.backends.clone()
         };
@@ -1050,6 +1056,7 @@ pub async fn ai_worker_loop(
             base_backends.clone()
         } else {
             let preferred = config.backend_strategy.backend_for_task(task_type);
+            log::info!("[{}] Preferred backend for {:?}: {}", bot_name, task_type, preferred);
             if available.iter().any(|(name, _)| name == preferred) {
                 let mut ordered = vec![preferred.to_string()];
                 ordered.extend(base_backends.iter()
@@ -1060,6 +1067,8 @@ pub async fn ai_worker_loop(
                 base_backends.clone()
             }
         };
+
+        log::info!("[{}] Selected backends (in order): {:?}", bot_name, backend_for_this_message);
 
         // Session continuity: prefer same backend for conversation continuity
         let primary_backend = backend_for_this_message[0].clone();

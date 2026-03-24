@@ -287,6 +287,7 @@ async fn get_config(
                     "backup_interval_hours": cfg.claude.backup_interval_hours,
                     "backup_remote": cfg.claude.backup_remote,
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
+                    "backend_strategy": cfg.claude.backend_strategy,
                     "backends": cfg.claude.backends,
                     "rumination": {
                         "enabled": cfg.claude.rumination.enabled,
