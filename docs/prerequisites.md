@@ -16,9 +16,11 @@ cargo --version
 
 ## 2. AI backend (at least one)
 
-Anthill supports multiple AI backends. Install whichever you want to use:
+Anthill supports multiple AI backends. You can install one or more — Anthill will automatically select the best one based on your configured strategy.
 
-### [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+### Cloud Backends
+
+#### [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (recommended)
 
 Requires [Node.js](https://nodejs.org/) and an [Anthropic account](https://console.anthropic.com/).
 
@@ -39,7 +41,7 @@ cd /tmp && claude
 claude -p "Say hello"
 ```
 
-### [OpenAI Codex](https://developers.openai.com/codex/cli)
+#### [OpenAI Codex](https://developers.openai.com/codex/cli)
 
 Requires Node.js and an OpenAI account.
 
@@ -54,7 +56,66 @@ codex
 codex exec "Say hello"
 ```
 
-### [Ollama](https://ollama.com/) (local)
+#### [Google Gemini CLI](https://ai.google.dev/gemini-cli)
+
+Requires Node.js and a Google account.
+
+```bash
+npm install -g @google/gemini-cli
+
+# Authenticate
+gemini
+# Follow prompts to sign in
+
+# Verify
+gemini -p "Say hello"
+```
+
+#### [Grok CLI](https://github.com/superagent-ai/grok-cli) (xAI)
+
+Requires Node.js and an [xAI API key](https://console.x.ai/).
+
+```bash
+npm install -g grok-cli
+
+# Set API key (will be stored in macOS keychain on first run)
+export XAI_API_KEY="your-api-key"
+
+# Verify
+grok -p "Say hello"
+```
+
+#### [DeepSeek CLI](https://github.com/holasoymalva/deepseek-cli)
+
+Requires Node.js and a [DeepSeek API key](https://platform.deepseek.com/).
+
+```bash
+npm install -g run-deepseek-cli
+
+# Set API key
+export DEEPSEEK_API_KEY="your-api-key"
+
+# Verify
+deepseek -q "Say hello"
+```
+
+#### [OpenCode](https://opencode.ai/) (multi-provider)
+
+OpenCode is an open-source AI coding agent that supports multiple providers.
+
+```bash
+npm install -g @opencode/cli
+
+# Configure API keys in ~/.config/opencode/config.json
+# or set environment variables
+
+# Verify
+opencode --version
+```
+
+### Local Backends
+
+#### [Ollama](https://ollama.com/) (recommended for local)
 
 Run AI models locally — no API key needed. Also provides embeddings for semantic knowledge graph search.
 
@@ -74,6 +135,36 @@ ollama pull nomic-embed-text
 
 Without `nomic-embed-text`, knowledge graph retrieval falls back to keyword search.
 
+#### [LM Studio](https://lmstudio.ai/)
+
+Run AI models locally with a GUI or CLI.
+
+```bash
+# Download from https://lmstudio.ai/ or via Homebrew
+brew install lm-studio
+
+# Start LM Studio server (default: http://localhost:1234)
+lm-studio
+
+# Verify
+curl http://localhost:1234/v1/models
+```
+
+### Backend Strategies
+
+Anthill uses **strategies** to select which AI backend to use. Configure this in your ANT's settings or `ant.toml`:
+
+| Strategy | Best For | Backend Priority |
+|----------|----------|-----------------|
+| **Cost Optimized** | Budget-conscious use | Ollama → DeepSeek → Gemini → Claude |
+| **Capability Optimized** | Complex reasoning, research | Claude → Grok → Gemini → Codex |
+| **Speed Optimized** | Quick responses | Ollama/LM Studio → DeepSeek → Gemini |
+| **Balanced** | General use | Ollama → DeepSeek → Gemini → Claude → Grok |
+| **Reliability Optimized** | Prioritize success rate | Based on recent success history |
+| **Manual** | Full control | Your specified order |
+
+For simple queries, Anthill uses faster/cheaper backends. For complex tasks (reasoning, analysis, coding), it switches to more capable models.
+
 ### Verify prerequisites
 
 After installing, run the built-in diagnostic check:
@@ -82,7 +173,7 @@ After installing, run the built-in diagnostic check:
 anthill --doctor
 ```
 
-This checks Rust, Claude, Codex, Ollama (and required models), Git, Tailscale, config files, colony key, ANTs, devices, and service status. It is also available as a web API at `GET /api/doctor`.
+This checks all installed AI backends, Rust, Git, Tailscale, config files, colony key, ANTs, devices, and service status. It is also available as a web API at `GET /api/doctor`.
 
 **Important:** Authenticate each backend as the same user that will run Anthill.
 

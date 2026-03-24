@@ -92,14 +92,19 @@ The `[claude]` section configures the AI backend and workspace (named for histor
 
 ```toml
 [claude]
-# AI backends in priority order. Fallback on failure/rate limits.
-# Supported: "claude", "codex", "ollama:<model>". Coming: "gemini".
-# Ollama models use the "ollama:" prefix followed by the model name.
+# Backend selection strategy. Choose how Anthill picks which AI to use.
+# Options: cost_optimized, capability_optimized, speed_optimized, balanced, reliability_optimized, manual
+backend_strategy = "balanced"
+
+# Manual backend override (only used when backend_strategy = "manual")
+# Supported: "claude", "codex", "gemini", "grok", "deepseek", "ollama:<model>", "lmstudio:<model>", "opencode"
+# Ollama/LM Studio models use the "backend:" prefix followed by the model name.
 backends = ["claude"]
 # Examples:
 #   backends = ["ollama:llama3.2"]                      # Ollama only (local)
-#   backends = ["claude", "ollama:llama3.2"]             # Claude with Ollama fallback
-#   backends = ["ollama:llama3.2", "codex"]              # Ollama with Codex fallback
+#   backends = ["claude", "ollama:llama3.2"]            # Claude with Ollama fallback
+#   backends = ["ollama:llama3.2", "deepseek:coder"]   # Ollama with DeepSeek fallback
+#   backends = ["claude", "grok:grok-3", "ollama"]      # Claude → Grok → Ollama cascade
 
 # Working directory — where the ANT operates
 # Auto-created if missing. Auto-initialised as a git repo.
