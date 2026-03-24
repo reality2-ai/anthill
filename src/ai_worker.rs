@@ -1034,24 +1034,23 @@ pub async fn ai_worker_loop(
 
         // Get available backends and select based on strategy + task type.
         let available = crate::backends::detect_backends();
-        let base_backends = if !config.backends.is_empty() {
-            config.backends.clone()
-        } else {
+        
+        // Use strategy if backends is empty or only contains default "claude"
+        let use_strategy = config.backends.is_empty() 
+            || (config.backends.len() == 1 && config.backends[0] == "claude");
+        
+        let base_backends = if use_strategy {
             config.backend_strategy.get_backends(&available)
+        } else {
+            config.backends.clone()
         };
 
-        // Dynamic per-message backend selection based on task type.
-        let backend_for_this_message = if base_backends.is_empty() {
-            vec!["claude".to_string()]
-        } else if base_backends.len() == 1 {
+        // If multiple backends available, prefer based on task type
+        let backend_for_this_message = if base_backends.len() <= 1 {
             base_backends.clone()
         } else {
-            // Select primary backend based on task type, with fallbacks
             let preferred = config.backend_strategy.backend_for_task(task_type);
-            
-            // Check if preferred is available, otherwise use first available
             if available.iter().any(|(name, _)| name == preferred) {
-                // Insert preferred at front, remove duplicates, keep order
                 let mut ordered = vec![preferred.to_string()];
                 ordered.extend(base_backends.iter()
                     .filter(|b| b.as_str() != preferred)
