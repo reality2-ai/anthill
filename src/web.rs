@@ -375,7 +375,11 @@ async fn put_config(
     };
 
     match state.registry.write_config(&id, &toml) {
-        Ok(()) => (StatusCode::OK, "Config saved. Restart Anthill to apply.").into_response(),
+        Ok(()) => {
+            // Trigger reload so the ANT picks up the new config immediately.
+            let _ = state.reload_tx.send(()).await;
+            (StatusCode::OK, "Config saved and reloaded.").into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }

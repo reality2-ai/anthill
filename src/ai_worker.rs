@@ -1096,6 +1096,8 @@ pub async fn ai_worker_loop(
                         context: std::collections::HashMap::new(),
                     };
 
+                    let mut all_errors: Vec<(String, String)> = Vec::new();
+
                     for (idx, backend) in backends_to_try.iter().enumerate() {
                         let backend_id = backend.id().to_string();
                         let backend_name = backend.name().to_string();
@@ -1133,17 +1135,23 @@ pub async fn ai_worker_loop(
                             }
                         });
 
+                        log::info!("[{}] Trying backend '{}' ({}/{})...",
+                            bname, backend_id, idx + 1, backends_to_try.len());
+
                         let result = backend.execute(&ai_request, progress_tx).await;
                         progress_handle.abort();
 
                         match result {
                             Ok(resp) => {
+                                log::info!("[{}] Backend '{}' succeeded", bname, backend_id);
                                 response_text = resp.text;
                                 _used_backend = resp.backend_id;
                                 break;
                             }
                             Err(err) => {
                                 log::warn!("[{}] Backend '{}' failed: {}", bname, backend_id, err);
+                                all_errors.push((backend_id.clone(), err.message.clone()));
+
                                 if err.retriable && idx + 1 < backends_to_try.len() {
                                     let next = backends_to_try[idx + 1].name();
                                     log::info!("[{}] Falling back to '{}'", bname, next);
@@ -1157,8 +1165,17 @@ pub async fn ai_worker_loop(
                                         });
                                     }
                                 } else {
-                                    response_text = format!("All backends failed. Last error: {}", err);
+                                    // All backends exhausted — show detailed error report.
+                                    let error_report = all_errors.iter()
+                                        .map(|(id, msg)| format!("• {}: {}", id, msg))
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    response_text = format!(
+                                        "All {} backend(s) failed:\n\n{}\n\nTry /model to see which backends are available.",
+                                        all_errors.len(), error_report
+                                    );
                                     _used_backend = backend_id;
+                                    log::error!("[{}] All backends failed:\n{}", bname, error_report);
                                 }
                             }
                         }
