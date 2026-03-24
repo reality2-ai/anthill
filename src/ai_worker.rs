@@ -1050,6 +1050,8 @@ pub async fn ai_worker_loop(
                 let backends_to_try: Vec<_> = if let Some(ref ai_cfg) = cfg.ai_config {
                     // [ai] section exists — use category/explicit resolution.
                     let ids = ai_cfg.resolve_backends("");
+                    log::info!("[{}] AI config active: default_category='{}', resolved ids={:?}",
+                        bname, ai_cfg.default_category, ids);
                     if ids.is_empty() {
                         // [ai] exists but no category/backends set — map legacy names.
                         cfg.backends.iter()
@@ -1070,6 +1072,8 @@ pub async fn ai_worker_loop(
                 } else {
                     // No [ai] config AND no explicit backends list.
                     // Use all registered backends (auto-detected CLIs + ollama).
+                    log::info!("[{}] No [ai] config and no explicit backends — using all {} registered backends",
+                        bname, registry.all().len());
                     registry.all()
                 };
 

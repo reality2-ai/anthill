@@ -49,9 +49,15 @@ impl BackendRegistry {
         self.backends.keys().cloned().collect()
     }
 
-    /// All registered backends.
+    /// All registered backends, sorted by quality tier (best first).
     pub fn all(&self) -> Vec<Arc<dyn AiBackend>> {
-        self.backends.values().cloned().collect()
+        let mut backends: Vec<_> = self.backends.values().cloned().collect();
+        // Sort by quality descending, then by cost ascending (prefer capable, then cheap).
+        backends.sort_by(|a, b| {
+            b.tags().quality_tier.cmp(&a.tags().quality_tier)
+                .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
+        });
+        backends
     }
 
     /// Find backends belonging to a category, in preference order.

@@ -375,7 +375,7 @@ pub struct AiConfig {
     pub categories: HashMap<String, Vec<String>>,
 
     /// Allow users to override engine selection per-request via `/model`.
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub allow_runtime_selection: bool,
 
     /// Maximum cost per request in USD (0 = unlimited).
@@ -578,5 +578,36 @@ intellectual = ["claude-cli", "anthropic-claude-opus"]
     fn empty_ai_config_is_not_configured() {
         let cfg: Config = toml::from_str("name = \"Test\"").unwrap();
         assert!(!cfg.ai.is_configured());
+    }
+
+    #[test]
+    fn web_save_roundtrip_with_category() {
+        // Simulate exactly what the web UI PUT handler builds.
+        let cfg = Config {
+            name: Some("Test".into()),
+            ai: AiConfig {
+                default_category: "intellectual".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        eprintln!("--- Serialized TOML ---\n{}\n---", toml_str);
+
+        // Verify the [ai] section appears.
+        assert!(toml_str.contains("[ai]"), "TOML must contain [ai] section");
+        assert!(
+            toml_str.contains("intellectual"),
+            "TOML must contain 'intellectual'"
+        );
+
+        // Parse back and verify.
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.ai.default_category, "intellectual");
+        assert!(
+            parsed.ai.is_configured(),
+            "is_configured() must be true after roundtrip"
+        );
     }
 }
