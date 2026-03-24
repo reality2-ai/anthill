@@ -263,13 +263,6 @@ else
         echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
         echo ""
     fi
-        echo "  DEV mode — debug logging enabled."
-        echo "  Re-install without 'dev' for production: ./install.sh"
-    fi
-    echo ""
-    echo "  Web dashboard:"
-    echo "    http://localhost:3000 (or your Tailscale HTTPS URL)"
-    echo ""
 fi
 
 # Common commands for all platforms.
