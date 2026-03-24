@@ -17,6 +17,7 @@ r2-wire   = { path = "crates/r2-wire" }
 r2-fnv    = { path = "crates/r2-fnv" }
 r2-cbor   = { path = "crates/r2-cbor" }
 r2-trust  = { path = "crates/r2-trust", features = ["std"] }
+r2-transport = { path = "crates/r2-transport", features = ["std"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -31,8 +32,11 @@ clap = { version = "4", features = ["derive"] }
 log = "0.4"
 env_logger = "0.11"
 
-# HTTP client (for Claude API)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# HTTP client (for Claude API and AI backends)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# Async trait (for AI backend abstraction)
+async-trait = "0.1"
 
 # Serialisation
 serde = { version = "1", features = ["derive"] }
@@ -83,6 +87,7 @@ members = [
     "crates/r2-fnv",
     "crates/r2-cbor",
     "crates/r2-trust",
+    "crates/r2-transport",
 ]
 
 [workspace.package]

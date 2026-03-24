@@ -289,6 +289,7 @@ async fn get_config(
                     "system_prompt": cfg.claude.system_prompt.unwrap_or_default(),
                     "backend_strategy": cfg.claude.backend_strategy,
                     "backends": cfg.claude.backends,
+                    "ai_default_category": cfg.ai.default_category,
                     "rumination": {
                         "enabled": cfg.claude.rumination.enabled,
                         "interval_secs": cfg.claude.rumination.interval_secs,
@@ -316,6 +317,7 @@ struct ConfigUpdate {
     name: Option<String>,
     backend_strategy: Option<crate::config::BackendStrategy>,
     backends: Option<Vec<String>>,
+    ai_default_category: Option<String>,
     telegram_token: Option<String>,
     telegram_allow: Option<Vec<i64>>,
     slack_bot_token: Option<String>,
@@ -359,6 +361,10 @@ async fn put_config(
             backup_interval_hours: req.backup_interval_hours.unwrap_or(0),
             backup_remote: req.backup_remote.clone().unwrap_or_default(),
             rumination: req.rumination.clone().unwrap_or_default(),
+            ..Default::default()
+        },
+        ai: crate::config::AiConfig {
+            default_category: req.ai_default_category.clone().unwrap_or_default(),
             ..Default::default()
         },
     };
@@ -414,6 +420,7 @@ async fn create_ant(
             system_prompt: req.system_prompt.filter(|s| !s.is_empty()),
             ..Default::default()
         },
+        ..Default::default()
     };
 
     let config = match toml::to_string_pretty(&cfg) {
@@ -455,9 +462,9 @@ async fn delete_ant(
 
 /// GET /api/backends — list available AI backends.
 async fn list_backends() -> impl IntoResponse {
-    let backends = crate::ai_worker::detect_backends();
-    Json(backends.iter().map(|(name, installed)| {
-        serde_json::json!({ "name": name, "installed": installed })
+    let backends = crate::ai_backends::detect_all_backends();
+    Json(backends.iter().map(|(id, name, installed)| {
+        serde_json::json!({ "id": id, "name": name, "installed": installed })
     }).collect::<Vec<_>>())
 }
 

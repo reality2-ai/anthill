@@ -1,6 +1,6 @@
 //! Bot registry — shared state between bot tasks and the web server.
 
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
@@ -8,7 +8,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use crate::ai_worker::{CliRequest, FollowUpQueue, StatsMap, TaskMap};
 
 /// Event broadcast to WebSocket clients.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(dead_code)]
 pub enum WsEvent {

@@ -1,6 +1,7 @@
 //! Configuration — loads from TOML file.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Top-level ANT config.
@@ -18,6 +19,14 @@ pub struct Config {
     pub telegram: TelegramConfig,
     pub slack: SlackConfig,
     pub claude: ClaudeConfig,
+
+    /// AI engine configuration — pluggable backend selection.
+    ///
+    /// When present, this takes precedence over `claude.backend_strategy`
+    /// for backend selection.  The `[claude]` section remains authoritative
+    /// for workspace paths, system prompt, and other non-AI settings.
+    #[serde(default)]
+    pub ai: AiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -342,6 +351,81 @@ impl Default for ClaudeConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AI engine configuration (new pluggable system)
+// ---------------------------------------------------------------------------
+
+/// Per-ANT AI engine configuration.
+///
+/// Controls how this ANT selects AI backends.  Fully optional — if absent,
+/// falls back to `[claude].backend_strategy` for backward compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AiConfig {
+    /// Default category for requests without explicit selection.
+    /// E.g. "balanced", "intellectual", "fast", "local", "cost_effective".
+    pub default_category: String,
+
+    /// Explicit backend ID list with fallback order.
+    #[serde(default)]
+    pub backends: Vec<String>,
+
+    /// Category → ordered backend ID list.
+    #[serde(default)]
+    pub categories: HashMap<String, Vec<String>>,
+
+    /// Allow users to override engine selection per-request via `/model`.
+    #[serde(default = "default_true")]
+    pub allow_runtime_selection: bool,
+
+    /// Maximum cost per request in USD (0 = unlimited).
+    #[serde(default)]
+    pub max_cost_per_request_usd: f64,
+
+    /// Maximum daily cost in USD (0 = unlimited).
+    #[serde(default)]
+    pub max_daily_cost_usd: f64,
+
+    /// Per-backend configuration blocks.
+    #[serde(default)]
+    pub backends_config: HashMap<String, crate::ai_backends::types::BackendConfig>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl AiConfig {
+    /// Returns true if this section has been explicitly configured.
+    pub fn is_configured(&self) -> bool {
+        !self.default_category.is_empty()
+            || !self.backends.is_empty()
+            || !self.categories.is_empty()
+            || !self.backends_config.is_empty()
+    }
+
+    /// Resolve which backends to try for a given request.
+    pub fn resolve_backends(&self, selector: &str) -> Vec<String> {
+        let effective = if selector.is_empty() {
+            if !self.default_category.is_empty() {
+                &self.default_category
+            } else if !self.backends.is_empty() {
+                return self.backends.clone();
+            } else {
+                return Vec::new();
+            }
+        } else {
+            selector
+        };
+
+        if let Some(ids) = self.categories.get(effective) {
+            return ids.clone();
+        }
+
+        vec![effective.to_string()]
+    }
+}
+
 impl Config {
     /// Load config from a TOML file.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
@@ -364,7 +448,8 @@ mod tests {
         let cfg = Config::default();
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.claude.backends, vec!["claude".to_string()]);
+        // backends defaults to empty vec (strategy-based selection is preferred)
+        assert!(parsed.claude.backends.is_empty());
         assert_eq!(parsed.claude.memory_dir, "memory");
         assert!(parsed.claude.skip_permissions);
         assert!(!parsed.claude.sync_channels);
@@ -394,6 +479,7 @@ mod tests {
                 backup_remote: "origin".into(),
                 ..Default::default()
             },
+            ..Default::default()
         };
 
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -416,7 +502,7 @@ name = "Minimal"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.name, Some("Minimal".into()));
-        assert_eq!(cfg.claude.backends, vec!["claude".to_string()]);
+        assert!(cfg.claude.backends.is_empty());
         assert!(cfg.claude.skip_permissions);
         assert!(cfg.telegram.token.is_none());
     }
@@ -426,7 +512,7 @@ name = "Minimal"
         let path = std::path::PathBuf::from("/tmp/anthill-test-nonexistent/ant.toml");
         let cfg = Config::load(&path).unwrap();
         assert!(cfg.name.is_none());
-        assert_eq!(cfg.claude.backends, vec!["claude".to_string()]);
+        assert!(cfg.claude.backends.is_empty());
     }
 
     #[test]
@@ -446,5 +532,51 @@ name = "Minimal"
         assert_eq!(loaded.name, Some("RoundTrip".into()));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ai_config_roundtrips() {
+        let toml_str = r#"
+name = "AI Test"
+
+[ai]
+default_category = "intellectual"
+allow_runtime_selection = true
+max_cost_per_request_usd = 0.5
+
+[ai.categories]
+fast = ["groq-llama3", "openai-gpt4o-mini"]
+intellectual = ["claude-cli", "anthropic-claude-opus"]
+"#;
+        let cfg: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.ai.default_category, "intellectual");
+        assert!(cfg.ai.allow_runtime_selection);
+        assert!((cfg.ai.max_cost_per_request_usd - 0.5).abs() < 0.001);
+        assert_eq!(
+            cfg.ai.categories.get("fast").unwrap(),
+            &vec!["groq-llama3", "openai-gpt4o-mini"]
+        );
+        assert!(cfg.ai.is_configured());
+    }
+
+    #[test]
+    fn ai_config_resolve_backends() {
+        let ai = AiConfig {
+            default_category: "fast".into(),
+            categories: {
+                let mut m = HashMap::new();
+                m.insert("fast".into(), vec!["groq".into(), "openai".into()]);
+                m
+            },
+            ..Default::default()
+        };
+        let resolved = ai.resolve_backends("");
+        assert_eq!(resolved, vec!["groq", "openai"]);
+    }
+
+    #[test]
+    fn empty_ai_config_is_not_configured() {
+        let cfg: Config = toml::from_str("name = \"Test\"").unwrap();
+        assert!(!cfg.ai.is_configured());
     }
 }

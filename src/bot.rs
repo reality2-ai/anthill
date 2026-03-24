@@ -118,6 +118,9 @@ pub async fn run_bot(
 
     let backup_working_dir = working_dir.clone();
     let maintenance_memory_dir = memory_dir.clone();
+    // Build the AI backend registry from config.
+    let backend_registry = crate::ai_backends::build_registry(&cfg);
+
     let worker_config = ai_worker::CliWorkerConfig {
         working_dir,
         memory_dir,
@@ -129,6 +132,8 @@ pub async fn run_bot(
         backend_strategy: cfg.claude.backend_strategy.clone(),
         worker_timeout_secs: cfg.claude.worker_timeout_secs,
         allow_base_code_changes: cfg.claude.allow_base_code_changes,
+        backend_registry: Some(backend_registry),
+        ai_config: if cfg.ai.is_configured() { Some(cfg.ai.clone()) } else { None },
     };
 
     // Forward events to the global broadcast if in supervisor mode.

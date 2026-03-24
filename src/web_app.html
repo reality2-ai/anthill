@@ -613,6 +613,24 @@
       </div>
     </div>
 
+    <h3 class="section-title">AI Engine Category (advanced)</h3>
+    <div class="field" style="margin-bottom:8px">
+      <span class="field-label">Default Category <span style="color:var(--text-dim)">(overrides strategy above when set)</span></span>
+      <select id="c-ai-category" class="field-input" style="padding:8px 10px;cursor:pointer">
+        <option value="">Use backend strategy above</option>
+        <option value="balanced">Balanced — good mix of speed, cost, and quality</option>
+        <option value="intellectual">Intellectual — best reasoning capability</option>
+        <option value="fast">Fast — fastest response time</option>
+        <option value="cost_effective">Cost-effective — lowest cost per request</option>
+        <option value="local">Local — on-premise only (privacy, no data leaves machine)</option>
+        <option value="specialized:coding">Specialized: Coding</option>
+      </select>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
+        When set, uses the pluggable AI backend registry with API backends (OpenAI, Anthropic, etc.) and category-based selection.
+        Type <code>/model</code> in chat to see available engines at runtime.
+      </div>
+    </div>
+
     <h3 class="section-title">Telegram (optional)</h3>
     <div class="field">
       <span class="field-label">Bot Token <span style="color:var(--text-dim)">(from @BotFather, leave empty to disable)</span></span>
@@ -2372,6 +2390,7 @@ async function showConfigModal(antId) {
       document.getElementById('c-name').value = cfg.name || '';
       document.getElementById('c-backend-strategy').value = cfg.backend_strategy || 'cost_optimized';
       updateBackendVisibility();
+      document.getElementById('c-ai-category').value = cfg.ai_default_category || '';
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
@@ -2449,6 +2468,7 @@ async function saveConfig() {
     backend_strategy: strategy,
     // Only include backends when using manual strategy
     backends: strategy === 'manual' ? (backends.length > 0 ? backends : ['claude']) : null,
+    ai_default_category: document.getElementById('c-ai-category').value,
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,
     working_dir: document.getElementById('c-workdir').value.trim(),

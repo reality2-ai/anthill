@@ -4,6 +4,7 @@
 //!   anthill --config bot.toml              # single bot
 //!   anthill --supervise ~/.config/anthill # multi-bot + web dashboard
 
+mod ai_backends;
 mod backup;
 mod bot;
 mod ai_worker;
@@ -25,6 +26,7 @@ mod specgen;
 mod plugins;
 mod registry;
 mod sentants;
+mod relay;
 mod trust;
 mod supervisor;
 mod web;

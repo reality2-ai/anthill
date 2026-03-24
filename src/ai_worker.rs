@@ -63,6 +63,10 @@ pub struct CliWorkerConfig {
     pub worker_timeout_secs: u64,
     /// Allow the AI to modify files outside the working directory. Default: false.
     pub allow_base_code_changes: bool,
+    /// AI backend registry (new pluggable system).
+    pub backend_registry: Option<crate::ai_backends::BackendRegistry>,
+    /// AI engine configuration from `[ai]` section.
+    pub ai_config: Option<crate::config::AiConfig>,
 }
 
 /// Per-user usage statistics (shared with sentant for /usage command).
@@ -604,6 +608,52 @@ fn build_rumination_followup(previous_response: &str) -> String {
 }
 
 /// Detect which AI backends are installed on this system.
+/// Handle `/model` and `/backends` commands.
+fn handle_model_command(message: &str, config: &CliWorkerConfig) -> String {
+    let arg = message.strip_prefix("/model ")
+        .or_else(|| message.strip_prefix("/backends "))
+        .unwrap_or("")
+        .trim();
+
+    if let Some(ref registry) = config.backend_registry {
+        if arg.is_empty() {
+            let mut lines = vec!["**Available AI backends:**\n".to_string()];
+            for b in registry.all() {
+                let cats: Vec<String> = b.tags().categories.iter().map(|c| c.to_string()).collect();
+                lines.push(format!(
+                    "- **{}** — {} (quality:{}, speed:{}, cost:{})\n  Categories: {}",
+                    b.id(), b.name(),
+                    b.tags().quality_tier, b.tags().speed_tier, b.tags().cost_tier,
+                    if cats.is_empty() { "none".into() } else { cats.join(", ") },
+                ));
+            }
+            lines.push("\n**Categories:** cost_effective, intellectual, fast, local, balanced".into());
+            lines.push("Usage: `/model <category>` to see which backends handle a category".into());
+            lines.join("\n")
+        } else {
+            let resolved = registry.resolve(arg);
+            if resolved.is_empty() {
+                format!("No backends found for '{}'. Available: {}", arg,
+                    registry.ids().join(", "))
+            } else {
+                let names: Vec<String> = resolved.iter()
+                    .map(|b| format!("{}({})", b.id(), b.name()))
+                    .collect();
+                format!("**Backends for '{}':** {}\n\n(First available will be used, others are fallback)",
+                    arg, names.join(" → "))
+            }
+        }
+    } else {
+        let installed = detect_backends();
+        let lines: Vec<String> = installed.iter()
+            .map(|(name, avail)| format!("- {} {}", name, if *avail { "✓" } else { "✗" }))
+            .collect();
+        format!("**AI backends (legacy mode):**\n{}\n\nCurrent: [{}]",
+            lines.join("\n"),
+            config.backends.join(", "))
+    }
+}
+
 pub fn detect_backends() -> Vec<(String, bool)> {
     crate::backends::detect_backends()
 }
@@ -976,6 +1026,24 @@ pub async fn ai_worker_loop(
             last_decay = Instant::now();
         }
 
+        // --- /model and /backends — handled directly, no AI backend needed ---
+        if req.message == "/model" || req.message == "/backends" || req.message.starts_with("/model ") {
+            let reply = handle_model_command(&req.message, &config);
+            if let Ok(mut q) = response_queue.lock() {
+                q.push_back(CliResponse { chat_id: req.chat_id, text: reply.clone(), task_id: req.task_id });
+            }
+            if let Some(ref tx) = event_tx {
+                let _ = tx.send(crate::registry::WsEvent::Message {
+                    bot: bot_name.to_string(),
+                    chat_id: req.chat_id,
+                    text: reply.clone(),
+                    task_id: req.task_id,
+                });
+            }
+            let _ = telegram_tx.send((req.chat_id, reply));
+            continue;
+        }
+
         // --- Special commands ---
         let is_analytical = req.message.starts_with("/analyse ")
             || req.message == "/reflect"
@@ -1179,22 +1247,129 @@ pub async fn ai_worker_loop(
                 }
             });
 
-            // Determine backend list based on strategy.
+            // ── Registry-based backend execution ──────────────────────
+            // When a BackendRegistry is available and [ai] config is set,
+            // resolve backends through the registry (supports categories,
+            // API backends, etc.).  Falls back to the upstream
+            // strategy-based code path otherwise.
+            let mut response_text = String::new();
+            let mut _used_backend = String::new();
+
+            let used_registry = if let (Some(ref registry), Some(ref ai_cfg)) = (&cfg.backend_registry, &cfg.ai_config) {
+                let ids = ai_cfg.resolve_backends("");
+                let backends_to_try: Vec<_> = if ids.is_empty() {
+                    // No AI config overrides — map legacy names through registry.
+                    cfg.backends.iter()
+                        .map(|b| crate::ai_backends::legacy_name_to_id(b))
+                        .flat_map(|id| registry.resolve(&id))
+                        .collect()
+                } else {
+                    ids.into_iter()
+                        .flat_map(|id| registry.resolve(&id))
+                        .collect()
+                };
+
+                if backends_to_try.is_empty() {
+                    false
+                } else {
+                    let ai_request = crate::ai_backends::AiRequest {
+                        task_id,
+                        chat_id,
+                        message: message_for_backends.clone(),
+                        system_prompt: system_prompt_for_backends.clone(),
+                        working_dir: cfg.working_dir.clone(),
+                        skip_permissions: cfg.skip_permissions,
+                        continue_session,
+                        context: std::collections::HashMap::new(),
+                    };
+
+                    for (idx, backend) in backends_to_try.iter().enumerate() {
+                        let backend_id = backend.id().to_string();
+                        let backend_name = backend.name().to_string();
+                        if let Ok(mut b) = task_live_backend.lock() { *b = backend_id.clone(); }
+                        if let Ok(mut p) = task_live_progress.lock() {
+                            *p = Some(format!("Starting {}...", backend_name));
+                        }
+
+                        let (progress_tx, mut progress_rx) =
+                            tokio::sync::mpsc::unbounded_channel::<crate::ai_backends::AiProgress>();
+
+                        let progress_etx = etx.clone();
+                        let progress_bname = bname.clone();
+                        let progress_task_live = Arc::clone(&task_live_progress);
+                        let progress_tg_chat = tg_chat;
+                        let progress_ttx = ttx.clone();
+                        let progress_handle = tokio::spawn(async move {
+                            while let Some(prog) = progress_rx.recv().await {
+                                if let Ok(mut p) = progress_task_live.lock() {
+                                    *p = Some(prog.detail.clone());
+                                }
+                                if prog.kind == "question" && progress_tg_chat != 0 {
+                                    let _ = progress_ttx.send((progress_tg_chat,
+                                        format!("[Task #{}] {}\n\nReply with /followup <answer>",
+                                            prog.task_id, prog.detail)));
+                                }
+                                if let Some(ref tx) = progress_etx {
+                                    let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                        bot: progress_bname.to_string(),
+                                        task_id: prog.task_id,
+                                        kind: prog.kind,
+                                        detail: prog.detail,
+                                    });
+                                }
+                            }
+                        });
+
+                        let result = backend.execute(&ai_request, progress_tx).await;
+                        progress_handle.abort();
+
+                        match result {
+                            Ok(resp) => {
+                                response_text = resp.text;
+                                _used_backend = resp.backend_id;
+                                break;
+                            }
+                            Err(err) => {
+                                log::warn!("[{}] Backend '{}' failed: {}", bname, backend_id, err);
+                                if err.retriable && idx + 1 < backends_to_try.len() {
+                                    let next = backends_to_try[idx + 1].name();
+                                    log::info!("[{}] Falling back to '{}'", bname, next);
+                                    if let Some(ref tx) = etx {
+                                        let _ = tx.send(crate::registry::WsEvent::TaskProgress {
+                                            bot: bname.to_string(),
+                                            task_id,
+                                            kind: "fallback".into(),
+                                            detail: format!("{} failed, trying {}...",
+                                                backend_name, next),
+                                        });
+                                    }
+                                } else {
+                                    response_text = format!("All backends failed. Last error: {}", err);
+                                    _used_backend = backend_id;
+                                }
+                            }
+                        }
+                    }
+                    true
+                }
+            } else {
+                false
+            };
+
+            // ── Legacy/strategy-based backend execution ────────────────
+            // Runs when no [ai] config is set or registry path returned nothing.
+            if !used_registry && response_text.is_empty() {
+
             let available = crate::backends::detect_backends();
             let backend_list = if !cfg.backends.is_empty() {
-                // Legacy: explicit backend list
                 cfg.backends.clone()
             } else {
-                // Use strategy-based selection
                 cfg.backend_strategy.get_backends(&available)
             };
-            let mut response_text = if backend_list.is_empty() {
+            if backend_list.is_empty() {
                 log::warn!("[{}] No backends available", bname);
-                "No AI backends available. Install Claude, Ollama, or another supported CLI.".to_string()
-            } else {
-                String::new()
-            };
-            let mut _used_backend = String::new();
+                response_text = "No AI backends available. Install Claude, Ollama, or another supported CLI.".to_string();
+            }
 
             for (idx, backend) in backend_list.iter().enumerate() {
                 // Track which backend is active.
@@ -1487,6 +1662,8 @@ pub async fn ai_worker_loop(
                     }
                 }
             }
+
+            } // end if !used_registry
 
             typing_handle.abort();
 

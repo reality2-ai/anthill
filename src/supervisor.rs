@@ -27,6 +27,8 @@ pub struct SupervisorConfig {
     pub http_port: u16,
     /// HTTP bind address.
     pub http_bind: String,
+    /// Relay configuration — distributed deployment.
+    pub relay: crate::relay::RelayConfig,
 }
 
 impl Default for SupervisorConfig {
@@ -38,6 +40,7 @@ impl Default for SupervisorConfig {
             max_restarts: 10,
             http_port: 3000,
             http_bind: "0.0.0.0".into(),
+            relay: Default::default(),
         }
     }
 }
@@ -215,6 +218,50 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, bind));
 
     log::info!("Web dashboard at http://{}", bind);
+
+    // ── Relay: distributed deployment ──────────────────────────────
+    if sup_cfg.relay.is_active() {
+        if sup_cfg.relay.engine_listener {
+            let relay_port = if sup_cfg.relay.engine_port > 0 {
+                sup_cfg.relay.engine_port
+            } else {
+                3001
+            };
+            let relay_bind: SocketAddr = format!("{}:{}", sup_cfg.http_bind, relay_port)
+                .parse()
+                .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], relay_port)));
+            let engine_id = config_dir.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            tokio::spawn(crate::relay::run_engine_listener(
+                relay_bind,
+                Arc::clone(&registry),
+                trust.clone(),
+                engine_id,
+            ));
+            log::info!("Engine relay listener on {}", relay_bind);
+        }
+
+        if !sup_cfg.relay.remote_engines.is_empty() {
+            let gateway = crate::relay::WebGateway::new(
+                Arc::clone(&registry),
+                trust.clone(),
+            );
+            let credential = sup_cfg.relay.credential.clone();
+            let device_id = sup_cfg.relay.device_id.clone();
+            let engines = sup_cfg.relay.remote_engines.clone();
+
+            tokio::spawn(async move {
+                for url in &engines {
+                    match gateway.connect(url, &credential, &device_id).await {
+                        Ok(()) => log::info!("Connected to remote engine: {}", url),
+                        Err(e) => log::error!("Failed to connect to {}: {}", url, e),
+                    }
+                }
+            });
+        }
+    }
 
     // Monitor loop.
     let mut restart_counts: std::collections::HashMap<String, u32> =
