@@ -9,9 +9,9 @@
 //!
 //! Usage: anthill --export-graph --ant <name> --output graph.html
 
-use std::path::Path;
-use crate::store::KnowledgeStore;
 use crate::store::live::LiveKnowledgeStore;
+use crate::store::KnowledgeStore;
+use std::path::Path;
 
 // Embed vendor JS at compile time — makes the export fully self-contained.
 const THREE_JS: &str = include_str!("vendor/three.min.js");
@@ -53,9 +53,21 @@ struct CollectedCitation {
 /// Check if a URL is reachable (HEAD request, 5s timeout).
 /// Returns true if the URL responds with 2xx/3xx, false for 404/timeout/error.
 fn url_exists(url: &str) -> bool {
-    if url.is_empty() { return false; }
+    if url.is_empty() {
+        return false;
+    }
     let output = std::process::Command::new("curl")
-        .args(["-sI", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", "-L", url])
+        .args([
+            "-sI",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--max-time",
+            "5",
+            "-L",
+            url,
+        ])
         .output();
     match output {
         Ok(o) => {
@@ -73,10 +85,13 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
     let mut conf_count = 0;
     let mut strongest = Vec::new();
     let mut weakest = Vec::new();
-    let mut node_connections: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut node_connections: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let mut topic_summaries = Vec::new();
-    let mut node_summaries: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let mut topic_descriptions: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut node_summaries: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut topic_descriptions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut all_citations: Vec<CollectedCitation> = Vec::new();
     let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -100,18 +115,28 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
         for n in nodes_arr {
             if let (Some(label), Some(summary)) = (n["label"].as_str(), n["summary"].as_str()) {
                 if !summary.is_empty() && summary.len() > 10 {
-                    node_summaries.entry(label.to_string())
+                    node_summaries
+                        .entry(label.to_string())
                         .or_insert_with(|| summary.to_string());
                 }
                 // First node in each topic with a good summary becomes the topic description.
-                if n["tags"].as_array().map(|t| t.iter().any(|v| v.as_str() == Some("hub") || v.as_str() == Some("topic"))).unwrap_or(false) {
-                    topic_descriptions.entry(name.to_string())
+                if n["tags"]
+                    .as_array()
+                    .map(|t| {
+                        t.iter()
+                            .any(|v| v.as_str() == Some("hub") || v.as_str() == Some("topic"))
+                    })
+                    .unwrap_or(false)
+                {
+                    topic_descriptions
+                        .entry(name.to_string())
                         .or_insert_with(|| summary.to_string());
                 }
             }
         }
 
-        let node_labels: std::collections::HashMap<i64, String> = nodes_arr.iter()
+        let node_labels: std::collections::HashMap<i64, String> = nodes_arr
+            .iter()
             .filter_map(|n| {
                 let id = n["id"].as_i64()?;
                 let label = n["label"].as_str()?.to_string();
@@ -125,10 +150,18 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                 let relation = link["relation"].as_str().unwrap_or("?");
                 let source_id = link["source"].as_i64().unwrap_or(-1);
                 let target_id = link["target"].as_i64().unwrap_or(-1);
-                let from = node_labels.get(&source_id).cloned().unwrap_or_else(|| "?".into());
-                let to = node_labels.get(&target_id).cloned().unwrap_or_else(|| "?".into());
+                let from = node_labels
+                    .get(&source_id)
+                    .cloned()
+                    .unwrap_or_else(|| "?".into());
+                let to = node_labels
+                    .get(&target_id)
+                    .cloned()
+                    .unwrap_or_else(|| "?".into());
 
-                if relation == "?" { continue; } // Skip undetermined
+                if relation == "?" {
+                    continue;
+                } // Skip undetermined
 
                 total_conf += conf;
                 conf_count += 1;
@@ -143,7 +176,11 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                     for cite in cites {
                         let url = cite["url"].as_str().unwrap_or("").to_string();
                         let cite_id = cite["cite_id"].as_str().unwrap_or("").to_string();
-                        let key = if !url.is_empty() { url.clone() } else { cite_id.clone() };
+                        let key = if !url.is_empty() {
+                            url.clone()
+                        } else {
+                            cite_id.clone()
+                        };
                         if !key.is_empty() && seen_urls.insert(key) {
                             // Verify URL is reachable — skip broken/moved/fabricated links.
                             if !url.is_empty() && !url_exists(&url) {
@@ -152,14 +189,19 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                             }
                             let final_cite_id = if cite_id.is_empty() {
                                 format!("cite-{:04x}", all_citations.len() + 1)
-                            } else { cite_id };
+                            } else {
+                                cite_id
+                            };
                             all_citations.push(CollectedCitation {
                                 cite_id: final_cite_id,
                                 url,
                                 title: cite["title"].as_str().unwrap_or("").to_string(),
                                 author: cite["author"].as_str().unwrap_or("").to_string(),
                                 date: cite["date"].as_str().unwrap_or("").to_string(),
-                                ref_type: cite["ref_type"].as_str().unwrap_or("website").to_string(),
+                                ref_type: cite["ref_type"]
+                                    .as_str()
+                                    .unwrap_or("website")
+                                    .to_string(),
                                 quality: cite["quality"].as_f64().unwrap_or(0.5),
                                 supports: format!("{} {} {}", from, relation, to),
                             });
@@ -172,7 +214,11 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
             }
         }
 
-        let graph_avg = if graph_conf_count > 0 { graph_conf_sum / graph_conf_count as f64 } else { 0.0 };
+        let graph_avg = if graph_conf_count > 0 {
+            graph_conf_sum / graph_conf_count as f64
+        } else {
+            0.0
+        };
         topic_summaries.push((name.to_string(), n_count, e_count, graph_avg));
     }
 
@@ -191,7 +237,11 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
     GraphInsights {
         total_nodes,
         total_edges,
-        avg_confidence: if conf_count > 0 { total_conf / conf_count as f64 } else { 0.0 },
+        avg_confidence: if conf_count > 0 {
+            total_conf / conf_count as f64
+        } else {
+            0.0
+        },
         strongest_beliefs: strongest,
         weakest_beliefs: weakest,
         most_connected,
@@ -208,7 +258,9 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     html.push_str(&format!(
         "<h2>{} — Knowledge Summary</h2>\n\
          <p style='color:#64748b;font-size:13px'>Snapshot {} | Generated {}</p>\n",
-        ant_name, snapshot_id, crate::dateutil::datetime_now()
+        ant_name,
+        snapshot_id,
+        crate::dateutil::datetime_now()
     ));
 
     html.push_str("<div style='background:#1e293b;border-radius:8px;padding:24px 28px;margin:20px 0;line-height:1.8;font-size:14px'>\n");
@@ -222,49 +274,80 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
         each time. Ideas with lower confidence are still being investigated.</p>\n");
 
     // Overview.
-    let active_topics: Vec<&(String, usize, usize, f64)> = insights.topic_summaries.iter()
-        .filter(|(_, n, _, _)| *n > 0).collect();
+    let active_topics: Vec<&(String, usize, usize, f64)> = insights
+        .topic_summaries
+        .iter()
+        .filter(|(_, n, _, _)| *n > 0)
+        .collect();
 
-    let confidence_word = if insights.avg_confidence >= 0.7 { "strong" }
-        else if insights.avg_confidence >= 0.5 { "moderate" }
-        else if insights.avg_confidence >= 0.3 { "developing" }
-        else { "early" };
+    let confidence_word = if insights.avg_confidence >= 0.7 {
+        "strong"
+    } else if insights.avg_confidence >= 0.5 {
+        "moderate"
+    } else if insights.avg_confidence >= 0.3 {
+        "developing"
+    } else {
+        "early"
+    };
 
     if active_topics.len() == 1 {
         let (name, nodes, edges, avg) = active_topics[0];
         let pretty = name.replace('-', " ");
-        let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
+        let desc = insights
+            .topic_descriptions
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_default();
         html.push_str(&format!(
             "<p>This summary covers <b>{}</b>{}. The knowledge base contains {} concepts \
              connected by {} relationships, with an overall confidence of {:.0}%. \
              The evidence base is {} — {}.</p>\n",
             pretty,
-            if desc.is_empty() { String::new() } else { format!(". {}", desc) },
-            nodes, edges, avg * 100.0, confidence_word,
+            if desc.is_empty() {
+                String::new()
+            } else {
+                format!(". {}", desc)
+            },
+            nodes,
+            edges,
+            avg * 100.0,
+            confidence_word,
             match confidence_word {
                 "strong" => "most ideas here have been rigorously tested and are well-supported",
-                "moderate" => "the core ideas are supported but would benefit from further investigation",
+                "moderate" =>
+                    "the core ideas are supported but would benefit from further investigation",
                 "developing" => "many ideas are still being explored and tested",
                 _ => "this is an early exploration of the subject",
             }
         ));
     } else if !active_topics.is_empty() {
-        let topic_names: Vec<String> = active_topics.iter()
-            .map(|(n, _, _, _)| n.replace('-', " ")).collect();
+        let topic_names: Vec<String> = active_topics
+            .iter()
+            .map(|(n, _, _, _)| n.replace('-', " "))
+            .collect();
         html.push_str(&format!(
             "<p>This summary covers {} areas of knowledge: {}. \
              Across all topics, there are {} concepts connected by {} relationships, \
              with an overall confidence level of {:.0}%.</p>\n",
-            active_topics.len(), format_list(&topic_names),
-            insights.total_nodes, insights.total_edges, insights.avg_confidence * 100.0
+            active_topics.len(),
+            format_list(&topic_names),
+            insights.total_nodes,
+            insights.total_edges,
+            insights.avg_confidence * 100.0
         ));
     }
 
     // Topic-by-topic narrative.
     for (idx, (name, nodes, edges, avg)) in insights.topic_summaries.iter().enumerate() {
-        if *nodes == 0 { continue; }
+        if *nodes == 0 {
+            continue;
+        }
         let pretty = name.replace('-', " ");
-        let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
+        let desc = insights
+            .topic_descriptions
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_default();
 
         html.push_str(&format!("<h3 style=\'margin-top:24px\'>{} <a href=\'#\' onclick=\'showTab(\"graph\",{});return false;\' \
             style=\'font-size:12px;color:#60a5fa;text-decoration:none;margin-left:8px\'>View graph →</a></h3>\n",
@@ -274,7 +357,11 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
             html.push_str(&format!("<p>{}</p>\n", desc));
         }
 
-        let density = if *nodes > 1 { *edges as f64 / *nodes as f64 } else { 0.0 };
+        let density = if *nodes > 1 {
+            *edges as f64 / *nodes as f64
+        } else {
+            0.0
+        };
         html.push_str(&format!(
             "<p>This area encompasses {} concepts with {} connections between them{}. \
              The average confidence across these relationships is {:.0}%{}.</p>\n",
@@ -289,19 +376,33 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
         ));
 
         // Key entities as flowing prose.
-        let relevant: Vec<(&String, &String)> = insights.node_summaries.iter()
-            .filter(|(_, s)| s.len() > 20).take(5).collect();
+        let relevant: Vec<(&String, &String)> = insights
+            .node_summaries
+            .iter()
+            .filter(|(_, s)| s.len() > 20)
+            .take(5)
+            .collect();
         if !relevant.is_empty() {
             html.push_str("<p>Key concepts include ");
             for (i, (label, summary)) in relevant.iter().enumerate() {
                 let short = if summary.len() > 150 {
                     let end = summary[..150].rfind(' ').unwrap_or(150);
                     format!("{}...", &summary[..end])
-                } else { summary.to_string() };
-                if i > 0 { html.push_str(". "); }
-                html.push_str(&format!("<b>{}</b>, which {}", label,
-                    if short.starts_with(|c: char| c.is_uppercase()) { short[..1].to_lowercase() + &short[1..] }
-                    else { short }));
+                } else {
+                    summary.to_string()
+                };
+                if i > 0 {
+                    html.push_str(". ");
+                }
+                html.push_str(&format!(
+                    "<b>{}</b>, which {}",
+                    label,
+                    if short.starts_with(|c: char| c.is_uppercase()) {
+                        short[..1].to_lowercase() + &short[1..]
+                    } else {
+                        short
+                    }
+                ));
             }
             html.push_str(".</p>\n");
         }
@@ -314,12 +415,29 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
             meaning they have survived genuine attempts at disproof from multiple angles, not simply \
             been confirmed repeatedly.</p>\n<p>");
         for (i, (from, to, rel, conf)) in insights.strongest_beliefs.iter().take(7).enumerate() {
-            let from_desc = insights.node_summaries.get(from.as_str())
-                .map(|s| { let short = if s.len() > 80 { format!("{}...", &s[..s[..80].rfind(' ').unwrap_or(80)]) } else { s.clone() }; format!(" ({})", short) })
+            let from_desc = insights
+                .node_summaries
+                .get(from.as_str())
+                .map(|s| {
+                    let short = if s.len() > 80 {
+                        format!("{}...", &s[..s[..80].rfind(' ').unwrap_or(80)])
+                    } else {
+                        s.clone()
+                    };
+                    format!(" ({})", short)
+                })
                 .unwrap_or_default();
-            if i > 0 { html.push_str(" "); }
-            html.push_str(&format!("<b>{}</b>{} {} <b>{}</b> ({:.0}% confidence).",
-                from, from_desc, rel, to, conf * 100.0));
+            if i > 0 {
+                html.push_str(" ");
+            }
+            html.push_str(&format!(
+                "<b>{}</b>{} {} <b>{}</b> ({:.0}% confidence).",
+                from,
+                from_desc,
+                rel,
+                to,
+                conf * 100.0
+            ));
         }
         html.push_str("</p>\n");
     }
@@ -330,7 +448,9 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
         html.push_str("<p>These ideas are still at an early stage. Low confidence does not mean an idea is \
             wrong — it means it has not yet been sufficiently tested against independent evidence.</p>\n<p>");
         for (i, (from, to, rel, conf)) in insights.weakest_beliefs.iter().take(5).enumerate() {
-            if i > 0 { html.push_str(" "); }
+            if i > 0 {
+                html.push_str(" ");
+            }
             html.push_str(&format!("The relationship between <b>{}</b> and <b>{}</b> ({}) currently sits at {:.0}% confidence.",
                 from, to, rel, conf * 100.0));
         }
@@ -340,17 +460,32 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
     // Central themes.
     if !insights.most_connected.is_empty() {
         html.push_str("<h3 style=\'margin-top:24px\'>Central Themes</h3>\n");
-        let central: Vec<String> = insights.most_connected.iter().take(5)
+        let central: Vec<String> = insights
+            .most_connected
+            .iter()
+            .take(5)
             .map(|(label, count)| {
-                let desc = insights.node_summaries.get(label.as_str())
-                    .map(|s| { let short = if s.len() > 100 { format!("{}...", &s[..s[..100].rfind(' ').unwrap_or(100)]) } else { s.clone() }; format!(" — {}", short) })
+                let desc = insights
+                    .node_summaries
+                    .get(label.as_str())
+                    .map(|s| {
+                        let short = if s.len() > 100 {
+                            format!("{}...", &s[..s[..100].rfind(' ').unwrap_or(100)])
+                        } else {
+                            s.clone()
+                        };
+                        format!(" — {}", short)
+                    })
                     .unwrap_or_default();
                 format!("<b>{}</b> ({} connections{})", label, count, desc)
-            }).collect();
+            })
+            .collect();
         html.push_str(&format!(
             "<p>The concepts that tie this knowledge together most strongly are: {}. \
              These act as hubs — understanding them provides the best foundation for \
-             understanding the broader subject matter.</p>\n", format_list(&central)));
+             understanding the broader subject matter.</p>\n",
+            format_list(&central)
+        ));
     }
 
     // Closing.
@@ -365,7 +500,6 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 
     html
 }
-
 
 /// Ask an AI to rewrite the raw insights as polished plain English.
 /// The user's guidance prompt is the primary instruction to the AI.
@@ -388,13 +522,15 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
          - Use as MANY of the provided citations as are relevant — don't just pick a few.\n\
          - The [cite-xxxx] codes will be automatically renumbered to [1], [2], etc.\n\
          - ONLY use codes from the provided list — NEVER invent a citation code."
-    } else { "" };
+    } else {
+        ""
+    };
 
     // The user's guidance is the primary prompt. If none provided, use a sensible default.
     let user_prompt = guidance.unwrap_or(
         "Summarise the knowledge in this area, looking for practical insights and solutions \
          that would work in the real world. Highlight what is well-established, what needs \
-         further investigation, and any surprising connections between ideas."
+         further investigation, and any surprising connections between ideas.",
     );
 
     let prompt = format!(
@@ -419,7 +555,9 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
     // and data while leaving space for the AI's response.
     let max_prompt_chars = 100000;
     let prompt = if prompt.len() > max_prompt_chars {
-        let truncated = &prompt[..prompt[..max_prompt_chars].rfind('\n').unwrap_or(max_prompt_chars)];
+        let truncated = &prompt[..prompt[..max_prompt_chars]
+            .rfind('\n')
+            .unwrap_or(max_prompt_chars)];
         format!("{}\n\n[... data truncated for length — focus on the topics and beliefs shown above ...]", truncated)
     } else {
         prompt
@@ -448,9 +586,13 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
 /// Post-process AI text to renumber citation codes [cite-xxxx] to [1], [2]...
 /// in order of first appearance. Returns the renumbered text and the
 /// ordered list of citations for the reference section.
-fn renumber_citations(text: &str, all_citations: &[CollectedCitation]) -> (String, Vec<CollectedCitation>) {
+fn renumber_citations(
+    text: &str,
+    all_citations: &[CollectedCitation],
+) -> (String, Vec<CollectedCitation>) {
     // Build a lookup from cite_id to citation.
-    let cite_map: std::collections::HashMap<&str, &CollectedCitation> = all_citations.iter()
+    let cite_map: std::collections::HashMap<&str, &CollectedCitation> = all_citations
+        .iter()
         .map(|c| (c.cite_id.as_str(), c))
         .collect();
 
@@ -478,9 +620,12 @@ fn renumber_citations(text: &str, all_citations: &[CollectedCitation]) -> (Strin
         }
     }
 
-    // Replace all [cite-xxxx] with [N] using the numbering.
+    // Replace all [cite-xxxx] with clickable [N] links that jump to the reference list.
     for (cite_id, num) in &id_to_num {
-        result = result.replace(&format!("[{}]", cite_id), &format!("[{}]", num));
+        result = result.replace(
+            &format!("[{}]", cite_id),
+            &format!("<a href='#ref-{}' style='color:#60a5fa;text-decoration:none;font-size:12px;vertical-align:super'>[{}]</a>", num, num),
+        );
     }
 
     (result, ordered)
@@ -494,14 +639,24 @@ fn format_list(items: &[String]) -> String {
         2 => format!("{} and {}", items[0], items[1]),
         _ => {
             let last = &items[items.len() - 1];
-            let rest: Vec<&str> = items[..items.len() - 1].iter().map(|s| s.as_str()).collect();
+            let rest: Vec<&str> = items[..items.len() - 1]
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
             format!("{}, and {}", rest.join(", "), last)
         }
     }
 }
 
 /// Export a single named graph.
-pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, output_path: &Path, guidance: Option<&str>, include_citations: bool) -> anyhow::Result<()> {
+pub fn export_single_graph(
+    memory_dir: &Path,
+    ant_name: &str,
+    graph_name: &str,
+    output_path: &Path,
+    guidance: Option<&str>,
+    include_citations: bool,
+) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
     let mut all_data = Vec::new();
@@ -520,7 +675,13 @@ pub fn export_single_graph(memory_dir: &Path, ant_name: &str, graph_name: &str, 
 }
 
 /// Export all graphs for an ANT.
-pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, guidance: Option<&str>, include_citations: bool) -> anyhow::Result<()> {
+pub fn export_ant_graphs(
+    memory_dir: &Path,
+    ant_name: &str,
+    output_path: &Path,
+    guidance: Option<&str>,
+    include_citations: bool,
+) -> anyhow::Result<()> {
     let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
 
     let graphs = store.list_graphs()?;
@@ -529,7 +690,9 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, 
     for g in &graphs {
         // Skip the citations graph in "export all" — it's an internal index,
         // not a topic. Citations are already attached to edges in topic graphs.
-        if g.name == "citations" || g.name == "uncategorised" { continue; }
+        if g.name == "citations" || g.name == "uncategorised" {
+            continue;
+        }
         if let Ok(viz) = store.to_visualization(&g.name) {
             all_data.push(serde_json::json!({
                 "name": g.name,
@@ -540,16 +703,31 @@ pub fn export_ant_graphs(memory_dir: &Path, ant_name: &str, output_path: &Path, 
         }
     }
 
-    generate_export_html(&all_data, ant_name, output_path, guidance, include_citations)
+    generate_export_html(
+        &all_data,
+        ant_name,
+        output_path,
+        guidance,
+        include_citations,
+    )
 }
 
-fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path: &Path, guidance: Option<&str>, include_citations: bool) -> anyhow::Result<()> {
+fn generate_export_html(
+    all_data: &[serde_json::Value],
+    title: &str,
+    output_path: &Path,
+    guidance: Option<&str>,
+    include_citations: bool,
+) -> anyhow::Result<()> {
     let ant_name = title;
 
-    let snapshot_id = format!("{:08x}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs());
+    let snapshot_id = format!(
+        "{:08x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    );
 
     let insights = compute_insights(all_data);
     let raw_insights_html = render_insights_html(&insights, ant_name, &snapshot_id);
@@ -566,59 +744,148 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
             Use as many as are relevant. Do not invent codes not on this list.\n\
             Sources are listed highest quality first.\n\n");
         let mut sorted_cites: Vec<&CollectedCitation> = insights.all_citations.iter().collect();
-        sorted_cites.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_cites.sort_by(|a, b| {
+            b.quality
+                .partial_cmp(&a.quality)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let citation_budget = 50000; // half of the 100K prompt budget
         let mut citation_chars = 0usize;
         let mut included = 0usize;
         for cite in &sorted_cites {
-            let line = format!("  [{}] {} — {}{}{} (supports: {})\n",
+            let line = format!(
+                "  [{}] {} — {}{}{} (supports: {})\n",
                 cite.cite_id,
-                if cite.title.is_empty() { &cite.url } else { &cite.title },
-                if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
-                if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
+                if cite.title.is_empty() {
+                    &cite.url
+                } else {
+                    &cite.title
+                },
+                if cite.author.is_empty() {
+                    String::new()
+                } else {
+                    format!("by {}. ", cite.author)
+                },
+                if cite.date.is_empty() {
+                    String::new()
+                } else {
+                    format!("({}). ", cite.date)
+                },
                 cite.url,
                 cite.supports,
             );
-            if citation_chars + line.len() > citation_budget { break; }
+            if citation_chars + line.len() > citation_budget {
+                break;
+            }
             raw_text.push_str(&line);
             citation_chars += line.len();
             included += 1;
         }
         if included < sorted_cites.len() {
-            raw_text.push_str(&format!("  [{} lower-quality sources omitted]\n", sorted_cites.len() - included));
+            raw_text.push_str(&format!(
+                "  [{} lower-quality sources omitted]\n",
+                sorted_cites.len() - included
+            ));
         }
         raw_text.push('\n');
     }
 
     // Then the knowledge data.
-    raw_text.push_str(&format!("Total: {} concepts, {} relationships, {:.0}% average confidence\n\n",
-        insights.total_nodes, insights.total_edges, insights.avg_confidence * 100.0));
+    raw_text.push_str(&format!(
+        "Total: {} concepts, {} relationships, {:.0}% average confidence\n\n",
+        insights.total_nodes,
+        insights.total_edges,
+        insights.avg_confidence * 100.0
+    ));
     for (name, nodes, edges, avg) in &insights.topic_summaries {
-        if *nodes == 0 { continue; }
-        let desc = insights.topic_descriptions.get(name.as_str()).cloned().unwrap_or_default();
-        raw_text.push_str(&format!("Topic: {} ({} concepts, {} relationships, {:.0}% confidence)\n",
-            name.replace('-', " "), nodes, edges, avg * 100.0));
-        if !desc.is_empty() { raw_text.push_str(&format!("  Description: {}\n", desc)); }
+        if *nodes == 0 {
+            continue;
+        }
+        let desc = insights
+            .topic_descriptions
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_default();
+        raw_text.push_str(&format!(
+            "Topic: {} ({} concepts, {} relationships, {:.0}% confidence)\n",
+            name.replace('-', " "),
+            nodes,
+            edges,
+            avg * 100.0
+        ));
+        if !desc.is_empty() {
+            raw_text.push_str(&format!("  Description: {}\n", desc));
+        }
     }
     raw_text.push_str("\nStrongest beliefs:\n");
     for (from, to, rel, conf) in insights.strongest_beliefs.iter().take(10) {
-        let desc = insights.node_summaries.get(from.as_str()).cloned().unwrap_or_default();
-        raw_text.push_str(&format!("  {} {} {} ({:.0}%){}\n", from, rel, to, conf * 100.0,
-            if desc.is_empty() { String::new() } else { format!(" — {}", if desc.len() > 150 { &desc[..150] } else { &desc }) }));
+        let desc = insights
+            .node_summaries
+            .get(from.as_str())
+            .cloned()
+            .unwrap_or_default();
+        raw_text.push_str(&format!(
+            "  {} {} {} ({:.0}%){}\n",
+            from,
+            rel,
+            to,
+            conf * 100.0,
+            if desc.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " — {}",
+                    if desc.len() > 150 {
+                        &desc[..150]
+                    } else {
+                        &desc
+                    }
+                )
+            }
+        ));
     }
     raw_text.push_str("\nWeakest beliefs (need investigation):\n");
     for (from, to, rel, conf) in insights.weakest_beliefs.iter().take(7) {
-        raw_text.push_str(&format!("  {} {} {} ({:.0}%)\n", from, rel, to, conf * 100.0));
+        raw_text.push_str(&format!(
+            "  {} {} {} ({:.0}%)\n",
+            from,
+            rel,
+            to,
+            conf * 100.0
+        ));
     }
     raw_text.push_str("\nMost connected concepts:\n");
     for (label, count) in insights.most_connected.iter().take(7) {
-        let desc = insights.node_summaries.get(label.as_str()).cloned().unwrap_or_default();
-        raw_text.push_str(&format!("  {} ({} connections){}\n", label, count,
-            if desc.is_empty() { String::new() } else { format!(" — {}", if desc.len() > 150 { &desc[..150] } else { &desc }) }));
+        let desc = insights
+            .node_summaries
+            .get(label.as_str())
+            .cloned()
+            .unwrap_or_default();
+        raw_text.push_str(&format!(
+            "  {} ({} connections){}\n",
+            label,
+            count,
+            if desc.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " — {}",
+                    if desc.len() > 150 {
+                        &desc[..150]
+                    } else {
+                        &desc
+                    }
+                )
+            }
+        ));
     }
     raw_text.push_str("\nKey entity descriptions:\n");
     for (label, summary) in insights.node_summaries.iter().take(15) {
-        let short = if summary.len() > 200 { &summary[..200] } else { summary.as_str() };
+        let short = if summary.len() > 200 {
+            &summary[..200]
+        } else {
+            summary.as_str()
+        };
         raw_text.push_str(&format!("  {}: {}\n", label, short));
     }
 
@@ -639,7 +906,9 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
             ant_name, snapshot_id, crate::dateutil::datetime_now()
         );
         // Build a lookup from normalized topic names to graph indices for "View graph" links.
-        let topic_to_idx: std::collections::HashMap<String, usize> = insights.topic_summaries.iter()
+        let topic_to_idx: std::collections::HashMap<String, usize> = insights
+            .topic_summaries
+            .iter()
             .enumerate()
             .map(|(i, (name, _, _, _))| (name.replace('-', " ").to_lowercase(), i))
             .collect();
@@ -662,19 +931,37 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
         // Convert markdown-ish AI output to HTML paragraphs.
         for line in renumbered.lines() {
             let line = line.trim();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             if line.starts_with("# ") {
                 let text = &line[2..];
-                html.push_str(&format!("<h3 style='margin-top:20px'>{}{}</h3>\n", text, find_graph_link(text)));
+                html.push_str(&format!(
+                    "<h3 style='margin-top:20px'>{}{}</h3>\n",
+                    text,
+                    find_graph_link(text)
+                ));
             } else if line.starts_with("## ") {
                 let text = &line[3..];
-                html.push_str(&format!("<h3 style='margin-top:20px'>{}{}</h3>\n", text, find_graph_link(text)));
+                html.push_str(&format!(
+                    "<h3 style='margin-top:20px'>{}{}</h3>\n",
+                    text,
+                    find_graph_link(text)
+                ));
             } else if line.starts_with("### ") {
                 let text = &line[4..];
-                html.push_str(&format!("<h4 style='margin-top:16px'>{}{}</h4>\n", text, find_graph_link(text)));
+                html.push_str(&format!(
+                    "<h4 style='margin-top:16px'>{}{}</h4>\n",
+                    text,
+                    find_graph_link(text)
+                ));
             } else if line.starts_with("**") && line.ends_with("**") {
-                let text = &line[2..line.len()-2];
-                html.push_str(&format!("<h4 style='margin-top:16px'>{}{}</h4>\n", text, find_graph_link(text)));
+                let text = &line[2..line.len() - 2];
+                html.push_str(&format!(
+                    "<h4 style='margin-top:16px'>{}{}</h4>\n",
+                    text,
+                    find_graph_link(text)
+                ));
             } else {
                 // Convert inline **bold** to <b>.
                 let line = line.replace("**", "<b>").replace("**", "</b>");
@@ -692,7 +979,9 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     };
 
     // Append reference list — ordered by first appearance in the document.
-    let insights_html = if !include_citations || (ordered_refs.is_empty() && insights.all_citations.is_empty()) {
+    let insights_html = if !include_citations
+        || (ordered_refs.is_empty() && insights.all_citations.is_empty())
+    {
         insights_html
     } else {
         let mut with_refs = insights_html;
@@ -700,22 +989,75 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
         with_refs.push_str("<h3>References</h3>\n");
         with_refs.push_str("<ol style='padding-left:20px'>\n");
         // Use the ordered list from renumbering (in order of first appearance).
-        let refs_to_show = if !ordered_refs.is_empty() { &ordered_refs } else { &insights.all_citations };
-        for cite in refs_to_show {
+        let refs_to_show = if !ordered_refs.is_empty() {
+            &ordered_refs
+        } else {
+            &insights.all_citations
+        };
+        for (ref_idx, cite) in refs_to_show.iter().enumerate() {
             let mut entry = String::new();
-            if !cite.author.is_empty() { entry.push_str(&format!("{}. ", cite.author)); }
+            if !cite.author.is_empty() {
+                entry.push_str(&format!("{}. ", cite.author));
+            }
+
+            // Build a link URL: use the citation's URL, or construct a search fallback.
+            let link_url = if !cite.url.is_empty() {
+                cite.url.clone()
+            } else {
+                // Construct a Google Scholar or web search URL from title + author.
+                let mut query_parts = Vec::new();
+                if !cite.title.is_empty() {
+                    query_parts.push(cite.title.clone());
+                }
+                if !cite.author.is_empty() {
+                    query_parts.push(cite.author.clone());
+                }
+                if query_parts.is_empty() {
+                    String::new()
+                } else if cite.ref_type == "book" || cite.ref_type == "peer_reviewed" {
+                    format!(
+                        "https://scholar.google.com/scholar?q={}",
+                        urlencoding::encode(&query_parts.join(" "))
+                    )
+                } else {
+                    format!(
+                        "https://www.google.com/search?q={}",
+                        urlencoding::encode(&query_parts.join(" "))
+                    )
+                }
+            };
+
             if !cite.title.is_empty() {
-                if !cite.url.is_empty() {
-                    entry.push_str(&format!("<a href='{}' style='color:#60a5fa'>{}</a>", cite.url, cite.title));
+                if !link_url.is_empty() {
+                    entry.push_str(&format!(
+                        "<a href='{}' target='_blank' rel='noopener' style='color:#60a5fa'>{}</a>",
+                        link_url, cite.title
+                    ));
                 } else {
                     entry.push_str(&format!("<em>{}</em>", cite.title));
                 }
-            } else if !cite.url.is_empty() {
-                entry.push_str(&format!("<a href='{}' style='color:#60a5fa'>{}</a>", cite.url, cite.url));
+            } else if !link_url.is_empty() {
+                let display = if cite.url.is_empty() {
+                    "Search"
+                } else {
+                    &cite.url
+                };
+                entry.push_str(&format!(
+                    "<a href='{}' target='_blank' rel='noopener' style='color:#60a5fa'>{}</a>",
+                    link_url, display
+                ));
             }
-            if !cite.date.is_empty() { entry.push_str(&format!(" ({})", cite.date)); }
-            entry.push_str(&format!(" <span style='color:#64748b'>[{}]</span>", cite.ref_type));
-            with_refs.push_str(&format!("<li>{}</li>\n", entry));
+            if !cite.date.is_empty() {
+                entry.push_str(&format!(" ({})", cite.date));
+            }
+            entry.push_str(&format!(
+                " <span style='color:#64748b'>[{}]</span>",
+                cite.ref_type
+            ));
+            if cite.url.is_empty() && !link_url.is_empty() {
+                entry.push_str(" <span style='color:#475569;font-size:11px'>(search link)</span>");
+            }
+            with_refs.push_str(&format!("<li id='ref-{}'>{}</li>\n", ref_idx + 1, entry));
         }
         with_refs.push_str("</ol>\n</div>\n");
         with_refs
@@ -724,7 +1066,8 @@ fn generate_export_html(all_data: &[serde_json::Value], title: &str, output_path
     let graphs_json = serde_json::to_string(&all_data)?;
     let timestamp = crate::dateutil::datetime_now();
 
-    let html = format!(r##"<!DOCTYPE html>
+    let html = format!(
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -950,7 +1293,11 @@ function searchNodes(q) {{
         insights_html = insights_html,
         graphs_json = graphs_json,
         version = env!("CARGO_PKG_VERSION"),
-        graph_tab_label = if all_data.len() > 1 { "Graphs" } else { "Graph" },
+        graph_tab_label = if all_data.len() > 1 {
+            "Graphs"
+        } else {
+            "Graph"
+        },
         three_js = THREE_JS,
         spritetext_js = SPRITETEXT_JS,
         forcegraph_js = FORCEGRAPH_JS,
@@ -959,13 +1306,21 @@ function searchNodes(q) {{
 
     std::fs::write(output_path, &html)?;
     let size_kb = html.len() / 1024;
-    println!("Exported {}'s knowledge graphs to {} ({} KB, snapshot {})",
-        ant_name, output_path.display(), size_kb, snapshot_id);
-    println!("  {} graphs with {} nodes, {} edges",
-        insights.topic_summaries.len(), insights.total_nodes, insights.total_edges);
+    println!(
+        "Exported {}'s knowledge graphs to {} ({} KB, snapshot {})",
+        ant_name,
+        output_path.display(),
+        size_kb,
+        snapshot_id
+    );
+    println!(
+        "  {} graphs with {} nodes, {} edges",
+        insights.topic_summaries.len(),
+        insights.total_nodes,
+        insights.total_edges
+    );
     println!("  Open in any browser — no server needed.");
     println!("  Tabs: Graph (3D interactive) | Insights (summary + key beliefs)");
 
     Ok(())
 }
-

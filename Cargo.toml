@@ -71,6 +71,7 @@ qrcode = "0.14"
 
 # UUID generation for knowledge graph snapshots
 uuid = { version = "1", features = ["v4"] }
+urlencoding = "2.1.3"
 
 # Process management (Unix process group signals)
 [target.'cfg(unix)'.dependencies]
