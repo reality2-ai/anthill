@@ -85,7 +85,7 @@ impl BackendKind {
             Self::OpenCode => "opencode",
             Self::Grok => "grok",
             Self::DeepSeek => "deepseek",
-            Self::LMStudio => "lm-studio",
+            Self::LMStudio => "lms",
         };
         std::process::Command::new("which")
             .arg(cmd)
