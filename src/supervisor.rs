@@ -275,7 +275,14 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
         // Check for reload signal (non-blocking).
         if reload_rx.try_recv().is_ok() {
             // Remove finished tasks so stopped ANTs can be re-discovered.
-            ant_tasks.retain(|(_, handle, _)| !handle.is_finished());
+            ant_tasks.retain(|(name, handle, _)| {
+                if handle.is_finished() {
+                    log::info!("Ant '{}' has stopped, will be re-discovered", name);
+                    false
+                } else {
+                    true
+                }
+            });
 
             let new_configs = discover_ants(&ants_dir);
             let running: Vec<String> = ant_tasks.iter().map(|(n, _, _)| n.clone()).collect();
@@ -290,6 +297,32 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                             Arc::clone(&registry),
                         );
                         ant_tasks.push((name.clone(), handle, cfg));
+                    }
+                } else {
+                    // ANT is already running — check if config has changed and restart if so.
+                    if let Some((_, _, old_cfg)) = ant_tasks.iter().find(|(n, _, _)| n == name) {
+                        if let Ok(new_cfg) = Config::load(config_path) {
+                            // Compare by serializing to TOML string (simple and reliable).
+                            let old_toml = toml::to_string(&*old_cfg).unwrap_or_default();
+                            let new_toml = toml::to_string(&new_cfg).unwrap_or_default();
+                            if old_toml != new_toml {
+                                log::info!("Config changed for ant '{}', restarting...", name);
+                                // Find and abort the old task.
+                                if let Some((_, handle, _)) = ant_tasks.iter().find(|(n, _, _)| n == name) {
+                                    handle.abort();
+                                }
+                                // Remove the old entry.
+                                ant_tasks.retain(|(n, _, _)| n != name);
+                                // Spawn new task with updated config.
+                                let handle = spawn_bot_task(
+                                    name.clone(),
+                                    new_cfg.clone(),
+                                    registry.global_tx.clone(),
+                                    Arc::clone(&registry),
+                                );
+                                ant_tasks.push((name.clone(), handle, new_cfg));
+                            }
+                        }
                     }
                 }
             }
