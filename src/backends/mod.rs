@@ -87,7 +87,9 @@ impl BackendKind {
             Self::DeepSeek => "deepseek",
             Self::LMStudio => {
                 // LM Studio CLI may be named lms, llmster, or lmstudio
-                for name in &["lms", "llmster", "lmstudio"] {
+                // Also check common installation paths
+                let paths = ["lms", "llmster", "lmstudio", ".lmstudio/bin/lms"];
+                for name in &paths {
                     if std::process::Command::new("which")
                         .arg(name)
                         .output()
@@ -95,6 +97,14 @@ impl BackendKind {
                         .unwrap_or(false)
                     {
                         return true;
+                    }
+                    // Check common install location
+                    if name.contains("lmstudio") {
+                        let home = std::env::var("HOME").unwrap_or_default();
+                        let path = format!("{}/{}", home, name);
+                        if std::path::Path::new(&path).exists() {
+                            return true;
+                        }
                     }
                 }
                 return false;
