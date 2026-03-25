@@ -120,6 +120,8 @@ pub struct AiRequest {
     pub skip_permissions: bool,
     /// Continue an existing session (CLI backends).
     pub continue_session: bool,
+    /// Memory directory for MCP tool access.
+    pub memory_dir: Option<std::path::PathBuf>,
     /// Extra key-value context (future use).
     pub context: HashMap<String, String>,
 }
@@ -170,6 +172,15 @@ impl AiError {
     }
     pub fn retriable(msg: impl Into<String>) -> Self {
         Self { message: msg.into(), retriable: true }
+    }
+    pub fn network(msg: impl Into<String>) -> Self {
+        Self { message: msg.into(), retriable: true }
+    }
+    pub fn api(msg: impl Into<String>) -> Self {
+        Self { message: msg.into(), retriable: true }
+    }
+    pub fn parse(msg: impl Into<String>) -> Self {
+        Self { message: msg.into(), retriable: false }
     }
 
     /// Classify an error message to decide retriability.

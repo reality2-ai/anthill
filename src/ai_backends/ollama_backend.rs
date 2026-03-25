@@ -62,6 +62,39 @@ impl AiBackend for OllamaBackend {
             detail: format!("Calling Ollama ({})...", self.model),
         });
 
+        // If memory_dir is available, use the tool-calling proxy via
+        // Ollama's OpenAI-compatible endpoint for MCP tool access.
+        if let Some(ref memory_dir) = request.memory_dir {
+            let client = reqwest::Client::new();
+            let api_url = format!("{}/v1", self.base_url);
+            let (text, tokens) = super::tool_proxy::run_tool_loop(
+                &client,
+                &api_url,
+                "", // No API key for local Ollama.
+                &self.model,
+                &request.system_prompt,
+                &request.message,
+                memory_dir,
+                &progress_tx,
+                request.task_id,
+                &self.id,
+            ).await?;
+
+            if text.is_empty() {
+                return Err(AiError::retriable(format!(
+                    "Ollama ({}): empty response", self.model
+                )));
+            }
+
+            return Ok(AiResponse {
+                text,
+                backend_id: self.id.clone(),
+                tokens,
+                cost_microdollars: Some(0),
+            });
+        }
+
+        // Fallback: use the existing generate API without tools.
         let client = crate::ollama::OllamaClient::new(Some(&self.base_url), None);
         let result = client.generate(
             &self.model,
@@ -74,7 +107,7 @@ impl AiBackend for OllamaBackend {
                 text,
                 backend_id: self.id.clone(),
                 tokens: None,
-                cost_microdollars: Some(0), // Local = free.
+                cost_microdollars: Some(0),
             }),
             Ok(_) => Err(AiError::retriable(format!(
                 "Ollama ({}): empty response", self.model

@@ -1093,6 +1093,7 @@ pub async fn ai_worker_loop(
                         working_dir: cfg.working_dir.clone(),
                         skip_permissions: cfg.skip_permissions,
                         continue_session,
+                        memory_dir: Some(std::path::PathBuf::from(&cfg.memory_dir)),
                         context: std::collections::HashMap::new(),
                     };
 

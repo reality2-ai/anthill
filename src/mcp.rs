@@ -11,9 +11,9 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::store::{KnowledgeStore, ValidatedNode, ValidatedEdge, ValidatedEvidence};
-use crate::store::live::LiveKnowledgeStore;
 use crate::reputation::{ReputationRegistry, SourceCategory};
+use crate::store::live::LiveKnowledgeStore;
+use crate::store::{KnowledgeStore, ValidatedEdge, ValidatedEvidence, ValidatedNode};
 
 /// Run the MCP server loop (stdio JSON-RPC).
 pub fn run_mcp_server(memory_dir: PathBuf) {
@@ -40,7 +40,9 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
             break;
         }
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
 
         let request: serde_json::Value = match serde_json::from_str(line) {
             Ok(v) => v,
@@ -51,9 +53,7 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
         let response = match method {
-            "initialize" => {
-                init_response.clone()
-            }
+            "initialize" => init_response.clone(),
             "tools/list" => {
                 serde_json::json!({
                     "jsonrpc": "2.0",
@@ -62,10 +62,14 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
                 })
             }
             "tools/call" => {
-                let tool_name = request.pointer("/params/name")
-                    .and_then(|n| n.as_str()).unwrap_or("");
-                let args = request.pointer("/params/arguments")
-                    .cloned().unwrap_or(serde_json::json!({}));
+                let tool_name = request
+                    .pointer("/params/name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                let args = request
+                    .pointer("/params/arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
                 let result = handle_tool_call(tool_name, &args, &store, &memory_dir);
                 serde_json::json!({
                     "jsonrpc": "2.0",
@@ -91,7 +95,7 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
     }
 }
 
-fn tool_definitions() -> Vec<serde_json::Value> {
+pub fn tool_definitions() -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({
             "name": "graph_query_about",
@@ -352,7 +356,7 @@ fn tool_definitions() -> Vec<serde_json::Value> {
     ]
 }
 
-fn handle_tool_call(
+pub fn handle_tool_call(
     tool: &str,
     args: &serde_json::Value,
     store: &LiveKnowledgeStore,
@@ -365,10 +369,9 @@ fn handle_tool_call(
             let entity = args.get("entity").and_then(|e| e.as_str()).unwrap_or("");
             let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
             match store.query_about(graph, entity, depth) {
-                Ok(result) => {
-                    store.with_graph_render(graph, &result)
-                        .unwrap_or_else(|| format!("Found results for '{}'", entity))
-                }
+                Ok(result) => store
+                    .with_graph_render(graph, &result)
+                    .unwrap_or_else(|| format!("Found results for '{}'", entity)),
                 Err(e) => format!("Error: {}", e),
             }
         }
@@ -379,10 +382,9 @@ fn handle_tool_call(
                 Ok(result) if result.paths.is_empty() => {
                     format!("No path found between '{}' and '{}'", from, to)
                 }
-                Ok(result) => {
-                    store.with_graph_render(graph, &result)
-                        .unwrap_or_else(|| format!("Path found from '{}' to '{}'", from, to))
-                }
+                Ok(result) => store
+                    .with_graph_render(graph, &result)
+                    .unwrap_or_else(|| format!("Path found from '{}' to '{}'", from, to)),
                 Err(e) => format!("Error: {}", e),
             }
         }
@@ -390,9 +392,14 @@ fn handle_tool_call(
             let label = args.get("label").and_then(|l| l.as_str()).unwrap_or("");
             let kind = args.get("kind").and_then(|k| k.as_str()).unwrap_or("fact");
             let summary = args.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-            let tags: Vec<String> = args.get("tags")
+            let tags: Vec<String> = args
+                .get("tags")
                 .and_then(|t| t.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
 
             match ValidatedNode::new(label, kind, summary, tags) {
@@ -409,9 +416,15 @@ fn handle_tool_call(
             let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
             let context = args.get("context").and_then(|c| c.as_str()).unwrap_or("");
             let basis = args.get("basis").and_then(|b| b.as_str()).unwrap_or("told");
-            let view = args.get("view").and_then(|v| v.as_str()).unwrap_or("entity");
+            let view = args
+                .get("view")
+                .and_then(|v| v.as_str())
+                .unwrap_or("entity");
             let source = args.get("source").and_then(|s| s.as_str()).unwrap_or("mcp");
-            let impact = args.get("beneficial_impact").and_then(|b| b.as_f64()).unwrap_or(0.0);
+            let impact = args
+                .get("beneficial_impact")
+                .and_then(|b| b.as_f64())
+                .unwrap_or(0.0);
 
             match ValidatedEdge::new(from, to, relation, context, basis, view, source, impact) {
                 Ok(edge) => match store.add_edge(graph, edge) {
@@ -425,38 +438,52 @@ fn handle_tool_call(
             let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
             let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
             let relation = args.get("relation").and_then(|r| r.as_str()).unwrap_or("");
-            let evidence_type = args.get("evidence_type").and_then(|e| e.as_str()).unwrap_or("");
+            let evidence_type = args
+                .get("evidence_type")
+                .and_then(|e| e.as_str())
+                .unwrap_or("");
             let test = args.get("test").and_then(|t| t.as_str()).unwrap_or("");
             let detail = args.get("detail").and_then(|d| d.as_str()).unwrap_or("");
-            let source_id = args.get("source_id").and_then(|s| s.as_str()).unwrap_or("ai:inference");
+            let source_id = args
+                .get("source_id")
+                .and_then(|s| s.as_str())
+                .unwrap_or("ai:inference");
 
             // Get source reputation.
             let rep_path = memory_dir.join("reputation.json");
             let mut registry = ReputationRegistry::load(&rep_path);
-            let category = if source_id.starts_with("user:") { SourceCategory::User }
-                else if source_id.starts_with("document:") { SourceCategory::Document }
-                else if source_id.starts_with("ai:") { SourceCategory::AiInference }
-                else if source_id.starts_with("ant:") { SourceCategory::Ant }
-                else { SourceCategory::Unknown };
+            let category = if source_id.starts_with("user:") {
+                SourceCategory::User
+            } else if source_id.starts_with("document:") {
+                SourceCategory::Document
+            } else if source_id.starts_with("ai:") {
+                SourceCategory::AiInference
+            } else if source_id.starts_with("ant:") {
+                SourceCategory::Ant
+            } else {
+                SourceCategory::Unknown
+            };
             let reputation = registry.get_reputation(source_id, category);
 
             match ValidatedEvidence::new(evidence_type, test, detail, source_id, reputation) {
-                Ok(evidence) => match store.update_evidence(graph, from, to, relation, evidence) {
-                    Ok(update) => {
-                        // Update source reputation.
-                        if update.confidence_after > update.confidence_before {
-                            registry.record_corroboration(source_id);
-                        } else if update.confidence_after < update.confidence_before {
-                            registry.record_contradiction(source_id);
-                        }
-                        registry.save(&rep_path);
-                        format!("'{}' → {} → '{}': confidence {:.0}% → {:.0}% (BF={:.2}, rep={:.2})",
+                Ok(evidence) => {
+                    match store.update_evidence(graph, from, to, relation, evidence) {
+                        Ok(update) => {
+                            // Update source reputation.
+                            if update.confidence_after > update.confidence_before {
+                                registry.record_corroboration(source_id);
+                            } else if update.confidence_after < update.confidence_before {
+                                registry.record_contradiction(source_id);
+                            }
+                            registry.save(&rep_path);
+                            format!("'{}' → {} → '{}': confidence {:.0}% → {:.0}% (BF={:.2}, rep={:.2})",
                             from, relation, to,
                             update.confidence_before * 100.0, update.confidence_after * 100.0,
                             update.bayes_factor, reputation)
+                        }
+                        Err(e) => format!("Error: {}", e),
                     }
-                    Err(e) => format!("Error: {}", e),
-                },
+                }
                 Err(e) => format!("Error: {}", e),
             }
         }
@@ -468,8 +495,14 @@ fn handle_tool_call(
             let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
 
             match store.strengthen(graph, from, to, relation, test, evidence) {
-                Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
-                    from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Ok(u) => format!(
+                    "'{}' → {} → '{}': {:.0}% → {:.0}%",
+                    from,
+                    relation,
+                    to,
+                    u.confidence_before * 100.0,
+                    u.confidence_after * 100.0
+                ),
                 Err(e) => format!("Error: {}", e),
             }
         }
@@ -481,8 +514,14 @@ fn handle_tool_call(
             let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
 
             match store.weaken(graph, from, to, relation, test, evidence) {
-                Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
-                    from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Ok(u) => format!(
+                    "'{}' → {} → '{}': {:.0}% → {:.0}%",
+                    from,
+                    relation,
+                    to,
+                    u.confidence_before * 100.0,
+                    u.confidence_after * 100.0
+                ),
                 Err(e) => format!("Error: {}", e),
             }
         }
@@ -494,8 +533,14 @@ fn handle_tool_call(
             let evidence = args.get("evidence").and_then(|e| e.as_str()).unwrap_or("");
 
             match store.contradict(graph, from, to, relation, test, evidence) {
-                Ok(u) => format!("'{}' → {} → '{}': {:.0}% → {:.0}%",
-                    from, relation, to, u.confidence_before * 100.0, u.confidence_after * 100.0),
+                Ok(u) => format!(
+                    "'{}' → {} → '{}': {:.0}% → {:.0}%",
+                    from,
+                    relation,
+                    to,
+                    u.confidence_before * 100.0,
+                    u.confidence_after * 100.0
+                ),
                 Err(e) => format!("Error: {}", e),
             }
         }
@@ -507,7 +552,10 @@ fn handle_tool_call(
             let title = args.get("title").and_then(|t| t.as_str()).unwrap_or("");
             let author = args.get("author").and_then(|a| a.as_str()).unwrap_or("");
             let date = args.get("date").and_then(|d| d.as_str()).unwrap_or("");
-            let ref_type = args.get("ref_type").and_then(|r| r.as_str()).unwrap_or("website");
+            let ref_type = args
+                .get("ref_type")
+                .and_then(|r| r.as_str())
+                .unwrap_or("website");
             let quality = args.get("quality").and_then(|q| q.as_f64());
 
             let citation = crate::knowledge::Reference {
@@ -527,26 +575,35 @@ fn handle_tool_call(
                 ref_type: serde_json::from_value(serde_json::Value::String(ref_type.into()))
                     .unwrap_or_default(),
                 quality: quality.unwrap_or_else(|| {
-                    let rt: crate::knowledge::ReferenceType = serde_json::from_value(
-                        serde_json::Value::String(ref_type.into())
-                    ).unwrap_or_default();
+                    let rt: crate::knowledge::ReferenceType =
+                        serde_json::from_value(serde_json::Value::String(ref_type.into()))
+                            .unwrap_or_default();
                     rt.initial_quality()
                 }),
             };
 
             match store.add_citation(graph, from, to, relation, citation) {
-                Ok(()) => format!("Citation added to '{}' → {} → '{}': {}", from, relation, to,
-                    if !title.is_empty() { title } else { url }),
+                Ok(()) => format!(
+                    "Citation added to '{}' → {} → '{}': {}",
+                    from,
+                    relation,
+                    to,
+                    if !title.is_empty() { title } else { url }
+                ),
                 Err(e) => format!("Error: {}", e),
             }
         }
         "graph_query_uncertain" => {
-            let threshold = args.get("threshold").and_then(|t| t.as_f64()).unwrap_or(0.5);
+            let threshold = args
+                .get("threshold")
+                .and_then(|t| t.as_f64())
+                .unwrap_or(0.5);
             match store.query_uncertain(graph, threshold) {
                 Ok(result) if result.edges.is_empty() => {
                     format!("No edges below {:.0}% confidence", threshold * 100.0)
                 }
-                Ok(result) => store.with_graph_render(graph, &result)
+                Ok(result) => store
+                    .with_graph_render(graph, &result)
                     .unwrap_or_else(|| "Results found".into()),
                 Err(e) => format!("Error: {}", e),
             }
@@ -557,27 +614,30 @@ fn handle_tool_call(
                 Ok(result) if result.nodes.is_empty() => {
                     format!("No '{}' nodes found", kind)
                 }
-                Ok(result) => store.with_graph_render(graph, &result)
+                Ok(result) => store
+                    .with_graph_render(graph, &result)
                     .unwrap_or_else(|| "Results found".into()),
                 Err(e) => format!("Error: {}", e),
             }
         }
-        "graph_list_graphs" => {
-            match store.list_graphs() {
-                Ok(graphs) => graphs.iter()
-                    .map(|g| format!("{} ({} nodes, {} edges)", g.name, g.node_count, g.edge_count))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-                Err(e) => format!("Error: {}", e),
-            }
-        }
-        "graph_list_orphans" => {
-            match store.list_orphans(graph) {
-                Ok(orphans) if orphans.is_empty() => "No orphan nodes".into(),
-                Ok(orphans) => format!("{} orphan(s):\n{}", orphans.len(), orphans.join("\n")),
-                Err(e) => format!("Error: {}", e),
-            }
-        }
+        "graph_list_graphs" => match store.list_graphs() {
+            Ok(graphs) => graphs
+                .iter()
+                .map(|g| {
+                    format!(
+                        "{} ({} nodes, {} edges)",
+                        g.name, g.node_count, g.edge_count
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Err(e) => format!("Error: {}", e),
+        },
+        "graph_list_orphans" => match store.list_orphans(graph) {
+            Ok(orphans) if orphans.is_empty() => "No orphan nodes".into(),
+            Ok(orphans) => format!("{} orphan(s):\n{}", orphans.len(), orphans.join("\n")),
+            Err(e) => format!("Error: {}", e),
+        },
         "graph_query_justification" => {
             let from = args.get("from").and_then(|f| f.as_str()).unwrap_or("");
             let to = args.get("to").and_then(|t| t.as_str()).unwrap_or("");
@@ -614,13 +674,15 @@ fn handle_tool_call(
             }
 
             // Derive self name and ants directory.
-            let self_name = memory_dir.parent()
+            let self_name = memory_dir
+                .parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.file_name())
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".into());
 
-            let ants_dir = memory_dir.parent()
+            let ants_dir = memory_dir
+                .parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.parent());
 
@@ -642,12 +704,18 @@ fn handle_tool_call(
                 "message": message,
                 "timestamp": crate::dateutil::datetime_now(),
             });
-            let filename = format!("{}-{}.json", ant_name,
+            let filename = format!(
+                "{}-{}.json",
+                ant_name,
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_millis());
-            let _ = std::fs::write(outbox.join(&filename), serde_json::to_string_pretty(&request).unwrap_or_default());
+                    .as_millis()
+            );
+            let _ = std::fs::write(
+                outbox.join(&filename),
+                serde_json::to_string_pretty(&request).unwrap_or_default(),
+            );
 
             format!("Message sent to {}. Their response will arrive in your conversation when they've thought about it.\n\n\
                      (Message: '{}')", ant_name,
@@ -664,11 +732,13 @@ fn handle_tool_call(
             // DON'T read the other ANT's files directly — that bypasses their reasoning.
             // Instead, send a real message that fires up their AI worker.
             // The response will be forwarded back to our chat when ready.
-            let ants_dir = memory_dir.parent()
+            let ants_dir = memory_dir
+                .parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.parent());
 
-            let _self_name = memory_dir.parent()
+            let _self_name = memory_dir
+                .parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.file_name())
                 .map(|f| f.to_string_lossy().to_string())
@@ -680,12 +750,19 @@ fn handle_tool_call(
                 .unwrap_or(false);
 
             if !exists {
-                format!("ANT '{}' not found. Use list_colony_ants to see available ANTs.", ant_name)
+                format!(
+                    "ANT '{}' not found. Use list_colony_ants to see available ANTs.",
+                    ant_name
+                )
             } else {
                 // Quick peek at the other ANT's knowledge for immediate context.
                 // This is a READ-ONLY look at their graph — they haven't reasoned about
                 // this question. For a real conversation, tell the user to use /ask.
-                let other_memory = ants_dir.unwrap().join(ant_name).join("working").join("memory");
+                let other_memory = ants_dir
+                    .unwrap()
+                    .join(ant_name)
+                    .join("working")
+                    .join("memory");
                 let other_store = LiveKnowledgeStore::new(other_memory);
                 let depth = args.get("depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
 
@@ -694,9 +771,14 @@ fn handle_tool_call(
                     for g in &graphs {
                         if let Ok(result) = other_store.query_about(&g.name, question, depth) {
                             if !result.nodes.is_empty() {
-                                if let Some(rendered) = other_store.with_graph_render(&g.name, &result) {
+                                if let Some(rendered) =
+                                    other_store.with_graph_render(&g.name, &result)
+                                {
                                     if !rendered.trim().is_empty() {
-                                        response.push_str(&format!("### {} (from {})\n", g.name, ant_name));
+                                        response.push_str(&format!(
+                                            "### {} (from {})\n",
+                                            g.name, ant_name
+                                        ));
                                         response.push_str(&rendered);
                                         response.push('\n');
                                     }
@@ -707,24 +789,28 @@ fn handle_tool_call(
                 }
 
                 if response.is_empty() {
-                    format!("{} has no knowledge about '{}' in their graphs.\n\n\
+                    format!(
+                        "{} has no knowledge about '{}' in their graphs.\n\n\
                             For a real conversation where {} THINKS about your question, \
                             tell the user to type: /ask {} {}",
-                            ant_name, question, ant_name, ant_name, question)
+                        ant_name, question, ant_name, ant_name, question
+                    )
                 } else {
-                    format!("READ-ONLY peek at {}'s existing knowledge about '{}' \
+                    format!(
+                        "READ-ONLY peek at {}'s existing knowledge about '{}' \
                             (source_id: 'ant:{}'):\n\n{}\n\
                             NOTE: This is what {} already knows — they haven't reasoned \
                             about your specific question. For a real conversation where \
                             they THINK about it, suggest the user type: /ask {} {}",
-                            ant_name, question, ant_name, response,
-                            ant_name, ant_name, question)
+                        ant_name, question, ant_name, response, ant_name, ant_name, question
+                    )
                 }
             }
         }
         "list_colony_ants" => {
             // Find all ANTs in the colony.
-            let ants_dir = memory_dir.parent()
+            let ants_dir = memory_dir
+                .parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.parent());
 
@@ -738,7 +824,8 @@ fn handle_tool_call(
             };
 
             let mut listing = String::from("Colony ANTs (communities of practice):\n\n");
-            let self_name = memory_dir.parent()
+            let self_name = memory_dir
+                .parent()
                 .and_then(|p| p.parent())
                 .and_then(|p| p.file_name())
                 .map(|f| f.to_string_lossy().to_string())
@@ -746,28 +833,41 @@ fn handle_tool_call(
 
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.is_dir() { continue; }
-                let name = path.file_name()
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = path
+                    .file_name()
                     .map(|f| f.to_string_lossy().to_string())
                     .unwrap_or_default();
 
                 let is_self = name == self_name;
                 let memory = path.join("working").join("memory");
-                if !memory.exists() { continue; }
+                if !memory.exists() {
+                    continue;
+                }
 
                 let other_store = LiveKnowledgeStore::new(memory);
-                let topics: Vec<String> = other_store.list_graphs()
-                    .map(|gs| gs.iter()
-                        .filter(|g| g.name != "meta" && g.node_count > 0)
-                        .map(|g| format!("{} ({} nodes)", g.name, g.node_count))
-                        .collect())
+                let topics: Vec<String> = other_store
+                    .list_graphs()
+                    .map(|gs| {
+                        gs.iter()
+                            .filter(|g| g.name != "meta" && g.node_count > 0)
+                            .map(|g| format!("{} ({} nodes)", g.name, g.node_count))
+                            .collect()
+                    })
                     .unwrap_or_default();
 
                 let marker = if is_self { " ← you" } else { "" };
-                listing.push_str(&format!("**{}**{}: {}\n",
-                    name, marker,
-                    if topics.is_empty() { "no topic graphs yet".into() }
-                    else { topics.join(", ") }
+                listing.push_str(&format!(
+                    "**{}**{}: {}\n",
+                    name,
+                    marker,
+                    if topics.is_empty() {
+                        "no topic graphs yet".into()
+                    } else {
+                        topics.join(", ")
+                    }
                 ));
             }
 
@@ -790,7 +890,10 @@ fn handle_tool_call(
                     Ok(commits) => {
                         let mut text = String::from("Thought history:\n\n");
                         for c in &commits {
-                            text.push_str(&format!("{} | {} | {}\n", c.hash, c.timestamp, c.message));
+                            text.push_str(&format!(
+                                "{} | {} | {}\n",
+                                c.hash, c.timestamp, c.message
+                            ));
                         }
                         text.push_str("\nUse thought_history with 'since' parameter to see what changed since a specific commit.");
                         text
@@ -805,50 +908,68 @@ fn handle_tool_call(
 
             match action {
                 "create" => {
-                    if name.is_empty() { return "Error: branch name required".into(); }
+                    if name.is_empty() {
+                        return "Error: branch name required".into();
+                    }
                     match store.create_thought_branch(name) {
                         Ok(branch) => format!("Created thought branch: {}. Explore freely — merge or abandon when done.", branch),
                         Err(e) => format!("Error: {}", e),
                     }
                 }
                 "merge" => {
-                    if name.is_empty() { return "Error: branch name required".into(); }
-                    let branch = if name.starts_with("thought/") { name.to_string() } else { format!("thought/{}", name) };
+                    if name.is_empty() {
+                        return "Error: branch name required".into();
+                    }
+                    let branch = if name.starts_with("thought/") {
+                        name.to_string()
+                    } else {
+                        format!("thought/{}", name)
+                    };
                     match store.merge_thought_branch(&branch) {
-                        Ok(true) => format!("Merged {} — ideas adopted into main knowledge.", branch),
-                        Ok(false) => format!("Merge conflict on {} — resolve manually or abandon.", branch),
+                        Ok(true) => {
+                            format!("Merged {} — ideas adopted into main knowledge.", branch)
+                        }
+                        Ok(false) => format!(
+                            "Merge conflict on {} — resolve manually or abandon.",
+                            branch
+                        ),
                         Err(e) => format!("Error: {}", e),
                     }
                 }
                 "abandon" => {
-                    if name.is_empty() { return "Error: branch name required".into(); }
-                    let branch = if name.starts_with("thought/") { name.to_string() } else { format!("thought/{}", name) };
+                    if name.is_empty() {
+                        return "Error: branch name required".into();
+                    }
+                    let branch = if name.starts_with("thought/") {
+                        name.to_string()
+                    } else {
+                        format!("thought/{}", name)
+                    };
                     match store.abandon_thought_branch(&branch) {
-                        Ok(()) => format!("Abandoned {} — dead-end exploration preserved in git history.", branch),
+                        Ok(()) => format!(
+                            "Abandoned {} — dead-end exploration preserved in git history.",
+                            branch
+                        ),
                         Err(e) => format!("Error: {}", e),
                     }
                 }
-                "list" => {
-                    match store.list_thought_branches() {
-                        Ok(branches) if branches.is_empty() => "No active thought branches.".into(),
-                        Ok(branches) => {
-                            let current = store.current_branch().unwrap_or_default();
-                            let mut text = String::from("Thought branches:\n\n");
-                            for b in &branches {
-                                let marker = if *b == current { " ← current" } else { "" };
-                                text.push_str(&format!("  {}{}\n", b, marker));
-                            }
-                            text
+                "list" => match store.list_thought_branches() {
+                    Ok(branches) if branches.is_empty() => "No active thought branches.".into(),
+                    Ok(branches) => {
+                        let current = store.current_branch().unwrap_or_default();
+                        let mut text = String::from("Thought branches:\n\n");
+                        for b in &branches {
+                            let marker = if *b == current { " ← current" } else { "" };
+                            text.push_str(&format!("  {}{}\n", b, marker));
                         }
-                        Err(e) => format!("Error: {}", e),
+                        text
                     }
-                }
-                "current" => {
-                    match store.current_branch() {
-                        Ok(branch) => format!("Current branch: {}", branch),
-                        Err(e) => format!("Error: {}", e),
-                    }
-                }
+                    Err(e) => format!("Error: {}", e),
+                },
+                "current" => match store.current_branch() {
+                    Ok(branch) => format!("Current branch: {}", branch),
+                    Err(e) => format!("Error: {}", e),
+                },
                 _ => "Error: action must be create, merge, abandon, list, or current".into(),
             }
         }

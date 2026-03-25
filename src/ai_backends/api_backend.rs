@@ -208,6 +208,33 @@ impl AiBackend for OpenAiCompatibleBackend {
             detail: format!("Calling {} ({})...", self.display_name, self.model),
         });
 
+        // If memory_dir is available, use the tool-calling proxy for MCP access.
+        if let Some(ref memory_dir) = request.memory_dir {
+            let (text, tokens) = super::tool_proxy::run_tool_loop(
+                &self.client,
+                &self.api_base,
+                &self.api_key,
+                &self.model,
+                &request.system_prompt,
+                &request.message,
+                memory_dir,
+                &progress_tx,
+                request.task_id,
+                &self.id,
+            ).await?;
+
+            if text.is_empty() {
+                return Err(AiError::retriable(format!("{}: empty response", self.display_name)));
+            }
+
+            return Ok(AiResponse {
+                text,
+                backend_id: self.id.clone(),
+                tokens,
+                cost_microdollars: None,
+            });
+        }
+
         // Build the chat completion request.
         let messages = serde_json::json!([
             { "role": "system", "content": request.system_prompt },

@@ -18,6 +18,8 @@ pub mod registry;
 pub mod cli_backend;
 pub mod api_backend;
 pub mod ollama_backend;
+pub mod lmstudio_backend;
+pub mod tool_proxy;
 
 pub use types::*;
 pub use registry::BackendRegistry;

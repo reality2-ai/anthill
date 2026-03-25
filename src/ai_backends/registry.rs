@@ -86,7 +86,6 @@ impl BackendRegistry {
                         .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
                 });
                 // Move ollama and lmstudio backends to the end (last resort).
-                let ollama_end = backends.len();
                 backends.sort_by(|a, b| {
                     let a_is_local = a.id().starts_with("ollama") || a.id().starts_with("lmstudio");
                     let b_is_local = b.id().starts_with("ollama") || b.id().starts_with("lmstudio");

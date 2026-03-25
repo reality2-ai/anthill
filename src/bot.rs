@@ -71,10 +71,11 @@ pub async fn run_bot(
     std::fs::create_dir_all(&repos_dir)?;
     std::fs::create_dir_all(&files_dir)?;
 
-    // Auto-configure MCP server for Claude Code in this ANT's working directory.
+    // Auto-configure MCP server for all CLI backends in this ANT's working directory.
     // This ensures the graph tools (graph_add_node, graph_add_edge, etc.) are always
-    // available when Claude runs in this directory.
-    ensure_mcp_settings(&working_dir, &memory_dir.to_string_lossy());
+    // available when Claude/Gemini/Codex run in this directory.
+    let mem_dir_str = memory_dir.to_string_lossy().to_string();
+    ensure_mcp_settings(&working_dir, &mem_dir_str);
 
     log::info!("[{}] working dir: {}", bot_name, working_dir);
 
@@ -202,20 +203,51 @@ pub async fn run_bot(
     }
 }
 
-/// Ensure the ANT's working directory has a `.claude/settings.json` that
-/// configures the anthill MCP server. This makes the graph tools (graph_add_node,
-/// graph_add_edge, etc.) always available when Claude runs in this directory.
+/// Ensure the ANT's working directory has MCP settings for all CLI backends
+/// that support MCP (Claude, Gemini, Codex). This makes the graph tools
+/// (graph_add_node, graph_add_edge, etc.) always available.
+///
+/// Configures:
+/// - `.claude/settings.json` — Claude Code
+/// - `.gemini/settings.json` — Gemini CLI
 ///
 /// Only writes if the file doesn't exist or doesn't already contain the
 /// anthill-graph MCP server config.
 fn ensure_mcp_settings(working_dir: &str, memory_dir: &str) {
-    let claude_dir = std::path::Path::new(working_dir).join(".claude");
-    let settings_path = claude_dir.join("settings.json");
-
-    // Find the anthill binary path.
     let anthill_bin = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "anthill".to_string());
+
+    let mcp_server_config = serde_json::json!({
+        "command": anthill_bin,
+        "args": ["--mcp-server", "--memory-dir", memory_dir]
+    });
+
+    // Configure for each CLI backend that supports MCP.
+    let configs = [
+        (".claude", "settings.json"),
+        (".gemini", "settings.json"),
+    ];
+
+    for (dir_name, file_name) in &configs {
+        write_mcp_settings_file(
+            working_dir,
+            dir_name,
+            file_name,
+            &mcp_server_config,
+        );
+    }
+}
+
+/// Write or merge an MCP server config into a settings.json file.
+fn write_mcp_settings_file(
+    working_dir: &str,
+    dir_name: &str,
+    file_name: &str,
+    mcp_server_config: &serde_json::Value,
+) {
+    let config_dir = std::path::Path::new(working_dir).join(dir_name);
+    let settings_path = config_dir.join(file_name);
 
     // Check if settings already exist and contain our MCP config.
     if settings_path.exists() {
@@ -229,14 +261,11 @@ fn ensure_mcp_settings(working_dir: &str, memory_dir: &str) {
                     let mcp_servers = obj.entry("mcpServers")
                         .or_insert_with(|| serde_json::json!({}));
                     if let Some(servers) = mcp_servers.as_object_mut() {
-                        servers.insert("anthill-graph".to_string(), serde_json::json!({
-                            "command": anthill_bin,
-                            "args": ["--mcp-server", "--memory-dir", memory_dir]
-                        }));
+                        servers.insert("anthill-graph".to_string(), mcp_server_config.clone());
                     }
                     if let Ok(json) = serde_json::to_string_pretty(&settings) {
                         let _ = std::fs::write(&settings_path, json);
-                        log::info!("Added anthill-graph MCP server to existing {}", settings_path.display());
+                        log::info!("Added anthill-graph MCP server to {}", settings_path.display());
                     }
                 }
                 return;
@@ -245,13 +274,10 @@ fn ensure_mcp_settings(working_dir: &str, memory_dir: &str) {
     }
 
     // No settings file — create one.
-    let _ = std::fs::create_dir_all(&claude_dir);
+    let _ = std::fs::create_dir_all(&config_dir);
     let settings = serde_json::json!({
         "mcpServers": {
-            "anthill-graph": {
-                "command": anthill_bin,
-                "args": ["--mcp-server", "--memory-dir", memory_dir]
-            }
+            "anthill-graph": mcp_server_config
         }
     });
     if let Ok(json) = serde_json::to_string_pretty(&settings) {
