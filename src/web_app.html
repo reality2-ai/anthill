@@ -2013,6 +2013,35 @@ function formatMarkdown(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
+// Intercept clicks on report download links — these need auth headers.
+document.addEventListener('click', async (e) => {
+  const link = e.target.closest('a[href*="/reports/"]');
+  if (!link) return;
+  const href = link.getAttribute('href');
+  if (!href || !href.startsWith('/api/ants/')) return;
+  e.preventDefault();
+  link.style.opacity = '0.5';
+  link.textContent += ' (downloading...)';
+  try {
+    const resp = await authFetch(href);
+    if (!resp.ok) { alert('Download failed: ' + resp.status); return; }
+    const blob = await resp.blob();
+    const cd = resp.headers.get('Content-Disposition') || '';
+    const match = cd.match(/filename="(.+?)"/);
+    const filename = match ? match[1] : href.split('/').pop();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
+  } catch(err) {
+    alert('Download error: ' + err.message);
+  } finally {
+    link.style.opacity = '1';
+    link.textContent = link.textContent.replace(' (downloading...)', '');
+  }
+});
+
 // Add copy buttons to code blocks after rendering
 function addCopyButtons() {
   document.querySelectorAll('.msg pre').forEach(pre => {
