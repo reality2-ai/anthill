@@ -995,16 +995,10 @@ fn generate_export_html(
             &insights.all_citations
         };
         for (ref_idx, cite) in refs_to_show.iter().enumerate() {
-            let mut entry = String::new();
-            if !cite.author.is_empty() {
-                entry.push_str(&format!("{}. ", cite.author));
-            }
-
             // Build a link URL: use the citation's URL, or construct a search fallback.
             let link_url = if !cite.url.is_empty() {
                 cite.url.clone()
             } else {
-                // Construct a Google Scholar or web search URL from title + author.
                 let mut query_parts = Vec::new();
                 if !cite.title.is_empty() {
                     query_parts.push(cite.title.clone());
@@ -1026,37 +1020,85 @@ fn generate_export_html(
                     )
                 }
             };
+            let is_search_link = cite.url.is_empty() && !link_url.is_empty();
 
+            // Format as a proper reference:
+            //   Author(s). (Year). *Title*. [ref_type] URL
+            //
+            // For books:    Author. (Year). *Title*. Publisher.
+            // For papers:   Author. (Year). *Title*. Journal.
+            // For websites: Author. (Year). *Title*. Retrieved from URL
+            let mut entry = String::new();
+
+            // Author
+            if !cite.author.is_empty() {
+                entry.push_str(&cite.author);
+                if !entry.ends_with('.') {
+                    entry.push('.');
+                }
+                entry.push(' ');
+            }
+
+            // Year
+            if !cite.date.is_empty() {
+                entry.push_str(&format!("({}). ", cite.date));
+            }
+
+            // Title — linked if URL available
             if !cite.title.is_empty() {
                 if !link_url.is_empty() {
                     entry.push_str(&format!(
-                        "<a href='{}' target='_blank' rel='noopener' style='color:#60a5fa'>{}</a>",
+                        "<a href='{}' target='_blank' rel='noopener' style='color:#60a5fa'><em>{}</em></a>",
                         link_url, cite.title
                     ));
                 } else {
                     entry.push_str(&format!("<em>{}</em>", cite.title));
                 }
+                if !cite.title.ends_with('.') {
+                    entry.push('.');
+                }
+                entry.push(' ');
             } else if !link_url.is_empty() {
+                // No title — show URL as the link
                 let display = if cite.url.is_empty() {
-                    "Search"
+                    "[Search]"
                 } else {
                     &cite.url
                 };
                 entry.push_str(&format!(
-                    "<a href='{}' target='_blank' rel='noopener' style='color:#60a5fa'>{}</a>",
+                    "<a href='{}' target='_blank' rel='noopener' style='color:#60a5fa'>{}</a>. ",
                     link_url, display
                 ));
             }
-            if !cite.date.is_empty() {
-                entry.push_str(&format!(" ({})", cite.date));
-            }
+
+            // Reference type badge
+            let type_label = match cite.ref_type.as_str() {
+                "peer_reviewed" => "Peer-reviewed",
+                "book" => "Book",
+                "official_report" => "Official report",
+                "news" => "News",
+                "website" => "Website",
+                "blog" => "Blog",
+                "ai_inference" => "AI inference",
+                "personal" => "Personal communication",
+                other => other,
+            };
             entry.push_str(&format!(
-                " <span style='color:#64748b'>[{}]</span>",
-                cite.ref_type
+                "<span style='color:#64748b'>[{}]</span>",
+                type_label
             ));
-            if cite.url.is_empty() && !link_url.is_empty() {
+
+            // Show direct URL on a separate line if it's a real link (not search)
+            if !cite.url.is_empty() && !cite.title.is_empty() {
+                entry.push_str(&format!(
+                    " <span style='color:#475569;font-size:11px'>{}</span>",
+                    cite.url
+                ));
+            }
+            if is_search_link {
                 entry.push_str(" <span style='color:#475569;font-size:11px'>(search link)</span>");
             }
+
             with_refs.push_str(&format!("<li id='ref-{}'>{}</li>\n", ref_idx + 1, entry));
         }
         with_refs.push_str("</ol>\n</div>\n");
