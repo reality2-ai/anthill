@@ -210,12 +210,16 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     // Reload channel — web server signals when new ants should be spawned.
     let (reload_tx, mut reload_rx) = tokio::sync::mpsc::channel::<()>(1);
 
+    // Build global backend registry for the web server.
+    let default_config = Config::default();
+    let backend_registry = Arc::new(crate::ai_backends::build_registry(&default_config));
+
     // Start the web server.
     let bind: SocketAddr = format!("{}:{}", sup_cfg.http_bind, sup_cfg.http_port)
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid bind address '{}:{}': {}", sup_cfg.http_bind, sup_cfg.http_port, e))?;
     let web_registry = Arc::clone(&registry);
-    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, bind));
+    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, backend_registry, bind));
 
     log::info!("Web dashboard at http://{}", bind);
 

@@ -103,6 +103,19 @@ pub enum BackendStrategy {
     Manual(Vec<String>),
 }
 
+impl std::fmt::Display for BackendStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BackendStrategy::CostOptimized => write!(f, "cost_optimized"),
+            BackendStrategy::CapabilityOptimized => write!(f, "capability_optimized"),
+            BackendStrategy::SpeedOptimized => write!(f, "speed_optimized"),
+            BackendStrategy::ReliabilityOptimized => write!(f, "reliability_optimized"),
+            BackendStrategy::Balanced => write!(f, "balanced"),
+            BackendStrategy::Manual(backends) => write!(f, "{}", backends.join(",")),
+        }
+    }
+}
+
 impl BackendStrategy {
     /// Get ordered list of backends based on strategy.
     pub fn get_backends(&self, available: &[(String, bool)]) -> Vec<String> {

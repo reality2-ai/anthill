@@ -66,9 +66,14 @@ impl BackendRegistry {
         self.categories
             .get(&key)
             .map(|ids| {
-                ids.iter()
+                let mut backends: Vec<_> = ids.iter()
                     .filter_map(|id| self.backends.get(id).cloned())
-                    .collect()
+                    .collect();
+                backends.sort_by(|a, b| {
+                    b.tags().quality_tier.cmp(&a.tags().quality_tier)
+                        .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
+                });
+                backends
             })
             .unwrap_or_default()
     }
@@ -224,6 +229,28 @@ mod tests {
         })
     }
 
+    #[derive(Debug)]
+    struct QualityDummy {
+        id: String,
+        tags: EngineTags,
+    }
+
+    #[async_trait::async_trait]
+    impl AiBackend for QualityDummy {
+        fn id(&self) -> &str { &self.id }
+        fn name(&self) -> &str { &self.id }
+        fn tags(&self) -> &EngineTags { &self.tags }
+        async fn is_available(&self) -> bool { true }
+        async fn execute(&self, _req: &AiRequest, _tx: ProgressTx) -> Result<AiResponse, AiError> {
+            Ok(AiResponse {
+                text: "test".into(),
+                backend_id: self.id.clone(),
+                tokens: None,
+                cost_microdollars: None,
+            })
+        }
+    }
+
     #[test]
     fn register_and_lookup() {
         let mut reg = BackendRegistry::new();
@@ -247,6 +274,51 @@ mod tests {
         let intellectual = reg.find_by_category(&EngineCategory::Intellectual);
         assert_eq!(intellectual.len(), 1);
         assert_eq!(intellectual[0].id(), "c");
+    }
+
+    #[test]
+    fn find_by_category_sorted_by_quality() {
+        let mut reg = BackendRegistry::new();
+        let high = Arc::new(QualityDummy {
+            id: "high".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Fast],
+                capabilities: vec![],
+                cost_tier: 4,
+                speed_tier: 3,
+                quality_tier: 5,
+            },
+        });
+        let low = Arc::new(QualityDummy {
+            id: "low".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Fast],
+                capabilities: vec![],
+                cost_tier: 1,
+                speed_tier: 3,
+                quality_tier: 2,
+            },
+        });
+        let medium = Arc::new(QualityDummy {
+            id: "medium".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Fast],
+                capabilities: vec![],
+                cost_tier: 2,
+                speed_tier: 3,
+                quality_tier: 3,
+            },
+        });
+
+        reg.register(low.clone());
+        reg.register(high.clone());
+        reg.register(medium.clone());
+
+        let fast = reg.find_by_category(&EngineCategory::Fast);
+        assert_eq!(fast.len(), 3);
+        assert_eq!(fast[0].id(), "high");
+        assert_eq!(fast[1].id(), "medium");
+        assert_eq!(fast[2].id(), "low");
     }
 
     #[test]

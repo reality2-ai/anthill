@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use crate::ai_backends::AiBackend;
 use crate::history::SharedHistory;
 use crate::registry::BotRegistry;
 use crate::trust::SharedTrust;
@@ -28,6 +29,8 @@ pub struct AppState {
     pub trust: SharedTrust,
     /// Channel to tell the supervisor to reload/spawn new ants.
     pub reload_tx: tokio::sync::mpsc::Sender<()>,
+    /// Global backend registry — built from default config at startup.
+    pub backend_registry: Arc<crate::ai_backends::BackendRegistry>,
 }
 
 /// Embedded web app HTML.
@@ -39,6 +42,7 @@ pub async fn run_web_server(
     history: SharedHistory,
     trust: SharedTrust,
     reload_tx: tokio::sync::mpsc::Sender<()>,
+    backend_registry: Arc<crate::ai_backends::BackendRegistry>,
     bind: SocketAddr,
 ) {
     let state = AppState {
@@ -46,6 +50,7 @@ pub async fn run_web_server(
         history,
         trust,
         reload_tx,
+        backend_registry,
     };
 
     // Protected API routes — require credential in X-Credential header.
@@ -66,6 +71,7 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/graph", get(get_graph))
         .route("/api/ants/{id}/export", get(export_graph))
         .route("/api/ants/{id}/rumination", get(get_rumination_log))
+        .route("/api/ants/{id}/engine", get(get_engine_info))
         .route("/api/backends", get(list_backends))
         .route("/api/doctor", get(doctor_check))
         .route("/api/auth/devices", get(auth_list_devices))
@@ -470,6 +476,46 @@ async fn list_backends() -> impl IntoResponse {
     Json(backends.iter().map(|(id, name, installed)| {
         serde_json::json!({ "id": id, "name": name, "installed": installed })
     }).collect::<Vec<_>>())
+}
+
+/// GET /api/ants/:id/engine — get current AI engine selection and ordered fallback list.
+async fn get_engine_info(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let config_content = match state.registry.read_config(&id) {
+        Some(c) => c,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let cfg: crate::config::Config = match toml::from_str(&config_content) {
+        Ok(c) => c,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let selector = if !cfg.ai.default_category.is_empty() {
+        cfg.ai.default_category.clone()
+    } else if !cfg.ai.backends.is_empty() {
+        cfg.ai.backends.join(",")
+    } else {
+        cfg.claude.backend_strategy.to_string()
+    };
+
+    let resolved = state.backend_registry.resolve(&selector);
+    let ordered_backends: Vec<serde_json::Value> = resolved.iter().map(|b: &Arc<dyn AiBackend>| {
+        serde_json::json!({
+            "id": b.id(),
+            "name": b.name(),
+            "quality_tier": b.tags().quality_tier,
+            "cost_tier": b.tags().cost_tier,
+            "categories": b.tags().categories.iter().map(|c: &crate::ai_backends::EngineCategory| c.to_string()).collect::<Vec<String>>(),
+        })
+    }).collect();
+
+    Json(serde_json::json!({
+        "selected": selector,
+        "ordered_backends": ordered_backends,
+    })).into_response()
 }
 
 /// GET /api/doctor — run diagnostic checks.

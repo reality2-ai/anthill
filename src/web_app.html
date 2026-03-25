@@ -635,6 +635,15 @@
       </div>
     </div>
 
+    <div id="engine-status" style="margin-top:8px;padding:10px;background:var(--surface2);border-radius:6px;display:none">
+      <div style="margin-bottom:6px">
+        <span style="font-weight:600">Current engine:</span>
+        <span id="engine-selected" style="color:var(--accent)"></span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim)">Fallback order (best first):</div>
+      <div id="engine-ordered" style="margin-top:4px"></div>
+    </div>
+
     <div id="manual-backends-section" style="display:none">
       <span class="field-label" style="margin-bottom:4px;display:block">Backends <span style="color:var(--text-dim)">(order = fallback priority)</span></span>
       <div id="c-backends" style="margin-bottom:8px"></div>
@@ -2421,6 +2430,8 @@ async function showConfigModal(antId) {
         || 'balanced';
       document.getElementById('c-ai-category').value = cat;
       updateBackendVisibility();
+      // Load engine info and display ordered backends.
+      loadEngineInfo(antId);
       document.getElementById('c-token').value = cfg.telegram_token || '';
       document.getElementById('c-allow').value = (cfg.telegram_allow || []).join(', ');
       document.getElementById('c-workdir').value = cfg.working_dir || '';
@@ -2476,6 +2487,40 @@ function updateBackendVisibility() {
   const cat = document.getElementById('c-ai-category').value;
   const manualSection = document.getElementById('manual-backends-section');
   manualSection.style.display = cat === 'manual' ? 'block' : 'none';
+}
+
+async function loadEngineInfo(antId) {
+  const statusEl = document.getElementById('engine-status');
+  const selectedEl = document.getElementById('engine-selected');
+  const orderedEl = document.getElementById('engine-ordered');
+  try {
+    const resp = await authFetch(`/api/ants/${antId}/engine`);
+    if (!resp.ok) {
+      statusEl.style.display = 'none';
+      return;
+    }
+    const info = await resp.json();
+    statusEl.style.display = 'block';
+    selectedEl.textContent = info.selected || 'unknown';
+    if (info.ordered_backends && info.ordered_backends.length > 0) {
+      orderedEl.innerHTML = info.ordered_backends.map((b, i) => {
+        const num = i + 1;
+        const quality = '★'.repeat(b.quality_tier || 0);
+        const cost = '$'.repeat(b.cost_tier || 0);
+        return `<div style="margin-bottom:4px">
+          <span style="color:var(--text-dim)">${num}.</span>
+          <span style="font-weight:500">${b.name}</span>
+          <span style="color:var(--green);font-size:11px;margin-left:4px">${quality}</span>
+          <span style="color:var(--yellow);font-size:11px">${cost}</span>
+          <span style="color:var(--text-dim);font-size:11px;margin-left:4px">${b.categories ? b.categories.join(', ') : ''}</span>
+        </div>`;
+      }).join('');
+    } else {
+      orderedEl.innerHTML = '<span style="color:var(--text-dim)">No backends available</span>';
+    }
+  } catch(e) {
+    statusEl.style.display = 'none';
+  }
 }
 
 function hideConfigModal() {
