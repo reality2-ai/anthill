@@ -620,7 +620,7 @@
 
     <h3 class="section-title">AI Engine</h3>
     <div class="field">
-      <select id="c-ai-category" class="field-input" style="margin-bottom:8px;cursor:pointer" onchange="updateBackendVisibility()">
+      <select id="c-ai-category" class="field-input" style="margin-bottom:8px;cursor:pointer" onchange="onCategoryChange()">
         <option value="balanced">Balanced — good mix of speed, cost, and quality</option>
         <option value="intellectual">Intellectual — best reasoning / most capable</option>
         <option value="fast">Fast — fastest response time</option>
@@ -801,6 +801,7 @@
     <div style="display:flex;align-items:center;gap:12px">
       <button id="menu-btn" onclick="toggleSidebar()">☰</button>
       <h2 id="bot-title">Select an ANT</h2>
+      <span id="engine-badge" style="display:none;font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--text-dim)"></span>
     </div>
     <div id="tab-bar" style="display:none;gap:4px">
       <button class="tab active" id="tab-chat" onclick="switchTab('chat')">Chat</button>
@@ -1854,8 +1855,32 @@ function selectBot(id) {
   renderBotList();
   renderChat(true);
   renderTasks();
+  // Load engine info for badge.
+  loadEngineBadge(id);
   // Close sidebar on mobile
   document.getElementById('sidebar').classList.remove('open');
+}
+
+async function loadEngineBadge(botId) {
+  const badge = document.getElementById('engine-badge');
+  try {
+    const resp = await authFetch(`/api/ants/${botId}/engine`);
+    if (!resp.ok) {
+      badge.style.display = 'none';
+      return;
+    }
+    const info = await resp.json();
+    if (info.ordered_backends && info.ordered_backends.length > 0) {
+      const top = info.ordered_backends[0];
+      const quality = '★'.repeat(top.quality_tier || 0);
+      badge.textContent = `${top.name} ${quality}`;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {
+    badge.style.display = 'none';
+  }
 }
 
 function renderChat(forceScroll) {
@@ -2487,6 +2512,47 @@ function updateBackendVisibility() {
   const cat = document.getElementById('c-ai-category').value;
   const manualSection = document.getElementById('manual-backends-section');
   manualSection.style.display = cat === 'manual' ? 'block' : 'none';
+}
+
+async function onCategoryChange() {
+  updateBackendVisibility();
+  const cat = document.getElementById('c-ai-category').value;
+  if (cat === 'manual' || !editingAntId) return;
+  await previewEngine(cat);
+}
+
+async function previewEngine(category) {
+  const statusEl = document.getElementById('engine-status');
+  const selectedEl = document.getElementById('engine-selected');
+  const orderedEl = document.getElementById('engine-ordered');
+  try {
+    const resp = await authFetch(`/api/ants/${editingAntId}/engine?category=${encodeURIComponent(category)}`);
+    if (!resp.ok) {
+      statusEl.style.display = 'none';
+      return;
+    }
+    const info = await resp.json();
+    statusEl.style.display = 'block';
+    selectedEl.textContent = category;
+    if (info.ordered_backends && info.ordered_backends.length > 0) {
+      orderedEl.innerHTML = info.ordered_backends.map((b, i) => {
+        const num = i + 1;
+        const quality = '★'.repeat(b.quality_tier || 0);
+        const cost = '$'.repeat(b.cost_tier || 0);
+        return `<div style="margin-bottom:4px">
+          <span style="color:var(--text-dim)">${num}.</span>
+          <span style="font-weight:500">${b.name}</span>
+          <span style="color:var(--green);font-size:11px;margin-left:4px">${quality}</span>
+          <span style="color:var(--yellow);font-size:11px">${cost}</span>
+          <span style="color:var(--text-dim);font-size:11px;margin-left:4px">${b.categories ? b.categories.join(', ') : ''}</span>
+        </div>`;
+      }).join('');
+    } else {
+      orderedEl.innerHTML = '<span style="color:var(--text-dim)">No backends available</span>';
+    }
+  } catch(e) {
+    statusEl.style.display = 'none';
+  }
 }
 
 async function loadEngineInfo(antId) {

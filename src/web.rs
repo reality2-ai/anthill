@@ -479,9 +479,11 @@ async fn list_backends() -> impl IntoResponse {
 }
 
 /// GET /api/ants/:id/engine — get current AI engine selection and ordered fallback list.
+/// Optional ?category=X to preview what backends would be used for a different category.
 async fn get_engine_info(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let config_content = match state.registry.read_config(&id) {
         Some(c) => c,
@@ -493,7 +495,9 @@ async fn get_engine_info(
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let selector = if !cfg.ai.default_category.is_empty() {
+    let selector = if let Some(preview) = params.get("category") {
+        preview.clone()
+    } else if !cfg.ai.default_category.is_empty() {
         cfg.ai.default_category.clone()
     } else if !cfg.ai.backends.is_empty() {
         cfg.ai.backends.join(",")
