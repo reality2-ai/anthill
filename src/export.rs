@@ -177,7 +177,10 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                         let ref_type = cite["ref_type"].as_str().unwrap_or("website");
 
                         // Skip AI-generated references — these are not real citations.
-                        if ref_type == "ai_inference" || ref_type == "ai_reference" {
+                        // The ref_type comes from Debug format of ReferenceType enum
+                        // (e.g. "aiinference") or serde (e.g. "ai_inference", "AiInference").
+                        let rt_lower = ref_type.to_lowercase().replace('_', "");
+                        if rt_lower == "aiinference" || rt_lower == "aireference" {
                             continue;
                         }
 
@@ -1076,16 +1079,18 @@ fn generate_export_html(
             }
 
             // Reference type badge
-            let type_label = match cite.ref_type.as_str() {
-                "peer_reviewed" => "Peer-reviewed",
+            let rt_norm = cite.ref_type.to_lowercase().replace('_', "");
+            let type_label = match rt_norm.as_str() {
+                "peerreviewed" => "Peer-reviewed",
                 "book" => "Book",
-                "official_report" => "Official report",
+                "officialreport" => "Official report",
                 "news" => "News",
                 "website" => "Website",
                 "blog" => "Blog",
-                "ai_inference" => "AI inference",
                 "personal" => "Personal communication",
-                other => other,
+                "antknowledge" => "ANT knowledge",
+                "other" => "Reference",
+                _ => &cite.ref_type,
             };
             entry.push_str(&format!(
                 "<span style='color:#64748b'>[{}]</span>",
