@@ -771,8 +771,9 @@ async fn start_report(
     let memory_dir = handle.working_dir.join("memory");
     let reports_dir = handle.working_dir.join("reports");
     let display_name = handle.display_name.clone();
-    let event_tx = handle.event_tx.clone();
     drop(bots);
+
+    let global_tx = state.registry.global_tx.clone();
 
     let graph_filter = params.get("graph").and_then(|v| v.as_str()).map(|s| s.to_string()).filter(|s| !s.is_empty());
     let guidance = params.get("guidance").and_then(|v| v.as_str()).map(|s| s.to_string()).filter(|s| !s.is_empty());
@@ -780,7 +781,7 @@ async fn start_report(
 
     let task_id = spawn_report_task(
         id, memory_dir, reports_dir, display_name,
-        graph_filter, guidance, include_citations, event_tx, 0,
+        graph_filter, guidance, include_citations, global_tx, 0,
     );
 
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "task_id": task_id }))).into_response()
@@ -1972,11 +1973,11 @@ async fn handle_web_command(
             let reports_dir = handle.working_dir.join("reports");
             let display_name = handle.display_name.clone();
             let ant_id = bot_name.to_string();
-            let event_tx = handle.event_tx.clone();
+            let global_tx = registry.global_tx.clone();
             drop(bots);
 
             spawn_report_task(ant_id.clone(), memory_dir, reports_dir, display_name,
-                None, guidance, true, event_tx, chat_id);
+                None, guidance, true, global_tx, chat_id);
 
             Some("Generating report in the background...\n\nThe download link will appear in chat when ready. You can leave this page.".into())
         },
