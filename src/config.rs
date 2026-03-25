@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Top-level ANT config.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     /// Display name (shown in web UI). Defaults to directory name.
@@ -29,7 +29,7 @@ pub struct Config {
     pub ai: AiConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct TelegramConfig {
     /// Bot token. Falls back to TELOXIDE_TOKEN env var.
@@ -38,7 +38,7 @@ pub struct TelegramConfig {
     pub allow: Vec<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SlackConfig {
     /// Slack bot token (xoxb-...).
@@ -48,7 +48,7 @@ pub struct SlackConfig {
 }
 
 /// Rumination engine configuration — autonomous thinking during idle time.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RuminationConfig {
     /// Enable the rumination engine. Default: false.
@@ -85,7 +85,7 @@ impl Default for RuminationConfig {
 }
 
 /// Backend selection strategy.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendStrategy {
     /// Prefer cheapest backend (Ollama > DeepSeek > Gemini > Claude)
@@ -122,7 +122,7 @@ impl std::fmt::Display for BackendStrategy {
 // to EngineCategory at load time.
 
 /// AI and workspace configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClaudeConfig {
     /// Backend selection strategy.
@@ -190,7 +190,7 @@ impl Default for ClaudeConfig {
 ///
 /// Controls how this ANT selects AI backends.  Fully optional — if absent,
 /// falls back to `[claude].backend_strategy` for backward compatibility.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct AiConfig {
     /// Default category for requests without explicit selection.

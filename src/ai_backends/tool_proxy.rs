@@ -7,8 +7,7 @@
 //! 3. Feeds tool results back to the model
 //! 4. Repeats until the model gives a final text response (max 10 rounds)
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::Path;
 
 use crate::store::live::LiveKnowledgeStore;
 
@@ -49,12 +48,12 @@ pub async fn run_tool_loop(
     model: &str,
     system_prompt: &str,
     user_message: &str,
-    memory_dir: &PathBuf,
+    memory_dir: &Path,
     progress_tx: &crate::ai_backends::ProgressTx,
     task_id: u32,
     backend_id: &str,
 ) -> Result<(String, Option<(usize, usize)>), crate::ai_backends::AiError> {
-    let store = LiveKnowledgeStore::new(memory_dir.clone());
+    let store = LiveKnowledgeStore::new(memory_dir.to_path_buf());
     let tools = openai_tool_definitions();
 
     let mut messages = vec![

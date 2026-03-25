@@ -3,6 +3,8 @@
 //! These backends spawn a child process, read stream-JSON from stdout,
 //! and parse progress + result lines.
 
+use crate::ai_worker::slice_safe;
+
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -215,14 +217,6 @@ fn is_command_available(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Slice a string at a char boundary (no suffix added).
-fn slice_safe(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes { return s; }
-    let mut end = max_bytes.min(s.len());
-    while end > 0 && !s.is_char_boundary(end) { end -= 1; }
-    &s[..end]
-}
-
 /// Run a CLI backend, streaming progress and collecting the result.
 ///
 /// This is the shared core for claude, codex, and gemini.
@@ -336,6 +330,12 @@ async fn run_cli_backend(
             if idle_secs > hard_timeout_secs {
                 #[cfg(unix)]
                 if let Some(pid) = child_id {
+                    // SAFETY: We created this process group via .process_group(0) above.
+                    // The PID was captured from the child immediately after spawn.
+                    // TOCTOU: The PID could theoretically be recycled after the child
+                    // exits, but the hard timeout only fires when stdout is still open
+                    // (indicating the process is alive). On Linux, PID reuse requires
+                    // the parent to wait() first, which hasn't happened yet.
                     unsafe { libc::killpg(pid as i32, libc::SIGKILL); }
                 }
                 break;

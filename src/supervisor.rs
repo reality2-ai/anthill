@@ -306,10 +306,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                     // ANT is already running — check if config has changed and restart if so.
                     if let Some((_, _, old_cfg)) = ant_tasks.iter().find(|(n, _, _)| n == name) {
                         if let Ok(new_cfg) = Config::load(config_path) {
-                            // Compare by serializing to TOML string (simple and reliable).
-                            let old_toml = toml::to_string(&*old_cfg).unwrap_or_default();
-                            let new_toml = toml::to_string(&new_cfg).unwrap_or_default();
-                            if old_toml != new_toml {
+                            if new_cfg != *old_cfg {
                                 log::info!("Config changed for ant '{}', restarting...", name);
                                 // Find and abort the old task.
                                 if let Some((_, handle, _)) = ant_tasks.iter().find(|(n, _, _)| n == name) {

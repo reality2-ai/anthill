@@ -69,7 +69,7 @@ impl EngineCategory {
 // ---------------------------------------------------------------------------
 
 /// Static metadata about a backend's capabilities and cost profile.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EngineTags {
     /// Categories this engine belongs to.
     pub categories: Vec<EngineCategory>,
@@ -173,12 +173,15 @@ impl AiError {
     pub fn retriable(msg: impl Into<String>) -> Self {
         Self { message: msg.into(), retriable: true }
     }
+    /// Network-level error (timeout, DNS, connection refused) — always retriable.
     pub fn network(msg: impl Into<String>) -> Self {
         Self { message: msg.into(), retriable: true }
     }
+    /// API-level error (4xx/5xx, rate limit, auth) — retriable only for transient cases.
     pub fn api(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), retriable: true }
+        Self::classify(&msg.into())
     }
+    /// Response parsing error — not retriable (same backend will give same response).
     pub fn parse(msg: impl Into<String>) -> Self {
         Self { message: msg.into(), retriable: false }
     }
@@ -258,7 +261,7 @@ pub trait AiBackend: Send + Sync + std::fmt::Debug {
 // ---------------------------------------------------------------------------
 
 /// Per-backend configuration block in `ant.toml` or `backends.toml`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BackendConfig {
     /// Backend type: "cli", "openai", "anthropic", "ollama", "openai-compatible", "groq".
     #[serde(rename = "type")]

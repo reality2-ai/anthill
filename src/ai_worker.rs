@@ -987,7 +987,7 @@ pub async fn ai_worker_loop(
             // API backends, etc.).  Falls back to the upstream
             // strategy-based code path otherwise.
             let mut response_text = String::new();
-            let mut _used_backend = String::new();
+            let mut used_backend = String::new();
 
             let used_registry = if let Some(ref registry) = cfg.backend_registry {
                 // Resolve backends: prefer [ai] config, fall back to legacy list,
@@ -1091,7 +1091,7 @@ pub async fn ai_worker_loop(
                             Ok(resp) => {
                                 log::info!("[{}] Backend '{}' succeeded", bname, backend_id);
                                 response_text = resp.text;
-                                _used_backend = resp.backend_id;
+                                used_backend = resp.backend_id;
                                 break;
                             }
                             Err(err) => {
@@ -1120,7 +1120,7 @@ pub async fn ai_worker_loop(
                                         "All {} backend(s) failed:\n\n{}\n\nTry /model to see which backends are available.",
                                         all_errors.len(), error_report
                                     );
-                                    _used_backend = backend_id;
+                                    used_backend = backend_id;
                                     log::error!("[{}] All backends failed:\n{}", bname, error_report);
                                 }
                             }
@@ -1269,18 +1269,20 @@ pub async fn ai_worker_loop(
                     });
                 }
 
-                // Record backend session for continuity tracking (use actual backend, not old strategy).
-                backend_sessions_clone.lock().unwrap().record_backend(chat_id, &_used_backend);
-                
-                // Store response summary for context injection when switching backends.
-                if !response_text.is_empty() {
-                    let summary = if response_text.len() > 500 {
-                        let end = response_text.floor_char_boundary(500);
-                        format!("{}... ({} chars)", &response_text[..end], response_text.len())
-                    } else {
-                        response_text.clone()
-                    };
-                    backend_sessions_clone.lock().unwrap().set_summary(chat_id, summary);
+                // Record backend session for continuity tracking.
+                if let Ok(mut sessions) = backend_sessions_clone.lock() {
+                    sessions.record_backend(chat_id, &used_backend);
+
+                    // Store response summary for context injection when switching backends.
+                    if !response_text.is_empty() {
+                        let summary = if response_text.len() > 500 {
+                            let end = response_text.floor_char_boundary(500);
+                            format!("{}... ({} chars)", &response_text[..end], response_text.len())
+                        } else {
+                            response_text.clone()
+                        };
+                        sessions.set_summary(chat_id, summary);
+                    }
                 }
             } else {
                 log::info!("[{}] Rumination task #{} complete ({} chars)",
