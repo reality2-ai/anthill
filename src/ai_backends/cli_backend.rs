@@ -178,14 +178,19 @@ impl AiBackend for GeminiCliBackend {
         request: &AiRequest,
         progress_tx: ProgressTx,
     ) -> Result<AiResponse, AiError> {
-        let mut args = vec![
-            "-p".to_string(),
+        // Build prompt: system instruction + user message
+        let prompt = if request.system_prompt.is_empty() {
+            request.message.clone()
+        } else {
+            format!("System: {}\n\nUser: {}", request.system_prompt, request.message)
+        };
+        
+        let args = vec![
             "--output-format".to_string(),
             "stream-json".to_string(),
+            "--prompt".to_string(),
+            prompt,
         ];
-        args.push("--append-system-prompt".to_string());
-        args.push(request.system_prompt.clone());
-        args.push(request.message.clone());
 
         run_cli_backend("gemini", &args, &request.working_dir, request.task_id, "gemini-cli", progress_tx).await
     }
