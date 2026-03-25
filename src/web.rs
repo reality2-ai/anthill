@@ -70,6 +70,8 @@ pub async fn run_web_server(
         .route("/api/ants/{id}/compact-history", post(compact_history))
         .route("/api/ants/{id}/graph", get(get_graph))
         .route("/api/ants/{id}/export", get(export_graph))
+        .route("/api/ants/{id}/report", post(start_report))
+        .route("/api/ants/{id}/reports/{filename}", get(download_report))
         .route("/api/ants/{id}/rumination", get(get_rumination_log))
         .route("/api/ants/{id}/engine", get(get_engine_info))
         .route("/api/backends", get(list_backends))
@@ -653,6 +655,170 @@ async fn export_graph(
             }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Export error: {}", e)).into_response(),
+    }
+}
+
+/// Spawn a background report generation task.
+///
+/// Reports appear as worker tasks with progress, and post a chat message
+/// with a download link when complete. The HTML file is stored persistently
+/// in the ANT's `reports/` directory.
+fn spawn_report_task(
+    ant_id: String,
+    memory_dir: std::path::PathBuf,
+    reports_dir: std::path::PathBuf,
+    display_name: String,
+    graph_filter: Option<String>,
+    guidance: Option<String>,
+    include_citations: bool,
+    event_tx: tokio::sync::broadcast::Sender<crate::registry::WsEvent>,
+    chat_id: i64,
+) -> u32 {
+    let task_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+
+    let _ = event_tx.send(crate::registry::WsEvent::TaskStarted {
+        bot: ant_id.clone(),
+        task_id,
+        preview: format!("Generating report{}", graph_filter.as_deref().map(|g| format!(": {}", g)).unwrap_or_default()),
+    });
+
+    tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        let _ = std::fs::create_dir_all(&reports_dir);
+
+        let _ = event_tx.send(crate::registry::WsEvent::TaskProgress {
+            bot: ant_id.clone(), task_id,
+            kind: "thinking".into(),
+            detail: "Computing graph insights...".into(),
+        });
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let filename = format!("report-{}.html", &uuid[..8]);
+        let output_path = reports_dir.join(&filename);
+
+        let _ = event_tx.send(crate::registry::WsEvent::TaskProgress {
+            bot: ant_id.clone(), task_id,
+            kind: "thinking".into(),
+            detail: "AI writing narrative summary...".into(),
+        });
+
+        let result = if let Some(ref graph_name) = graph_filter {
+            crate::export::export_single_graph(&memory_dir, &display_name, graph_name, &output_path, guidance.as_deref(), include_citations)
+        } else {
+            crate::export::export_ant_graphs(&memory_dir, &display_name, &output_path, guidance.as_deref(), include_citations)
+        };
+
+        let duration = start.elapsed().as_secs_f64();
+
+        match result {
+            Ok(()) => {
+                let file_size = std::fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+                let size_str = if file_size > 1_000_000 {
+                    format!("{:.1} MB", file_size as f64 / 1_000_000.0)
+                } else {
+                    format!("{:.0} KB", file_size as f64 / 1_000.0)
+                };
+
+                let download_url = format!("/api/ants/{}/reports/{}", ant_id, filename);
+                let summary = format!(
+                    "**Report ready** ({:.0}s, {})\n\n\
+                     [Download report]({})\n\n\
+                     _Self-contained HTML with interactive 3D graph — open in any browser._",
+                    duration, size_str, download_url,
+                );
+
+                let _ = event_tx.send(crate::registry::WsEvent::Message {
+                    bot: ant_id.clone(), chat_id, text: summary, task_id,
+                });
+                let _ = event_tx.send(crate::registry::WsEvent::TaskCompleted {
+                    bot: ant_id, task_id, duration_secs: duration as u64,
+                });
+            }
+            Err(e) => {
+                let _ = event_tx.send(crate::registry::WsEvent::TaskError {
+                    bot: ant_id.clone(), task_id,
+                    error: format!("Report failed: {}", e),
+                });
+                let _ = event_tx.send(crate::registry::WsEvent::TaskCompleted {
+                    bot: ant_id, task_id, duration_secs: duration as u64,
+                });
+            }
+        }
+    });
+
+    task_id
+}
+
+/// POST /api/ants/:id/report — start a background report generation task.
+///
+/// The report runs as a worker task visible in the Workers tab.
+/// On completion, a chat message with summary + download link is posted.
+/// The HTML file is stored persistently in the ANT's `reports/` directory.
+async fn start_report(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(params): Json<HashMap<String, serde_json::Value>>,
+) -> impl IntoResponse {
+    let bots = state.registry.bots.read().await;
+    let handle = match bots.get(&id) {
+        Some(h) => h,
+        None => return (StatusCode::NOT_FOUND, "ANT not found").into_response(),
+    };
+
+    let memory_dir = handle.working_dir.join("memory");
+    let reports_dir = handle.working_dir.join("reports");
+    let display_name = handle.display_name.clone();
+    let event_tx = handle.event_tx.clone();
+    drop(bots);
+
+    let graph_filter = params.get("graph").and_then(|v| v.as_str()).map(|s| s.to_string()).filter(|s| !s.is_empty());
+    let guidance = params.get("guidance").and_then(|v| v.as_str()).map(|s| s.to_string()).filter(|s| !s.is_empty());
+    let include_citations = params.get("citations").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    let task_id = spawn_report_task(
+        id, memory_dir, reports_dir, display_name,
+        graph_filter, guidance, include_citations, event_tx, 0,
+    );
+
+    (StatusCode::ACCEPTED, Json(serde_json::json!({ "task_id": task_id }))).into_response()
+}
+
+/// GET /api/ants/:id/reports/:filename — download a previously generated report.
+async fn download_report(
+    State(state): State<AppState>,
+    Path((id, filename)): Path<(String, String)>,
+) -> impl IntoResponse {
+    // Sanitize filename — no path traversal.
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let bots = state.registry.bots.read().await;
+    let handle = match bots.get(&id) {
+        Some(h) => h,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let reports_dir = handle.working_dir.join("reports");
+    drop(bots);
+
+    let path = reports_dir.join(&filename);
+    if !path.exists() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    match std::fs::read(&path) {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Content-Disposition", &format!("attachment; filename=\"{}\"", filename)),
+            ],
+            bytes,
+        ).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Read error: {}", e)).into_response(),
     }
 }
 
@@ -1444,6 +1610,7 @@ async fn handle_web_command(
             /citations — resolve unknown citations and link to topic graphs\n\
             /questions — show pending questions from rumination\n\
             /ask <ant> <topic> — query another ANT's knowledge\n\
+            /report [guidance] — generate report as background task\n\
             /export — download knowledge graph as shareable HTML\n\
             /specify <file> — generate spec from code\n\
             /test-vectors <file> — generate test cases\n\n\
@@ -1797,7 +1964,21 @@ async fn handle_web_command(
         },
         "/export" => {
             drop(bots);
-            Some("Click the **Export** button in the Graph tab to download a shareable HTML snapshot of this ANT's knowledge graph. The file opens in any browser — no server needed.".into())
+            Some("Click the **Export** button in the Graph tab to download a shareable HTML snapshot of this ANT's knowledge graph. The file opens in any browser — no server needed.\n\nOr use `/report [guidance]` to generate a report as a background task.".into())
+        },
+        cmd if cmd.starts_with("/report") => {
+            let guidance = cmd.strip_prefix("/report").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+            let memory_dir = handle.working_dir.join("memory");
+            let reports_dir = handle.working_dir.join("reports");
+            let display_name = handle.display_name.clone();
+            let ant_id = bot_name.to_string();
+            let event_tx = handle.event_tx.clone();
+            drop(bots);
+
+            spawn_report_task(ant_id.clone(), memory_dir, reports_dir, display_name,
+                None, guidance, true, event_tx, chat_id);
+
+            Some("Generating report in the background...\n\nThe download link will appear in chat when ready. You can leave this page.".into())
         },
         "/ruminate" => {
             drop(bots);

@@ -1332,38 +1332,31 @@ async function submitExport() {
   const prompt = document.getElementById('export-prompt').value.trim();
   const includeCitations = document.getElementById('export-citations').checked;
 
-  btn.textContent = 'Exporting...';
+  btn.textContent = 'Starting...';
   btn.disabled = true;
 
   try {
     const selector = document.getElementById('graph-selector');
     const graphName = (exportScope === 'current' && selector) ? selector.value : '';
-    let url = `/api/ants/${state.activeBot}/export`;
-    const params = [];
-    if (graphName) params.push(`graph=${encodeURIComponent(graphName)}`);
-    if (prompt) params.push(`guidance=${encodeURIComponent(prompt)}`);
-    if (!includeCitations) params.push('citations=false');
-    if (params.length) url += '?' + params.join('&');
 
-    const resp = await authFetch(url);
-    if (!resp.ok) { alert('Export failed: ' + resp.status + ' ' + await resp.text()); return; }
-    const blob = await resp.blob();
-    const cd = resp.headers.get('Content-Disposition') || '';
-    const match = cd.match(/filename="(.+?)"/);
-    const filename = match ? match[1] : `${state.activeBot}-knowledge.html`;
+    const body = {};
+    if (graphName) body.graph = graphName;
+    if (prompt) body.guidance = prompt;
+    body.citations = includeCitations;
 
-    const dlUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = dlUrl;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(dlUrl); }, 2000);
+    const resp = await authFetch(`/api/ants/${state.activeBot}/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) { alert('Report failed: ' + resp.status + ' ' + await resp.text()); return; }
 
     hideExportDialog();
+    // Switch to Workers tab so the user can see progress.
+    switchTab('workers');
   } catch (e) {
-    alert('Export error: ' + e.message);
+    alert('Report error: ' + e.message);
   } finally {
     btn.textContent = 'Export';
     btn.disabled = false;
