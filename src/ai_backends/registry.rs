@@ -5,6 +5,49 @@ use std::sync::Arc;
 
 use super::types::*;
 
+/// Returns true if backend ID is a local inference backend (last-resort).
+fn is_local_backend(id: &str) -> bool {
+    id.starts_with("ollama") || id.starts_with("lmstudio")
+}
+
+/// Sort backends according to category semantics.
+///
+/// - `Local`/`CostEffective`: cost ascending, then quality descending. No local-to-end move.
+/// - `Fast`: speed descending, then quality descending. Local backends to end.
+/// - All others (including `None`): quality descending, then cost ascending. Local to end.
+fn sort_backends(backends: &mut Vec<Arc<dyn AiBackend>>, category: Option<&EngineCategory>) {
+    let local_to_end = !matches!(category, Some(EngineCategory::Local) | Some(EngineCategory::CostEffective));
+
+    backends.sort_by(|a, b| {
+        // Push local backends to end unless category is Local/CostEffective.
+        if local_to_end {
+            let a_local = is_local_backend(a.id());
+            let b_local = is_local_backend(b.id());
+            if a_local != b_local {
+                return a_local.cmp(&b_local); // false < true, so non-local first
+            }
+        }
+
+        match category {
+            Some(EngineCategory::CostEffective) | Some(EngineCategory::Local) => {
+                // Cheapest first, then best quality.
+                a.tags().cost_tier.cmp(&b.tags().cost_tier)
+                    .then(b.tags().quality_tier.cmp(&a.tags().quality_tier))
+            }
+            Some(EngineCategory::Fast) => {
+                // Fastest first, then best quality.
+                b.tags().speed_tier.cmp(&a.tags().speed_tier)
+                    .then(b.tags().quality_tier.cmp(&a.tags().quality_tier))
+            }
+            _ => {
+                // Best quality first, then cheapest.
+                b.tags().quality_tier.cmp(&a.tags().quality_tier)
+                    .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
+            }
+        }
+    });
+}
+
 /// Central registry of all available AI backends.
 ///
 /// Thread-safe (all interior data is behind `Arc`).  Constructed once at
@@ -49,29 +92,23 @@ impl BackendRegistry {
         self.backends.keys().cloned().collect()
     }
 
-    /// All registered backends, sorted by quality tier (best first),
-    /// with local backends (ollama, lmstudio) moved to the end as last resort.
+    /// All registered backends, sorted: non-local first by quality desc then
+    /// cost asc, local backends (ollama, lmstudio) last.
     pub fn all(&self) -> Vec<Arc<dyn AiBackend>> {
         let mut backends: Vec<_> = self.backends.values().cloned().collect();
-        // Sort by quality descending, then by cost ascending (prefer capable, then cheap).
-        backends.sort_by(|a, b| {
-            b.tags().quality_tier.cmp(&a.tags().quality_tier)
-                .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
-        });
-        // Move local backends (ollama, lmstudio) to the end.
-        backends.sort_by(|a, b| {
-            let a_is_local = a.id().starts_with("ollama") || a.id().starts_with("lmstudio");
-            let b_is_local = b.id().starts_with("ollama") || b.id().starts_with("lmstudio");
-            match (a_is_local, b_is_local) {
-                (true, false) => std::cmp::Ordering::Greater,
-                (false, true) => std::cmp::Ordering::Less,
-                _ => std::cmp::Ordering::Equal,
-            }
-        });
+        sort_backends(&mut backends, None);
         backends
     }
 
     /// Find backends belonging to a category, in preference order.
+    ///
+    /// Sorting adapts to the category intent:
+    /// - CostEffective/Local: sort by cost ascending, then quality descending
+    /// - Fast: sort by speed descending, then quality descending
+    /// - All others: sort by quality descending, then cost ascending
+    ///
+    /// Local backends (ollama, lmstudio) are always moved to the end unless
+    /// the category is `Local` or `CostEffective`.
     pub fn find_by_category(&self, category: &EngineCategory) -> Vec<Arc<dyn AiBackend>> {
         let key = category.to_string();
         self.categories
@@ -80,21 +117,7 @@ impl BackendRegistry {
                 let mut backends: Vec<_> = ids.iter()
                     .filter_map(|id| self.backends.get(id).cloned())
                     .collect();
-                // Sort by quality descending, then cost ascending.
-                backends.sort_by(|a, b| {
-                    b.tags().quality_tier.cmp(&a.tags().quality_tier)
-                        .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
-                });
-                // Move ollama and lmstudio backends to the end (last resort).
-                backends.sort_by(|a, b| {
-                    let a_is_local = a.id().starts_with("ollama") || a.id().starts_with("lmstudio");
-                    let b_is_local = b.id().starts_with("ollama") || b.id().starts_with("lmstudio");
-                    match (a_is_local, b_is_local) {
-                        (true, false) => std::cmp::Ordering::Greater,
-                        (false, true) => std::cmp::Ordering::Less,
-                        _ => std::cmp::Ordering::Equal,
-                    }
-                });
+                sort_backends(&mut backends, Some(category));
                 backends
             })
             .unwrap_or_default()
@@ -409,5 +432,171 @@ mod tests {
         assert_eq!(EngineCategory::parse("specialized:coding"),
             Some(EngineCategory::Specialized("coding".into())));
         assert_eq!(EngineCategory::parse("garbage"), None);
+    }
+
+    // ── Audit fix test vectors ───────────────────────────────────────
+
+    /// Fix #16: CostEffective category sorts by cost ascending (cheapest first).
+    #[test]
+    fn cost_effective_sorts_by_cost_first() {
+        let mut reg = BackendRegistry::new();
+        let expensive_high_quality = Arc::new(QualityDummy {
+            id: "cloud-api".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::CostEffective],
+                capabilities: vec![],
+                cost_tier: 5, speed_tier: 3, quality_tier: 5,
+            },
+        });
+        let cheap_low_quality = Arc::new(QualityDummy {
+            id: "local-cheap".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::CostEffective],
+                capabilities: vec![],
+                cost_tier: 1, speed_tier: 3, quality_tier: 2,
+            },
+        });
+        reg.register(expensive_high_quality);
+        reg.register(cheap_low_quality);
+
+        let results = reg.find_by_category(&EngineCategory::CostEffective);
+        assert_eq!(results[0].id(), "local-cheap", "CostEffective should sort cheapest first");
+        assert_eq!(results[1].id(), "cloud-api");
+    }
+
+    /// Fix #16: Fast category sorts by speed descending (fastest first).
+    #[test]
+    fn fast_sorts_by_speed_first() {
+        let mut reg = BackendRegistry::new();
+        let slow = Arc::new(QualityDummy {
+            id: "slow-but-smart".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Fast],
+                capabilities: vec![],
+                cost_tier: 3, speed_tier: 2, quality_tier: 5,
+            },
+        });
+        let fast = Arc::new(QualityDummy {
+            id: "fast-local".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Fast],
+                capabilities: vec![],
+                cost_tier: 1, speed_tier: 5, quality_tier: 3,
+            },
+        });
+        reg.register(slow);
+        reg.register(fast);
+
+        let results = reg.find_by_category(&EngineCategory::Fast);
+        assert_eq!(results[0].id(), "fast-local", "Fast should sort fastest first");
+        assert_eq!(results[1].id(), "slow-but-smart");
+    }
+
+    /// Fix #19: Ollama/LMStudio always last in non-Local categories.
+    #[test]
+    fn ollama_lmstudio_always_last_in_quality_categories() {
+        let mut reg = BackendRegistry::new();
+        let ollama = Arc::new(QualityDummy {
+            id: "ollama-llama".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Intellectual],
+                capabilities: vec![],
+                cost_tier: 1, speed_tier: 4, quality_tier: 3,
+            },
+        });
+        let lms = Arc::new(QualityDummy {
+            id: "lmstudio-qwen".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Intellectual],
+                capabilities: vec![],
+                cost_tier: 1, speed_tier: 4, quality_tier: 3,
+            },
+        });
+        let claude = Arc::new(QualityDummy {
+            id: "claude-cli".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Intellectual],
+                capabilities: vec![],
+                cost_tier: 4, speed_tier: 3, quality_tier: 5,
+            },
+        });
+
+        reg.register(ollama);
+        reg.register(lms);
+        reg.register(claude);
+
+        let results = reg.find_by_category(&EngineCategory::Intellectual);
+        assert_eq!(results[0].id(), "claude-cli", "Claude should be first (non-local)");
+        assert!(results[1].id().starts_with("ollama") || results[1].id().starts_with("lmstudio"),
+            "Local backends should be at the end");
+    }
+
+    /// Fix #19: Local category does NOT push ollama/lmstudio to end.
+    #[test]
+    fn local_category_keeps_ollama_at_natural_position() {
+        let mut reg = BackendRegistry::new();
+        let ollama = Arc::new(QualityDummy {
+            id: "ollama-llama".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Local],
+                capabilities: vec![],
+                cost_tier: 1, speed_tier: 4, quality_tier: 3,
+            },
+        });
+        let lms_expensive = Arc::new(QualityDummy {
+            id: "lmstudio-big".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Local],
+                capabilities: vec![],
+                cost_tier: 2, speed_tier: 3, quality_tier: 4,
+            },
+        });
+
+        reg.register(lms_expensive);
+        reg.register(ollama);
+
+        let results = reg.find_by_category(&EngineCategory::Local);
+        assert_eq!(results[0].id(), "ollama-llama",
+            "Local category should sort by cost (cheapest first), not push ollama to end");
+    }
+
+    /// Fix #19: all() returns non-local first, local last, sorted by quality.
+    #[test]
+    fn all_backends_sorted_correctly() {
+        let mut reg = BackendRegistry::new();
+        let ollama = Arc::new(QualityDummy {
+            id: "ollama-x".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Local],
+                capabilities: vec![],
+                cost_tier: 1, speed_tier: 4, quality_tier: 3,
+            },
+        });
+        let gemini = Arc::new(QualityDummy {
+            id: "gemini-cli".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Fast],
+                capabilities: vec![],
+                cost_tier: 3, speed_tier: 4, quality_tier: 4,
+            },
+        });
+        let claude = Arc::new(QualityDummy {
+            id: "claude-cli".into(),
+            tags: EngineTags {
+                categories: vec![EngineCategory::Intellectual],
+                capabilities: vec![],
+                cost_tier: 4, speed_tier: 3, quality_tier: 5,
+            },
+        });
+
+        reg.register(ollama);
+        reg.register(gemini);
+        reg.register(claude);
+
+        let all = reg.all();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id(), "claude-cli", "Best quality non-local first");
+        assert_eq!(all[1].id(), "gemini-cli", "Next quality non-local");
+        assert_eq!(all[2].id(), "ollama-x", "Local backend last");
     }
 }

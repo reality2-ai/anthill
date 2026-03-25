@@ -131,3 +131,15 @@ impl AiBackend for LmStudioBackend {
         }
     }
 }
+
+/// Create an LM Studio backend from a [`BackendConfig`].
+pub fn create_from_config(id: &str, config: &super::types::BackendConfig) -> Option<Box<dyn AiBackend>> {
+    let model = if config.model.is_empty() { "default" } else { &config.model };
+    let base_url = if config.api_base.is_empty() { None } else { Some(config.api_base.as_str()) };
+    let mut backend = LmStudioBackend::new(model, base_url);
+    if let Some(ref tags) = config.tags {
+        backend = backend.with_tags(tags.clone());
+    }
+    backend.id = id.to_string();
+    Some(Box::new(backend))
+}

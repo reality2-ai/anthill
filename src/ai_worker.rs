@@ -57,8 +57,8 @@ pub struct CliWorkerConfig {
     pub system_prompt: Option<String>,
     pub skip_permissions: bool,
     pub sync_channels: bool,
+    /// Legacy backend list — kept for backward compat config parsing only.
     pub backends: Vec<String>,
-    pub backend_strategy: crate::config::BackendStrategy,
     /// Worker timeout in seconds (0 = no timeout). Default: 600 (10 minutes).
     pub worker_timeout_secs: u64,
     /// Allow the AI to modify files outside the working directory. Default: false.
@@ -885,68 +885,13 @@ pub async fn ai_worker_loop(
         let relevant_episodes = episodes_mem.search(&actual_message, 5);
         let episodes_rendered = episodes_mem.render(&relevant_episodes, 2048);
 
-        // Classify the task for dynamic backend selection.
-        let task_type = crate::config::BackendStrategy::classify_message(&actual_message);
-        log::info!("[{}] Task classified as: {:?}, message preview: {}", bot_name, task_type, 
-            if actual_message.len() > 50 { format!("{}...", &actual_message[..50]) } else { actual_message.clone() });
-
-        // Get available backends and select based on strategy + task type.
-        let available = crate::backends::detect_backends();
-        log::info!("[{}] Available backends: {:?}", bot_name, available);
-        
-        // Use strategy if backends is empty or only contains default "claude"
-        let use_strategy = config.backends.is_empty() 
-            || (config.backends.len() == 1 && config.backends[0] == "claude");
-        
-        log::info!("[{}] Using strategy: {}, config.backends: {:?}", bot_name, use_strategy, config.backends);
-        
-        let base_backends = if use_strategy {
-            let strategy_backends = config.backend_strategy.get_backends(&available);
-            log::info!("[{}] Strategy {:?} returned backends: {:?}", bot_name, config.backend_strategy, strategy_backends);
-            strategy_backends
-        } else {
-            config.backends.clone()
-        };
-
-        // If multiple backends available, prefer based on task type
-        let backend_for_this_message = if base_backends.len() <= 1 {
-            base_backends.clone()
-        } else {
-            let preferred = config.backend_strategy.backend_for_task(task_type);
-            log::info!("[{}] Preferred backend for {:?}: {}", bot_name, task_type, preferred);
-            if available.iter().any(|(name, _)| name == preferred) {
-                let mut ordered = vec![preferred.to_string()];
-                ordered.extend(base_backends.iter()
-                    .filter(|b| b.as_str() != preferred)
-                    .cloned());
-                ordered
+        // Log message preview.
+        log::info!("[{}] Message preview: {}", bot_name,
+            if actual_message.len() > 80 {
+                format!("{}...", &actual_message[..actual_message.floor_char_boundary(80)])
             } else {
-                base_backends.clone()
-            }
-        };
-
-        log::info!("[{}] Selected backends (in order): {:?}", bot_name, backend_for_this_message);
-
-        // Session continuity: prefer same backend for conversation continuity
-        let primary_backend = backend_for_this_message[0].clone();
-        let req_chat_id = req.chat_id;
-        let is_switching = backend_sessions.lock().unwrap().is_switching(req_chat_id, &primary_backend);
-        
-        // Get context injection BEFORE the spawn closure if switching
-        let _context_injection = if is_switching {
-            backend_sessions.lock().unwrap().get_summary(req_chat_id).map(|s| {
-                format!("\n\n[CONTEXT from previous conversation - inject into your response naturally]:\n{}\n\n", s)
-            })
-        } else {
-            None
-        };
-        
-        if is_switching {
-            log::info!("[{}] Switching backend for chat {}: {} -> {}", 
-                bot_name, req_chat_id, 
-                backend_sessions.lock().unwrap().last_backend(req_chat_id).unwrap_or("none"),
-                primary_backend);
-        }
+                actual_message.clone()
+            });
 
         let system_prompt = build_system_prompt(
             config.system_prompt.as_deref(),
@@ -976,7 +921,7 @@ pub async fn ai_worker_loop(
         let etx = event_tx.clone();
         let bname = Arc::clone(&bot_name);
         let rq_tx = request_tx.clone();
-        let _timeout_secs = if config.worker_timeout_secs > 0 { config.worker_timeout_secs } else { 600 };
+
 
         // Broadcast user message (for history and cross-device sync).
         // Skip for rumination — autonomous thinking is not user-facing.
@@ -1191,9 +1136,6 @@ pub async fn ai_worker_loop(
                 response_text = "No AI backends available. Install Claude, Ollama, or configure API backends in [ai.backends_config].".to_string();
             }
 
-            // Suppress unused warnings for fields still in CliWorkerConfig
-            // (kept for config backward compatibility).
-            let _ = &cfg.backend_strategy;
             let _ = used_registry;
 
 
@@ -1327,13 +1269,14 @@ pub async fn ai_worker_loop(
                     });
                 }
 
-                // Record backend session for continuity tracking
-                backend_sessions_clone.lock().unwrap().record_backend(chat_id, &primary_backend);
+                // Record backend session for continuity tracking (use actual backend, not old strategy).
+                backend_sessions_clone.lock().unwrap().record_backend(chat_id, &_used_backend);
                 
-                // Store response summary for context injection when switching backends
+                // Store response summary for context injection when switching backends.
                 if !response_text.is_empty() {
                     let summary = if response_text.len() > 500 {
-                        format!("{}... ({} chars)", &response_text[..500], response_text.len())
+                        let end = response_text.floor_char_boundary(500);
+                        format!("{}... ({} chars)", &response_text[..end], response_text.len())
                     } else {
                         response_text.clone()
                     };

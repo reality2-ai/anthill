@@ -56,6 +56,7 @@ pub fn build_registry(config: &crate::config::Config) -> BackendRegistry {
     for (id, bc) in &config.ai.backends_config {
         let backend: Option<Box<dyn AiBackend>> = match bc.backend_type.as_str() {
             "ollama" => ollama_backend::create_from_config(id, bc),
+            "lmstudio" => lmstudio_backend::create_from_config(id, bc),
             _ => api_backend::create_from_config(id, bc),
         };
         if let Some(b) = backend {
@@ -65,26 +66,23 @@ pub fn build_registry(config: &crate::config::Config) -> BackendRegistry {
         }
     }
 
-    // ── Phase 3: register Ollama if installed but not in config ────
-    // If Ollama is locally available and no ollama backend was configured,
-    // auto-register a default one.
+    // ── Phase 3: register local backends if installed but not in config ──
+    // Auto-register Ollama with default model if not already configured.
     if reg.get("ollama-llama3-2").is_none() && reg.get("ollama-llama3").is_none() {
         let ollama = ollama_backend::OllamaBackend::new("llama3.2", None);
-        // We'll check availability lazily — just register it.
         reg.register(Arc::new(ollama));
     }
 
-    // ── Phase 4: legacy compatibility ─────────────────────────────
-    // Map old-style backend names from [claude].backends to registry IDs.
-    // This lets existing configs keep working unchanged.
-    let _legacy_map: Vec<(&str, &str)> = vec![
-        ("claude", "claude-cli"),
-        ("codex", "codex-cli"),
-        ("gemini", "gemini-cli"),
-    ];
-    // (The worker will consult this map when resolving backend names.)
+    // Auto-register LM Studio if installed (checks ~/.lmstudio/bin/lms, lms, etc.)
+    if !reg.ids().iter().any(|id| id.starts_with("lmstudio")) {
+        if crate::backends::BackendKind::LMStudio.is_installed() {
+            let lms = lmstudio_backend::LmStudioBackend::new("default", None);
+            reg.register(Arc::new(lms));
+            log::info!("Auto-registered LM Studio backend (detected on system)");
+        }
+    }
 
-    // ── Phase 5: apply category overrides from config ─────────────
+    // ── Phase 4: apply category overrides from config ──────────────
     if !config.ai.categories.is_empty() {
         reg.apply_category_overrides(&config.ai.categories);
     }

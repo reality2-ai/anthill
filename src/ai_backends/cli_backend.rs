@@ -178,18 +178,24 @@ impl AiBackend for GeminiCliBackend {
         request: &AiRequest,
         progress_tx: ProgressTx,
     ) -> Result<AiResponse, AiError> {
-        // Build prompt: system instruction + user message
+        // Build prompt: combine system prompt + user message.
         let prompt = if request.system_prompt.is_empty() {
             request.message.clone()
         } else {
-            format!("System: {}\n\nUser: {}", request.system_prompt, request.message)
+            format!("{}\n\n{}", request.system_prompt, request.message)
         };
-        
+
+        // Gemini CLI headless mode:
+        //   gemini -p "prompt" --output-format stream-json --yolo
+        // -p / --prompt triggers non-interactive mode.
+        // --yolo auto-approves tool calls (like Claude's --dangerously-skip-permissions).
+        // --output-format stream-json gives JSONL events we can parse.
         let args = vec![
+            "-p".to_string(),
+            prompt,
             "--output-format".to_string(),
             "stream-json".to_string(),
-            "--prompt".to_string(),
-            prompt,
+            "--yolo".to_string(),
         ];
 
         run_cli_backend("gemini", &args, &request.working_dir, request.task_id, "gemini-cli", progress_tx).await
@@ -506,8 +512,48 @@ fn parse_codex_line(json: &serde_json::Value) -> (Option<(String, String)>, Opti
 }
 
 fn parse_gemini_line(json: &serde_json::Value) -> (Option<(String, String)>, Option<String>) {
-    // Gemini uses the same stream-json format as Claude.
-    parse_claude_line(json)
+    // Gemini stream-json event types: init, message, tool_use, tool_result, error, result, thought
+    let event_type = json.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    match event_type {
+        "result" => {
+            // Final result event — contains the response text.
+            let response = json.get("response").and_then(|r| r.as_str());
+            if let Some(text) = response {
+                return (None, Some(text.to_string()));
+            }
+            (None, None)
+        }
+        "message" => {
+            // Streaming message chunk.
+            let content = json.get("content").and_then(|c| c.as_str());
+            if let Some(text) = content {
+                return (None, Some(text.to_string()));
+            }
+            (None, None)
+        }
+        "tool_use" => {
+            let tool_name = json.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+            (Some(("tool_use".into(), format!("Using: {}", tool_name))), None)
+        }
+        "tool_result" => {
+            (Some(("tool_result".into(), "Tool finished".into())), None)
+        }
+        "thought" => {
+            let content = json.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            (Some(("thinking".into(), content.chars().take(100).collect::<String>())), None)
+        }
+        "error" => {
+            let msg = json.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
+            (Some(("warning".into(), msg.to_string())), None)
+        }
+        "init" => {
+            (Some(("thinking".into(), "Gemini session started".into())), None)
+        }
+        _ => {
+            // Fall back to Claude-style parsing for unknown event types.
+            parse_claude_line(json)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -345,35 +345,35 @@ async fn put_config(
     Path(id): Path<String>,
     Json(req): Json<ConfigUpdate>,
 ) -> impl IntoResponse {
-    // Build a typed config and serialize to TOML.
-    let cfg = crate::config::Config {
-        name: req.name.clone().filter(|s| !s.is_empty()),
-        mode: String::new(),
-        telegram: crate::config::TelegramConfig {
-            token: req.telegram_token.clone().filter(|s| !s.is_empty()),
-            allow: req.telegram_allow.clone().unwrap_or_default(),
-        },
-        slack: crate::config::SlackConfig {
-            bot_token: req.slack_bot_token.clone().filter(|s| !s.is_empty()),
-            app_token: req.slack_app_token.clone().filter(|s| !s.is_empty()),
-        },
-        claude: crate::config::ClaudeConfig {
-            backend_strategy: req.backend_strategy.clone().unwrap_or_default(),
-            backends: req.backends.clone().unwrap_or_default(),
-            working_dir: req.working_dir.clone().filter(|s| !s.is_empty()),
-            system_prompt: req.system_prompt.clone().filter(|s| !s.is_empty()),
-            sync_channels: req.sync_channels.unwrap_or(false),
-            allow_base_code_changes: req.allow_base_code_changes.unwrap_or(false),
-            backup_interval_hours: req.backup_interval_hours.unwrap_or(0),
-            backup_remote: req.backup_remote.clone().unwrap_or_default(),
-            rumination: req.rumination.clone().unwrap_or_default(),
-            ..Default::default()
-        },
-        ai: crate::config::AiConfig {
-            default_category: req.ai_default_category.clone().unwrap_or_default(),
-            ..Default::default()
-        },
-    };
+    // Load existing config so we only overwrite fields the UI controls.
+    // This preserves [ai.categories], [ai.backends_config], memory_dir, etc.
+    let mut cfg: crate::config::Config = state.registry.read_config(&id)
+        .and_then(|c| toml::from_str(&c).ok())
+        .unwrap_or_default();
+
+    // Apply web UI updates on top of existing config.
+    cfg.name = req.name.clone().filter(|s| !s.is_empty());
+    cfg.telegram.token = req.telegram_token.clone().filter(|s| !s.is_empty());
+    cfg.telegram.allow = req.telegram_allow.clone().unwrap_or_default();
+    cfg.slack.bot_token = req.slack_bot_token.clone().filter(|s| !s.is_empty());
+    cfg.slack.app_token = req.slack_app_token.clone().filter(|s| !s.is_empty());
+    cfg.claude.backend_strategy = req.backend_strategy.clone().unwrap_or_default();
+    cfg.claude.backends = req.backends.clone().unwrap_or_default();
+    if let Some(ref wd) = req.working_dir {
+        if !wd.is_empty() { cfg.claude.working_dir = Some(wd.clone()); }
+    }
+    cfg.claude.system_prompt = req.system_prompt.clone().filter(|s| !s.is_empty());
+    cfg.claude.sync_channels = req.sync_channels.unwrap_or(false);
+    cfg.claude.allow_base_code_changes = req.allow_base_code_changes.unwrap_or(false);
+    cfg.claude.backup_interval_hours = req.backup_interval_hours.unwrap_or(0);
+    cfg.claude.backup_remote = req.backup_remote.clone().unwrap_or_default();
+    if let Some(ref rum) = req.rumination {
+        cfg.claude.rumination = rum.clone();
+    }
+    // Update AI category — preserve existing categories/backends_config.
+    if let Some(ref cat) = req.ai_default_category {
+        cfg.ai.default_category = cat.clone();
+    }
 
     let toml = match toml::to_string_pretty(&cfg) {
         Ok(t) => t,

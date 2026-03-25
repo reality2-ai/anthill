@@ -2614,10 +2614,17 @@ async function saveConfig() {
     'manual': 'manual',
   };
 
+  // For manual mode, backend_strategy must be {"manual": ["backend1", "backend2"]}.
+  // For other modes, it's a plain string like "balanced".
+  const manualBackends = backends.length > 0 ? backends : ['claude'];
+  const strategyValue = aiCategory === 'manual'
+    ? { manual: manualBackends }
+    : (categoryToStrategy[aiCategory] || 'balanced');
+
   const body = {
     name: document.getElementById('c-name').value.trim(),
-    backend_strategy: categoryToStrategy[aiCategory] || 'balanced',
-    backends: aiCategory === 'manual' ? (backends.length > 0 ? backends : ['claude']) : null,
+    backend_strategy: strategyValue,
+    backends: aiCategory === 'manual' ? manualBackends : null,
     ai_default_category: aiCategory === 'manual' ? '' : aiCategory,
     telegram_token: document.getElementById('c-token').value.trim(),
     telegram_allow: allow,

@@ -211,8 +211,12 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     let (reload_tx, mut reload_rx) = tokio::sync::mpsc::channel::<()>(1);
 
     // Build global backend registry for the web server.
-    let default_config = Config::default();
-    let backend_registry = Arc::new(crate::ai_backends::build_registry(&default_config));
+    // Use the first ANT's config (which may have [ai.backends_config]),
+    // falling back to defaults if no ANTs exist.
+    let registry_config = ant_tasks.first()
+        .map(|(_, _, cfg)| cfg.clone())
+        .unwrap_or_default();
+    let backend_registry = Arc::new(crate::ai_backends::build_registry(&registry_config));
 
     // Start the web server.
     let bind: SocketAddr = format!("{}:{}", sup_cfg.http_bind, sup_cfg.http_port)
