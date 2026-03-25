@@ -85,7 +85,20 @@ impl BackendKind {
             Self::OpenCode => "opencode",
             Self::Grok => "grok",
             Self::DeepSeek => "deepseek",
-            Self::LMStudio => "lms",
+            Self::LMStudio => {
+                // LM Studio CLI may be named lms, llmster, or lmstudio
+                for name in &["lms", "llmster", "lmstudio"] {
+                    if std::process::Command::new("which")
+                        .arg(name)
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
         };
         std::process::Command::new("which")
             .arg(cmd)

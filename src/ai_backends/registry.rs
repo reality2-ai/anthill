@@ -49,13 +49,24 @@ impl BackendRegistry {
         self.backends.keys().cloned().collect()
     }
 
-    /// All registered backends, sorted by quality tier (best first).
+    /// All registered backends, sorted by quality tier (best first),
+    /// with local backends (ollama, lmstudio) moved to the end as last resort.
     pub fn all(&self) -> Vec<Arc<dyn AiBackend>> {
         let mut backends: Vec<_> = self.backends.values().cloned().collect();
         // Sort by quality descending, then by cost ascending (prefer capable, then cheap).
         backends.sort_by(|a, b| {
             b.tags().quality_tier.cmp(&a.tags().quality_tier)
                 .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
+        });
+        // Move local backends (ollama, lmstudio) to the end.
+        backends.sort_by(|a, b| {
+            let a_is_local = a.id().starts_with("ollama") || a.id().starts_with("lmstudio");
+            let b_is_local = b.id().starts_with("ollama") || b.id().starts_with("lmstudio");
+            match (a_is_local, b_is_local) {
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                _ => std::cmp::Ordering::Equal,
+            }
         });
         backends
     }
@@ -69,9 +80,21 @@ impl BackendRegistry {
                 let mut backends: Vec<_> = ids.iter()
                     .filter_map(|id| self.backends.get(id).cloned())
                     .collect();
+                // Sort by quality descending, then cost ascending.
                 backends.sort_by(|a, b| {
                     b.tags().quality_tier.cmp(&a.tags().quality_tier)
                         .then(a.tags().cost_tier.cmp(&b.tags().cost_tier))
+                });
+                // Move ollama and lmstudio backends to the end (last resort).
+                let ollama_end = backends.len();
+                backends.sort_by(|a, b| {
+                    let a_is_local = a.id().starts_with("ollama") || a.id().starts_with("lmstudio");
+                    let b_is_local = b.id().starts_with("ollama") || b.id().starts_with("lmstudio");
+                    match (a_is_local, b_is_local) {
+                        (true, false) => std::cmp::Ordering::Greater,
+                        (false, true) => std::cmp::Ordering::Less,
+                        _ => std::cmp::Ordering::Equal,
+                    }
                 });
                 backends
             })
