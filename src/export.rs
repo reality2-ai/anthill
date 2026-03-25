@@ -174,6 +174,13 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                 // Collect citations from this edge, verifying URLs are reachable.
                 if let Some(cites) = link["citations"].as_array() {
                     for cite in cites {
+                        let ref_type = cite["ref_type"].as_str().unwrap_or("website");
+
+                        // Skip AI-generated references — these are not real citations.
+                        if ref_type == "ai_inference" || ref_type == "ai_reference" {
+                            continue;
+                        }
+
                         let url = cite["url"].as_str().unwrap_or("").to_string();
                         let cite_id = cite["cite_id"].as_str().unwrap_or("").to_string();
                         let key = if !url.is_empty() {
@@ -198,10 +205,7 @@ fn compute_insights(all_data: &[serde_json::Value]) -> GraphInsights {
                                 title: cite["title"].as_str().unwrap_or("").to_string(),
                                 author: cite["author"].as_str().unwrap_or("").to_string(),
                                 date: cite["date"].as_str().unwrap_or("").to_string(),
-                                ref_type: cite["ref_type"]
-                                    .as_str()
-                                    .unwrap_or("website")
-                                    .to_string(),
+                                ref_type: ref_type.to_string(),
                                 quality: cite["quality"].as_f64().unwrap_or(0.5),
                                 supports: format!("{} {} {}", from, relation, to),
                             });
