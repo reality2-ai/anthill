@@ -286,8 +286,14 @@ async fn send_chat(
     }
 }
 
-/// Extract @mentions from a message. Returns (ant_name, question) pairs.
-/// Each @mention captures the text that follows it until the next @mention or end of message.
+/// Extract @mentions from a message. Returns (ant_id, question) pairs.
+///
+/// Each mentioned ANT receives the full message as context (with @names stripped),
+/// prefixed with what was specifically directed at them if identifiable.
+///
+/// Example: "What do you think @Gaea about renewable energy @Sven how does Sweden handle this?"
+/// → Gaea gets: "The user asked you specifically about renewable energy. Full context: What do you think about renewable energy, how does Sweden handle this?"
+/// → Sven gets: "The user asked you specifically how does Sweden handle this. Full context: What do you think about renewable energy, how does Sweden handle this?"
 async fn extract_mentions(message: &str, registry: &BotRegistry) -> Vec<(String, String)> {
     let bots = registry.bots.read().await;
     let bot_names: Vec<(String, String)> = bots.iter()
@@ -295,19 +301,24 @@ async fn extract_mentions(message: &str, registry: &BotRegistry) -> Vec<(String,
         .collect();
     drop(bots);
 
-    let mut mentions = Vec::new();
+    // First pass: find all @Name positions and which ANT they refer to.
+    let mut found: Vec<(usize, usize, String, String)> = Vec::new(); // (start, end, display_name, id)
+    let msg_lower = message.to_lowercase();
+    let mut search_from = 0;
 
-    // Find all @Name patterns. Match against known ANT display names (case-insensitive).
-    let mut remaining = message;
-    while let Some(at_pos) = remaining.find('@') {
-        let after_at = &remaining[at_pos + 1..];
-        // Try to match an ANT name at this position.
+    while let Some(at_pos) = message[search_from..].find('@') {
+        let abs_at = search_from + at_pos;
+        let after_at = &message[abs_at + 1..];
+        let after_lower = &msg_lower[abs_at + 1..];
+
         let mut matched = None;
-        for (display_name, id) in &bot_names {
+        // Try longer names first to avoid partial matches.
+        let mut sorted_names = bot_names.clone();
+        sorted_names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+        for (display_name, id) in &sorted_names {
             let name_lower = display_name.to_lowercase();
-            let after_lower = after_at.to_lowercase();
             if after_lower.starts_with(&name_lower) {
-                // Check it's a word boundary (next char is space, punctuation, or end).
                 let end_pos = name_lower.len();
                 if end_pos >= after_at.len() || !after_at.as_bytes()[end_pos].is_ascii_alphanumeric() {
                     matched = Some((display_name.clone(), id.clone(), end_pos));
@@ -317,25 +328,44 @@ async fn extract_mentions(message: &str, registry: &BotRegistry) -> Vec<(String,
         }
 
         if let Some((display_name, id, name_len)) = matched {
-            // Extract the question: text after the name until next @mention or end.
-            let question_start = at_pos + 1 + name_len;
-            let rest = &remaining[question_start..];
-            // Find next @mention or end.
-            let question_end = rest.find('@').unwrap_or(rest.len());
-            let question = rest[..question_end].trim().to_string();
-            if !question.is_empty() {
-                mentions.push((id, question));
-            } else {
-                // No question after the name — treat entire message as the question.
-                let full_question = strip_mentions(message).trim().to_string();
-                if !full_question.is_empty() {
-                    mentions.push((id, full_question));
-                }
-            }
-            remaining = &remaining[question_start + question_end..];
+            found.push((abs_at, abs_at + 1 + name_len, display_name, id));
+            search_from = abs_at + 1 + name_len;
         } else {
-            // Not a known ANT name — skip this @.
-            remaining = &remaining[at_pos + 1..];
+            search_from = abs_at + 1;
+        }
+    }
+
+    if found.is_empty() {
+        return Vec::new();
+    }
+
+    // Build the full context: message with all @Names stripped out.
+    let full_context = strip_mentions(message).trim().to_string();
+
+    // For each mention, extract the specific fragment directed at that ANT.
+    let mut mentions = Vec::new();
+    for (i, (_start, end, display_name, id)) in found.iter().enumerate() {
+        // Fragment: text from after this @Name to the next @mention (or end).
+        let next_at = if i + 1 < found.len() { found[i + 1].0 } else { message.len() };
+        let fragment = message[*end..next_at].trim();
+
+        // Build the question with context so the mentioned ANT understands.
+        let question = if fragment.is_empty() {
+            // Just "@Name" with no specific question — send full context.
+            full_context.clone()
+        } else if fragment.len() > full_context.len() / 2 {
+            // The fragment is most of the message — just send it.
+            fragment.to_string()
+        } else {
+            // Specific fragment + full context for reference.
+            format!(
+                "The user asked you specifically: {}\n\nFull context of the conversation: {}",
+                fragment, full_context
+            )
+        };
+
+        if !question.is_empty() {
+            mentions.push((id.clone(), question));
         }
     }
 
