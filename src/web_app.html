@@ -945,21 +945,68 @@ function submitGraphQuery() {
 // --- Node update dialog (right-click on graph node) ---
 let pendingNodeUpdate = null;
 
+// Resolve the label for the "other" end of an edge relative to a clicked node.
+// After force-graph simulation, e.source/e.target become full node objects,
+// so we can read .label directly. Before simulation they're plain IDs.
+function resolveEdgeLabel(e, nodeId, graphData) {
+  const srcId = e.source.id !== undefined ? e.source.id : e.source;
+  const tgtId = e.target.id !== undefined ? e.target.id : e.target;
+  const isSource = srcId === nodeId;
+
+  // The "other" end of the edge.
+  const otherEnd = isSource ? e.target : e.source;
+
+  // If force-graph already replaced the id with a node object, use it directly.
+  if (otherEnd && typeof otherEnd === 'object' && otherEnd.label) {
+    return otherEnd.label;
+  }
+
+  // Fallback: look up by id in the nodes array.
+  const otherId = isSource ? tgtId : srcId;
+  const found = graphData.nodes.find(n => n.id === otherId);
+  return found ? found.label : '?';
+}
+
+// Get edges connected to a node, handling both pre- and post-simulation formats.
+function getNodeEdges(node, graphData) {
+  return (graphData.links || []).filter(l => {
+    const srcId = l.source.id !== undefined ? l.source.id : l.source;
+    const tgtId = l.target.id !== undefined ? l.target.id : l.target;
+    return srcId === node.id || tgtId === node.id;
+  });
+}
+
+// Show the node info panel (shared by 2D and 3D graphs).
+function showGraphNodeInfo(node, graphData) {
+  const info = document.getElementById('graph-info');
+  const edges = getNodeEdges(node, graphData);
+  let html = `<b>${node.label}</b> (${node.kind})`;
+  if (node.summary) html += `<br>${node.summary}`;
+  if (node.tags && node.tags.length) html += `<br><span style="color:var(--text-dim)">Tags: ${node.tags.join(', ')}</span>`;
+  if (edges.length) {
+    html += '<br><br><b>Connections:</b>';
+    edges.forEach(e => {
+      const other = resolveEdgeLabel(e, node.id, graphData);
+      const conf = Math.round(e.confidence * 100);
+      const color = conf >= 80 ? 'var(--green)' : conf >= 50 ? 'var(--yellow)' : 'var(--red)';
+      html += `<br>→ ${e.relation} → ${other} <span style="color:${color}">${conf}%</span>`;
+    });
+  }
+  info.innerHTML = '<button onclick="closeGraphInfo()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text-dim);font-size:16px;cursor:pointer;line-height:1" title="Close">✕</button>' + html;
+  info.style.display = 'block';
+}
+
 function showNodeUpdateDialog(node, graphData) {
   pendingNodeUpdate = { node, graphData };
   const modal = document.getElementById('node-update-modal');
   const label = document.getElementById('node-update-label');
   const text = document.getElementById('node-update-text');
 
-  // Show node info and its connections for context.
-  const edges = graphData.links.filter(l =>
-    (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id);
+  const edges = getNodeEdges(node, graphData);
   let info = `<b>${node.label}</b> (${node.kind})`;
   if (edges.length) {
     const conns = edges.map(e => {
-      const other = (e.source.id || e.source) === node.id
-        ? (graphData.nodes.find(n => n.id === (e.target.id || e.target)) || {}).label || '?'
-        : (graphData.nodes.find(n => n.id === (e.source.id || e.source)) || {}).label || '?';
+      const other = resolveEdgeLabel(e, node.id, graphData);
       return `${e.relation} → ${other}`;
     });
     info += `<br><span style="color:var(--text-dim)">${conns.join(', ')}</span>`;
@@ -1249,24 +1296,7 @@ function render2DFallback(container, data) {
     .linkDirectionalArrowRelPos(0.95)
     .backgroundColor(cs().getPropertyValue('--bg').trim())
     .onNodeClick(node => {
-      const info = document.getElementById('graph-info');
-      const edges = data.links.filter(l =>
-        (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id);
-      let html = `<b>${node.label}</b> (${node.kind})`;
-      if (node.summary) html += `<br>${node.summary}`;
-      if (edges.length) {
-        html += '<br><br><b>Connections:</b>';
-        edges.forEach(e => {
-          const other = (e.source.id || e.source) === node.id
-            ? (data.nodes.find(n => n.id === (e.target.id || e.target)) || {}).label || '?'
-            : (data.nodes.find(n => n.id === (e.source.id || e.source)) || {}).label || '?';
-          const conf = Math.round(e.confidence * 100);
-          const color = conf >= 80 ? 'var(--green)' : conf >= 50 ? 'var(--yellow)' : 'var(--red)';
-          html += `<br>→ ${e.relation} → ${other} <span style="color:${color}">${conf}%</span>`;
-        });
-      }
-      info.innerHTML = '<button onclick="closeGraphInfo()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text-dim);font-size:16px;cursor:pointer;line-height:1" title="Close">✕</button>' + html;
-      info.style.display = 'block';
+      showGraphNodeInfo(node, data);
     })
     .warmupTicks(50)
     .cooldownTime(3000);
@@ -1517,25 +1547,7 @@ async function loadGraph(graphName) {
       .backgroundColor(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
       .enableNodeDrag(true)
       .onNodeClick(node => {
-        // Show node details.
-        const edges = data.links.filter(l =>
-          (l.source.id || l.source) === node.id || (l.target.id || l.target) === node.id);
-        let html = `<b>${node.label}</b> (${node.kind})`;
-        if (node.summary) html += `<br>${node.summary}`;
-        if (node.tags && node.tags.length) html += `<br><span style="color:var(--text-dim)">Tags: ${node.tags.join(', ')}</span>`;
-        if (edges.length) {
-          html += '<br><br><b>Connections:</b>';
-          edges.forEach(e => {
-            const other = (e.source.id || e.source) === node.id
-              ? (data.nodes.find(n => n.id === (e.target.id || e.target)) || {}).label || '?'
-              : (data.nodes.find(n => n.id === (e.source.id || e.source)) || {}).label || '?';
-            const conf = Math.round(e.confidence * 100);
-            const color = conf >= 80 ? 'var(--green)' : conf >= 50 ? 'var(--yellow)' : 'var(--red)';
-            html += `<br>→ ${e.relation} → ${other} <span style="color:${color}">${conf}%</span>`;
-          });
-        }
-        info.innerHTML = '<button onclick="closeGraphInfo()" style="position:absolute;top:6px;right:8px;background:none;border:none;color:var(--text-dim);font-size:16px;cursor:pointer;line-height:1" title="Close">✕</button>' + html;
-        info.style.display = 'block';
+        showGraphNodeInfo(node, data);
 
         // Smoothly centre the camera on the selected node.
         const distance = 60;
