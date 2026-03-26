@@ -862,9 +862,10 @@
       <button onclick="clearQuote()" style="position:absolute;top:4px;right:6px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;line-height:1" title="Remove quote">&times;</button>
     </div>
     <div id="slash-menu" style="display:none;background:var(--surface);border:1px solid var(--border-light);border-radius:8px;padding:4px 0;margin-bottom:4px;max-height:200px;overflow-y:auto;font-size:13px"></div>
+    <div id="mention-menu" style="display:none;background:var(--surface);border:1px solid var(--border-light);border-radius:8px;padding:4px 0;margin-bottom:4px;max-height:200px;overflow-y:auto;font-size:13px"></div>
     <div id="input-row">
-      <textarea id="input" placeholder="Send a message..." rows="1"
-        onkeydown="handleInputKey(event)" oninput="handleSlashMenu()"></textarea>
+      <textarea id="input" placeholder="Send a message... (@ to mention an ANT)" rows="1"
+        onkeydown="handleInputKey(event)" oninput="handleInputMenus()"></textarea>
       <button id="send-btn" onclick="sendMessage()">Send</button>
       <button onclick="compactChat()" style="background:none;color:var(--text-dim);border:1px solid var(--border-light);border-radius:6px;padding:8px;cursor:pointer;font-size:12px;white-space:nowrap" title="Analyse conversation → knowledge graph, then trim chat history">Compact</button>
     </div>
@@ -1675,23 +1676,32 @@ const SLASH_COMMANDS = [
 ];
 
 function handleInputKey(event) {
-  const menu = document.getElementById('slash-menu');
-  if (menu.style.display !== 'none') {
-    if (event.key === 'Escape') { menu.style.display = 'none'; return; }
-    if (event.key === 'Tab' || (event.key === 'Enter' && menu.querySelector('.selected'))) {
+  // Handle autocomplete menus (slash commands and @mentions).
+  const slashMenu = document.getElementById('slash-menu');
+  const mentionMenu = document.getElementById('mention-menu');
+  const activeMenu = slashMenu.style.display !== 'none' ? slashMenu
+    : mentionMenu.style.display !== 'none' ? mentionMenu : null;
+
+  if (activeMenu) {
+    if (event.key === 'Escape') {
+      activeMenu.style.display = 'none';
+      return;
+    }
+    if (event.key === 'Tab' || (event.key === 'Enter' && activeMenu.querySelector('.selected'))) {
       event.preventDefault();
-      const selected = menu.querySelector('.selected') || menu.querySelector('.slash-item');
+      const selected = activeMenu.querySelector('.selected') || activeMenu.querySelector('.slash-item');
       if (selected) {
-        const input = document.getElementById('input');
-        input.value = selected.dataset.cmd + ' ';
-        menu.style.display = 'none';
-        input.focus();
+        if (selected.dataset.cmd) {
+          selectSlashCmd(selected.dataset.cmd);
+        } else if (selected.dataset.ant) {
+          selectMention(selected.dataset.ant);
+        }
       }
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const items = Array.from(menu.querySelectorAll('.slash-item'));
+      const items = Array.from(activeMenu.querySelectorAll('.slash-item'));
       const current = items.findIndex(i => i.classList.contains('selected'));
       items.forEach(i => i.classList.remove('selected'));
       const next = event.key === 'ArrowDown' ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
@@ -1706,32 +1716,76 @@ function handleInputKey(event) {
   }
 }
 
-function handleSlashMenu() {
+function handleInputMenus() {
   const input = document.getElementById('input');
-  const menu = document.getElementById('slash-menu');
+  const slashMenu = document.getElementById('slash-menu');
+  const mentionMenu = document.getElementById('mention-menu');
   const text = input.value;
+  const cursor = input.selectionStart;
 
+  // Slash command autocomplete — only at start of input, no space yet.
   if (text.startsWith('/') && !text.includes(' ')) {
     const filter = text.toLowerCase();
     const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(filter));
     if (matches.length > 0 && text.length > 0) {
-      menu.innerHTML = matches.map((c, i) =>
+      slashMenu.innerHTML = matches.map((c, i) =>
         `<div class="slash-item${i === 0 ? ' selected' : ''}" data-cmd="${c.cmd}" onclick="selectSlashCmd('${c.cmd}')" style="padding:6px 12px;cursor:pointer;display:flex;justify-content:space-between">
           <span style="font-weight:600;color:var(--accent)">${c.cmd}</span>
           <span style="color:var(--text-dim);margin-left:12px">${c.desc}</span>
         </div>`
       ).join('');
-      menu.style.display = 'block';
+      slashMenu.style.display = 'block';
+      mentionMenu.style.display = 'none';
       return;
     }
   }
-  menu.style.display = 'none';
+  slashMenu.style.display = 'none';
+
+  // @ mention autocomplete — find the @ token the cursor is currently in.
+  const before = text.slice(0, cursor);
+  const atMatch = before.match(/@(\w*)$/);
+  if (atMatch) {
+    const filter = atMatch[1].toLowerCase();
+    const otherAnts = Object.values(state.bots)
+      .filter(b => b.id !== state.activeBot)
+      .filter(b => b.name.toLowerCase().startsWith(filter) || b.id.toLowerCase().startsWith(filter))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (otherAnts.length > 0) {
+      mentionMenu.innerHTML = otherAnts.map((b, i) =>
+        `<div class="slash-item${i === 0 ? ' selected' : ''}" data-ant="${b.id}" onclick="selectMention('${b.id}')" style="padding:6px 12px;cursor:pointer;display:flex;justify-content:space-between">
+          <span style="font-weight:600;color:#c07aff">@${b.name}</span>
+          <span style="color:var(--text-dim);margin-left:12px">${b.id}</span>
+        </div>`
+      ).join('');
+      mentionMenu.style.display = 'block';
+      return;
+    }
+  }
+  mentionMenu.style.display = 'none';
 }
 
 function selectSlashCmd(cmd) {
   const input = document.getElementById('input');
   input.value = cmd + ' ';
   document.getElementById('slash-menu').style.display = 'none';
+  input.focus();
+}
+
+function selectMention(antId) {
+  const input = document.getElementById('input');
+  const cursor = input.selectionStart;
+  const text = input.value;
+  const before = text.slice(0, cursor);
+  const after = text.slice(cursor);
+  const bot = state.bots[antId];
+  const name = bot ? bot.name : antId;
+
+  // Replace the @partial with @Name
+  const atPos = before.lastIndexOf('@');
+  const newBefore = before.slice(0, atPos) + '@' + name + ' ';
+  input.value = newBefore + after;
+  input.selectionStart = input.selectionEnd = newBefore.length;
+  document.getElementById('mention-menu').style.display = 'none';
   input.focus();
 }
 

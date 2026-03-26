@@ -250,11 +250,109 @@ async fn send_chat(
     Path(name): Path<String>,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
+    // Check for @mentions — route relevant parts to mentioned ANTs.
+    let mentions = extract_mentions(&req.message, &state.registry).await;
+    if !mentions.is_empty() {
+        for (ant_name, question) in &mentions {
+            let sent = state.registry.ask_ant(&name, ant_name, req.chat_id, question.clone()).await;
+            if sent {
+                let _ = state.registry.global_tx.send(crate::registry::WsEvent::Message {
+                    bot: name.clone(),
+                    chat_id: req.chat_id,
+                    text: format!("Asking **@{}**: _{}_", ant_name, question),
+                    task_id: 0,
+                });
+            } else {
+                let _ = state.registry.global_tx.send(crate::registry::WsEvent::Message {
+                    bot: name.clone(),
+                    chat_id: req.chat_id,
+                    text: format!("@{} is not available.", ant_name),
+                    task_id: 0,
+                });
+            }
+        }
+        // If the message is ONLY @mentions with no other content for the current ANT,
+        // don't send it to the current ANT's AI.
+        let stripped = strip_mentions(&req.message).trim().to_string();
+        if stripped.is_empty() {
+            return StatusCode::ACCEPTED;
+        }
+    }
+
     if state.registry.send_message(&name, req.chat_id, req.message).await {
         StatusCode::ACCEPTED
     } else {
         StatusCode::NOT_FOUND
     }
+}
+
+/// Extract @mentions from a message. Returns (ant_name, question) pairs.
+/// Each @mention captures the text that follows it until the next @mention or end of message.
+async fn extract_mentions(message: &str, registry: &BotRegistry) -> Vec<(String, String)> {
+    let bots = registry.bots.read().await;
+    let bot_names: Vec<(String, String)> = bots.iter()
+        .map(|(id, h)| (h.display_name.clone(), id.clone()))
+        .collect();
+    drop(bots);
+
+    let mut mentions = Vec::new();
+
+    // Find all @Name patterns. Match against known ANT display names (case-insensitive).
+    let mut remaining = message;
+    while let Some(at_pos) = remaining.find('@') {
+        let after_at = &remaining[at_pos + 1..];
+        // Try to match an ANT name at this position.
+        let mut matched = None;
+        for (display_name, id) in &bot_names {
+            let name_lower = display_name.to_lowercase();
+            let after_lower = after_at.to_lowercase();
+            if after_lower.starts_with(&name_lower) {
+                // Check it's a word boundary (next char is space, punctuation, or end).
+                let end_pos = name_lower.len();
+                if end_pos >= after_at.len() || !after_at.as_bytes()[end_pos].is_ascii_alphanumeric() {
+                    matched = Some((display_name.clone(), id.clone(), end_pos));
+                    break;
+                }
+            }
+        }
+
+        if let Some((display_name, id, name_len)) = matched {
+            // Extract the question: text after the name until next @mention or end.
+            let question_start = at_pos + 1 + name_len;
+            let rest = &remaining[question_start..];
+            // Find next @mention or end.
+            let question_end = rest.find('@').unwrap_or(rest.len());
+            let question = rest[..question_end].trim().to_string();
+            if !question.is_empty() {
+                mentions.push((id, question));
+            } else {
+                // No question after the name — treat entire message as the question.
+                let full_question = strip_mentions(message).trim().to_string();
+                if !full_question.is_empty() {
+                    mentions.push((id, full_question));
+                }
+            }
+            remaining = &remaining[question_start + question_end..];
+        } else {
+            // Not a known ANT name — skip this @.
+            remaining = &remaining[at_pos + 1..];
+        }
+    }
+
+    mentions
+}
+
+/// Remove all @AntName mentions from a message, leaving just the user's text.
+fn strip_mentions(message: &str) -> String {
+    // Simple approach: remove @word patterns.
+    let mut result = message.to_string();
+    while let Some(at_pos) = result.find('@') {
+        let end = result[at_pos + 1..].find(|c: char| c.is_whitespace())
+            .map(|p| at_pos + 1 + p)
+            .unwrap_or(result.len());
+        result = format!("{}{}", &result[..at_pos], &result[end..]);
+    }
+    result
 }
 
 /// POST /api/bots/:name/cancel/:task_id — cancel a running task.
