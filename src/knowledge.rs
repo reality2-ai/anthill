@@ -1340,7 +1340,8 @@ impl KnowledgeGraph {
 
     /// Add an edge to the graph (used by synthesis and other direct-write operations).
     #[allow(dead_code)]
-    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, edge: KnowledgeEdge) {
+    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, mut edge: KnowledgeEdge) {
+        edge.relation = sanitize_relation(&edge.relation);
         self.graph.add_edge(from, to, edge);
     }
 
@@ -2431,6 +2432,8 @@ impl KnowledgeGraph {
         let chains_collapsed = self.collapse_chains();
         // 4. Clean up '?' prefixes on relations that have a real title.
         self.clean_question_mark_relations();
+        // 4b. Strip arrow characters from relation names.
+        self.clean_arrow_relations();
         // 5. Detect contradictions.
         let contradictions = self.detect_contradictions();
         // 6. Community detection (GraphRAG-inspired) — find disconnected clusters.
@@ -2462,6 +2465,20 @@ impl KnowledgeGraph {
 
     /// Clean up edge relations that start with '?' but contain a real title.
     /// e.g. "? some relationship" → "some relationship", "?title" → "title".
+    /// Strip arrow characters and other formatting noise from all relation names.
+    /// The AI sometimes writes "→ causes" or "--> influences" instead of just "causes".
+    fn clean_arrow_relations(&mut self) {
+        let edge_indices: Vec<_> = self.graph.edge_indices().collect();
+        for eid in edge_indices {
+            let original = self.graph[eid].relation.clone();
+            let cleaned = sanitize_relation(&original);
+            if cleaned != original {
+                log::info!("Cleaned relation: '{}' → '{}'", original, cleaned);
+                self.graph[eid].relation = cleaned;
+            }
+        }
+    }
+
     /// Pure '?' relations (undetermined) are left as-is.
     fn clean_question_mark_relations(&mut self) {
         let edge_indices: Vec<_> = self.graph.edge_indices().collect();
@@ -3560,6 +3577,25 @@ fn days_between(a: &str, b: &str) -> Option<u64> {
 /// Extract meaningful keywords from a message.
 /// Language-agnostic: filters by length and produces both the original
 /// word and common suffix-stripped variants for fuzzy matching.
+/// Sanitize a relation name — strip arrow characters, leading/trailing whitespace,
+/// and other formatting noise that the AI sometimes includes.
+///
+/// Examples:
+/// - "→ causes" → "causes"
+/// - "--> influences" → "influences"
+/// - "── relates to ──" → "relates to"
+/// - "causes →" → "causes"
+fn sanitize_relation(relation: &str) -> String {
+    let mut s = relation.to_string();
+    // Strip common arrow patterns.
+    for pattern in &["-->", "->", "→", "←", "<-", "<--", "──", "—", "=>", "<=", "⟶", "⟵"] {
+        s = s.replace(pattern, " ");
+    }
+    // Collapse whitespace and trim.
+    let cleaned: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() { "?".to_string() } else { cleaned }
+}
+
 pub fn extract_keywords(text: &str) -> Vec<String> {
     let mut keywords = Vec::new();
     for word in tokenize(text) {
@@ -4419,5 +4455,16 @@ mod tests {
         assert!(!labels.contains(&"LowConf"), "Low-confidence neighbor should be filtered out");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn sanitize_relation_strips_arrows() {
+        assert_eq!(sanitize_relation("→ causes"), "causes");
+        assert_eq!(sanitize_relation("--> influences"), "influences");
+        assert_eq!(sanitize_relation("causes →"), "causes");
+        assert_eq!(sanitize_relation("── relates to ──"), "relates to");
+        assert_eq!(sanitize_relation("→"), "?");
+        assert_eq!(sanitize_relation("is part of"), "is part of");
+        assert_eq!(sanitize_relation("  has   property  "), "has property");
     }
 }
