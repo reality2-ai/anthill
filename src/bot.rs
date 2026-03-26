@@ -14,6 +14,7 @@ pub async fn run_bot(
     bot_name: String,
     global_event_tx: Option<broadcast::Sender<registry::WsEvent>>,
     bot_registry: Option<Arc<registry::BotRegistry>>,
+    ant_bus: Option<Arc<crate::ant_bus::AntBus>>,
 ) -> anyhow::Result<()> {
     let rt = tokio::runtime::Handle::current();
     let mut bus = EventBus::new();
@@ -144,6 +145,7 @@ pub async fn run_bot(
     let maintenance_request_tx = request_tx.clone();
     let maintenance_event_tx = global_event_tx.clone().or_else(|| Some(event_tx.clone()));
 
+    let worker_request_tx = request_tx.clone();
     tokio::spawn(ai_worker::ai_worker_loop(
         request_rx,
         response_queue,
@@ -156,6 +158,69 @@ pub async fn run_bot(
         worker_event_tx,
         bot_name.clone(),
     ));
+
+    // Register on the AntBus and spawn a listener for inter-ANT events.
+    if let Some(ref bus) = ant_bus {
+        let display_name = cfg.name.clone().unwrap_or_else(|| bot_name.clone());
+        let mut bus_rx = bus.register(&bot_name, &display_name).await;
+        let bot_name_clone = bot_name.clone();
+        let req_tx = worker_request_tx.clone();
+
+        tokio::spawn(async move {
+            while let Some(event) = bus_rx.recv().await {
+                match event.event_name.as_str() {
+                    "colony.query" => {
+                        // Another ANT is asking us a question via @mention.
+                        let from = event.data.get("from").and_then(|f| f.as_str()).unwrap_or("unknown");
+                        let question = event.data.get("question").and_then(|q| q.as_str()).unwrap_or("");
+                        let context = event.data.get("context").and_then(|c| c.as_str()).unwrap_or("");
+
+                        let colony_message = format!(
+                            "COLONY QUERY from {}\n\n\
+                             Context:\n{}\n\n\
+                             Question:\n{}\n\n\
+                             Respond with your knowledge and reasoning. Be specific about \
+                             confidence levels. Your response will be evaluated critically. \
+                             Complete your response and STOP.",
+                            from,
+                            if context.is_empty() { "(no context)" } else { context },
+                            question
+                        );
+
+                        let task_id = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .subsec_nanos();
+
+                        // Store the reply address so the worker can reply when done.
+                        // For now, send as a CliRequest and handle the reply in the
+                        // response path.
+                        let source = if let Some(ref reply) = event.reply_to {
+                            format!("colony:{}:{}", reply.from_ant, reply.chat_id)
+                        } else {
+                            format!("colony:{}:0", from)
+                        };
+
+                        let _ = req_tx.send(ai_worker::CliRequest {
+                            chat_id: -2,
+                            message: colony_message,
+                            new_session: true,
+                            task_id,
+                            source,
+                        });
+
+                        log::info!("[{}] Received colony.query from @{}: {}",
+                            bot_name_clone, from,
+                            if question.len() > 80 { &question[..80] } else { question });
+                    }
+                    _ => {
+                        log::debug!("[{}] Unhandled bus event: {}", bot_name_clone, event.event_name);
+                    }
+                }
+            }
+            log::info!("[{}] AntBus listener exited", bot_name_clone);
+        });
+    }
 
     if cfg.claude.backup_interval_hours > 0 {
         let backup_credential = if cfg.claude.encrypt_backups {

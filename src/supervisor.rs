@@ -93,6 +93,7 @@ fn spawn_bot_task(
     config: Config,
     global_tx: tokio::sync::broadcast::Sender<crate::registry::WsEvent>,
     registry: Arc<BotRegistry>,
+    ant_bus: Arc<crate::ant_bus::AntBus>,
 ) -> JoinHandle<()> {
     let bot_name = name.clone();
     tokio::task::spawn_blocking(move || {
@@ -112,6 +113,7 @@ fn spawn_bot_task(
                 bot_name.clone(),
                 Some(global_tx),
                 Some(registry),
+                Some(ant_bus),
             ).await {
                 log::error!("[{}] bot exited with error: {}", bot_name, e);
             }
@@ -139,6 +141,9 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
 
     let registry = Arc::new(BotRegistry::new(ants_dir.clone()));
 
+    // Create the AntBus — inter-ANT event bus (R2 sentant communication model).
+    let ant_bus = Arc::new(crate::ant_bus::AntBus::new(registry.global_tx.clone()));
+
     log::info!(
         "Supervisor starting — {} ant(s) discovered",
         ant_configs.len()
@@ -158,6 +163,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
             cfg.clone(),
             registry.global_tx.clone(),
             Arc::clone(&registry),
+            Arc::clone(&ant_bus),
         );
 
         ant_tasks.push((dir_name.clone(), handle, cfg));
@@ -223,7 +229,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid bind address '{}:{}': {}", sup_cfg.http_bind, sup_cfg.http_port, e))?;
     let web_registry = Arc::clone(&registry);
-    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, backend_registry, bind));
+    tokio::spawn(crate::web::run_web_server(web_registry, history, trust.clone(), reload_tx, backend_registry, Arc::clone(&ant_bus), bind));
 
     log::info!("Web dashboard at http://{}", bind);
 
@@ -299,6 +305,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                             cfg.clone(),
                             registry.global_tx.clone(),
                             Arc::clone(&registry),
+                            Arc::clone(&ant_bus),
                         );
                         ant_tasks.push((name.clone(), handle, cfg));
                     }
@@ -308,18 +315,16 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                         if let Ok(new_cfg) = Config::load(config_path) {
                             if new_cfg != *old_cfg {
                                 log::info!("Config changed for ant '{}', restarting...", name);
-                                // Find and abort the old task.
                                 if let Some((_, handle, _)) = ant_tasks.iter().find(|(n, _, _)| n == name) {
                                     handle.abort();
                                 }
-                                // Remove the old entry.
                                 ant_tasks.retain(|(n, _, _)| n != name);
-                                // Spawn new task with updated config.
                                 let handle = spawn_bot_task(
                                     name.clone(),
                                     new_cfg.clone(),
                                     registry.global_tx.clone(),
                                     Arc::clone(&registry),
+                                    Arc::clone(&ant_bus),
                                 );
                                 ant_tasks.push((name.clone(), handle, new_cfg));
                             }
@@ -383,6 +388,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                     fresh_cfg,
                     registry.global_tx.clone(),
                     Arc::clone(&registry),
+                    Arc::clone(&ant_bus),
                 );
                 log::info!("Ant '{}' restarted (config reloaded from disk)", name);
                 let _ = registry.global_tx.send(crate::registry::WsEvent::BotStatus {

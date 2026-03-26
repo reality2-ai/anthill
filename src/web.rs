@@ -31,6 +31,8 @@ pub struct AppState {
     pub reload_tx: tokio::sync::mpsc::Sender<()>,
     /// Global backend registry — built from default config at startup.
     pub backend_registry: Arc<crate::ai_backends::BackendRegistry>,
+    /// Inter-ANT event bus (R2 sentant communication).
+    pub ant_bus: Arc<crate::ant_bus::AntBus>,
 }
 
 /// Embedded web app HTML.
@@ -43,6 +45,7 @@ pub async fn run_web_server(
     trust: SharedTrust,
     reload_tx: tokio::sync::mpsc::Sender<()>,
     backend_registry: Arc<crate::ai_backends::BackendRegistry>,
+    ant_bus: Arc<crate::ant_bus::AntBus>,
     bind: SocketAddr,
 ) {
     let state = AppState {
@@ -51,6 +54,7 @@ pub async fn run_web_server(
         trust,
         reload_tx,
         backend_registry,
+        ant_bus,
     };
 
     // Protected API routes — require credential in X-Credential header.
@@ -256,30 +260,29 @@ async fn send_chat(
         // Build structured context from knowledge graph + recent conversation.
         let conversation_context = build_conversation_context(&name, &state.history, &state.registry);
 
-        for (ant_name, question) in &mentions {
-            // Prepend conversation context so the mentioned ANT understands the discussion.
-            let question_with_context = if conversation_context.is_empty() {
-                question.clone()
-            } else {
-                format!(
-                    "{}\n\nNow the user is asking you directly:\n{}",
-                    conversation_context, question
-                )
-            };
+        for (ant_id, question) in &mentions {
+            let sent = state.ant_bus.ask(
+                &name, ant_id, req.chat_id,
+                question.clone(), conversation_context.clone(),
+            ).await;
 
-            let sent = state.registry.ask_ant(&name, ant_name, req.chat_id, question_with_context).await;
             if sent {
+                // Show brief confirmation (the full response will arrive via @sender reply).
+                let display_name = {
+                    let bots = state.registry.bots.read().await;
+                    bots.get(ant_id).map(|h| h.display_name.clone()).unwrap_or_else(|| ant_id.clone())
+                };
                 let _ = state.registry.global_tx.send(crate::registry::WsEvent::Message {
                     bot: name.clone(),
                     chat_id: req.chat_id,
-                    text: format!("Asking **@{}**: _{}_", ant_name, question),
+                    text: format!("Asking **@{}**...", display_name),
                     task_id: 0,
                 });
             } else {
                 let _ = state.registry.global_tx.send(crate::registry::WsEvent::Message {
                     bot: name.clone(),
                     chat_id: req.chat_id,
-                    text: format!("@{} is not available.", ant_name),
+                    text: format!("@{} is not available.", ant_id),
                     task_id: 0,
                 });
             }

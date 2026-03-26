@@ -6,6 +6,7 @@
 
 #[allow(dead_code)]
 mod ai_backends;
+mod ant_bus;
 mod backup;
 mod bot;
 mod ai_worker;
