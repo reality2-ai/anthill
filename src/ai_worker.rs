@@ -60,6 +60,7 @@ pub struct CliWorkerConfig {
     /// Legacy backend list — kept for backward compat config parsing only.
     pub backends: Vec<String>,
     /// Worker timeout in seconds (0 = no timeout). Default: 600 (10 minutes).
+    #[allow(dead_code)]
     pub worker_timeout_secs: u64,
     /// Allow the AI to modify files outside the working directory. Default: false.
     pub allow_base_code_changes: bool,
@@ -93,12 +94,14 @@ impl BackendSessions {
         self.last_backend.insert(chat_id, backend.to_string());
     }
 
-    /// Get the last backend used for a chat
+    /// Get the last backend used for a chat (used when context injection is enabled).
+    #[allow(dead_code)]
     pub fn last_backend(&self, chat_id: i64) -> Option<&str> {
         self.last_backend.get(&chat_id).map(|s| s.as_str())
     }
 
-    /// Check if we're switching backends (need to inject context)
+    /// Check if we're switching backends (need to inject context).
+    #[allow(dead_code)]
     pub fn is_switching(&self, chat_id: i64, new_backend: &str) -> bool {
         self.last_backend.get(&chat_id)
             .map(|last| last != new_backend)
@@ -110,7 +113,8 @@ impl BackendSessions {
         self.summaries.insert(chat_id, summary);
     }
 
-    /// Get stored summary for context injection
+    /// Get stored summary for context injection when switching backends.
+    #[allow(dead_code)]
     pub fn get_summary(&self, chat_id: i64) -> Option<&str> {
         self.summaries.get(&chat_id).map(|s| s.as_str())
     }

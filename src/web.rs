@@ -454,7 +454,7 @@ async fn extract_mentions(message: &str, registry: &BotRegistry) -> Vec<(String,
 
     // For each mention, extract the specific fragment directed at that ANT.
     let mut mentions = Vec::new();
-    for (i, (_start, end, display_name, id)) in found.iter().enumerate() {
+    for (i, (_start, end, _display_name, id)) in found.iter().enumerate() {
         // Fragment: text from after this @Name to the next @mention (or end).
         let next_at = if i + 1 < found.len() { found[i + 1].0 } else { message.len() };
         let fragment = message[*end..next_at].trim();
