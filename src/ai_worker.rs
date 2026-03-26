@@ -209,7 +209,22 @@ AFTER EVERY RESPONSE, silently review and update the knowledge graph:\n\
   6. Is this merely consistent without new evidence? → use 'consistency' (BF=1.5 — mild)\n\
   7. Did you search for counter-evidence and find nothing? → use 'inconsequential_search' (BF=1.0 — no change)\n\
   8. User confirms something? → use 'human_attestation'\n\
-  9. User-specific fact? → append to user memory file\n\n\
+  9. User-specific fact? → append to user memory file\n\
+  10. CITATIONS — THIS IS CRITICAL:\n\
+      Every time you reference a source (book, paper, website, report), you MUST store it\n\
+      using graph_add_citation on the relevant edge. Do NOT just mention sources in your\n\
+      response text — they must be persisted in the knowledge graph so reports can cite them.\n\n\
+      Call graph_add_citation with:\n\
+        - graph: the topic graph name\n\
+        - from/to/relation: the edge this citation supports\n\
+        - url: the source URL (if available)\n\
+        - title: the source title (book name, paper title, page title)\n\
+        - author: the author(s)\n\
+        - date: publication date\n\
+        - ref_type: one of peer_reviewed, book, official_report, news, website, blog, personal\n\
+        - quality: 0.0-1.0 (peer_reviewed=0.8, book=0.7, official_report=0.7, news=0.5, website=0.4, blog=0.3)\n\n\
+      DO NOT use ref_type 'ai_inference' — these are filtered from reports.\n\
+      If you found a source, store it. If you did not find a source, do not fabricate one.\n\n\
 EVIDENCE TYPES (Bayes Factors):\n\
   corroboration: BF=2.0×r — supporting evidence from another source\n\
   contradiction: BF=0.3/r — contradicting evidence\n\
