@@ -513,25 +513,6 @@ fn render_insights_html(insights: &GraphInsights, ant_name: &str, snapshot_id: &
 /// Falls back to the algorithmic version if the AI is unavailable.
 fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>) -> String {
     let has_citations = raw_insights.contains("[cite-");
-    let citation_instruction = if has_citations {
-        "\n\nCITATIONS ARE MANDATORY.\n\
-         At the end of the data you will find a SOURCES AND REFERENCES section listing \
-         citation codes like [cite-a1b2c3d4]. You MUST use these codes inline in your text.\n\n\
-         HOW TO CITE:\n\
-         - Write a claim, then put the citation code immediately after it in square brackets.\n\
-         - Example: 'Research has shown that early intervention significantly improves outcomes [cite-a1b2c3d4].'\n\
-         - Example: 'According to recent analysis [cite-f5e6d7c8], the trend is accelerating.'\n\
-         - You can cite multiple sources: 'This finding is well-supported [cite-a1b2c3d4] [cite-b2c3d4e5].'\n\n\
-         RULES:\n\
-         - Cite the source whenever you introduce a new idea, finding, or claim from the data.\n\
-         - If a claim has no supporting citation, it is SPECULATION — use language like \
-           'it appears that', 'this suggests', or 'further investigation is needed' to signal this.\n\
-         - Use as MANY of the provided citations as are relevant — don't just pick a few.\n\
-         - The [cite-xxxx] codes will be automatically renumbered to [1], [2], etc.\n\
-         - ONLY use codes from the provided list — NEVER invent a citation code."
-    } else {
-        ""
-    };
 
     // The user's guidance is the primary prompt. If none provided, use a sensible default.
     let user_prompt = guidance.unwrap_or(
@@ -540,8 +521,40 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
          further investigation, and any surprising connections between ideas.",
     );
 
+    // Citation instructions are ALWAYS included — even when the data has no [cite-xxx] codes,
+    // the AI should produce a properly referenced academic document. When citation codes are
+    // present, it must use them; when they are absent, it should note which claims lack sources.
+    let citation_section = if has_citations {
+        "\n\n## CITATIONS — THIS IS THE MOST IMPORTANT SECTION\n\n\
+         The knowledge data below contains a SOURCES AND REFERENCES section with citation codes \
+         like [cite-a1b2c3d4]. You MUST use these codes inline in your text.\n\n\
+         CITATION FORMAT:\n\
+         - After every claim, place the relevant citation code in square brackets.\n\
+         - Example: 'Research shows early intervention improves outcomes [cite-a1b2c3d4].'\n\
+         - Multiple sources: 'This is well-supported [cite-a1b2c3d4] [cite-b2c3d4e5].'\n\n\
+         RULES:\n\
+         - EVERY factual claim MUST have at least one citation. No exceptions.\n\
+         - If a claim has no supporting citation in the data, mark it explicitly as \
+           unsupported: 'This appears likely (no source available).'\n\
+         - Use as MANY of the provided citations as are relevant — do not cherry-pick.\n\
+         - The [cite-xxxx] codes will be automatically renumbered to [1], [2], etc.\n\
+         - ONLY use codes from the provided list — NEVER invent a citation code.\n\
+         - A report without inline citations is UNACCEPTABLE."
+    } else {
+        "\n\n## REFERENCES\n\n\
+         The knowledge data below does not contain pre-assigned citation codes. However, you \
+         should still write as a properly referenced document:\n\
+         - Distinguish clearly between claims supported by the data and your own synthesis.\n\
+         - Use language like 'the data indicates', 'according to the knowledge graph', or \
+           'this is well-established (high confidence)' vs 'this appears likely' or \
+           'further investigation is needed' for unsupported claims.\n\
+         - If you know of real-world sources that support a claim, mention them by name \
+           (e.g. 'as described by Smith et al.')."
+    };
+
     let prompt = format!(
-        "You are writing a report based on knowledge graph data for '{ant_name}'.\n\n\
+        "You are writing an academic-quality report based on knowledge graph data for '{ant_name}'.\n\
+         {citation_section}\n\n\
          YOUR TASK:\n{user_prompt}\n\n\
          FORMATTING RULES:\n\
          - Write flowing prose — no bullet points, no tables, no technical jargon about graphs or nodes.\n\
@@ -549,11 +562,11 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
          - Include specific facts and evidence from the data.\n\
          - Write as a unified whole — not individual summaries of each topic, but an integrated narrative \
            that draws connections across the entire knowledge base.\n\
-         - Write in third person, referring to the knowledge as belonging to '{ant_name}'.{citation_instruction}\n\n\
+         - Write in third person, referring to the knowledge as belonging to '{ant_name}'.\n\n\
          Knowledge data:\n\n{raw_insights}",
         ant_name = ant_name,
+        citation_section = citation_section,
         user_prompt = user_prompt,
-        citation_instruction = citation_instruction,
         raw_insights = raw_insights,
     );
 
@@ -795,6 +808,10 @@ fn generate_export_html(
             ));
         }
         raw_text.push('\n');
+        eprintln!("  [export] {} citations included in prompt ({} total collected, {} after quality sort)",
+            included, insights.all_citations.len(), sorted_cites.len());
+    } else if include_citations {
+        eprintln!("  [export] No citations found in knowledge graph edges");
     }
 
     // Then the knowledge data.

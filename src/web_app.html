@@ -1294,8 +1294,8 @@ function showExportDialog() {
   // Set default prompt if empty.
   const promptEl = document.getElementById('export-prompt');
   if (!promptEl.value.trim()) promptEl.value = defaultExportPrompt;
-  // Set scope hints.
-  setExportScope('current');
+  // Default to 'all graphs' — most useful for integrated reports.
+  setExportScope('all');
   // Focus the prompt textarea.
   setTimeout(() => promptEl.focus(), 100);
 }
