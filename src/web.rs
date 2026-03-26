@@ -253,8 +253,21 @@ async fn send_chat(
     // Check for @mentions — route relevant parts to mentioned ANTs.
     let mentions = extract_mentions(&req.message, &state.registry).await;
     if !mentions.is_empty() {
+        // Build structured context from knowledge graph + recent conversation.
+        let conversation_context = build_conversation_context(&name, &state.history, &state.registry);
+
         for (ant_name, question) in &mentions {
-            let sent = state.registry.ask_ant(&name, ant_name, req.chat_id, question.clone()).await;
+            // Prepend conversation context so the mentioned ANT understands the discussion.
+            let question_with_context = if conversation_context.is_empty() {
+                question.clone()
+            } else {
+                format!(
+                    "{}\n\nNow the user is asking you directly:\n{}",
+                    conversation_context, question
+                )
+            };
+
+            let sent = state.registry.ask_ant(&name, ant_name, req.chat_id, question_with_context).await;
             if sent {
                 let _ = state.registry.global_tx.send(crate::registry::WsEvent::Message {
                     bot: name.clone(),
@@ -284,6 +297,103 @@ async fn send_chat(
     } else {
         StatusCode::NOT_FOUND
     }
+}
+
+/// Build structured context from the current ANT's knowledge graph and recent conversation.
+///
+/// Instead of sending raw chat transcript, we:
+/// 1. Extract keywords from recent messages
+/// 2. Query the ANT's knowledge graph for relevant nodes and edges
+/// 3. Render those as structured context (concepts, relationships, confidence levels)
+/// 4. Include a brief conversation summary for pronoun resolution ("this", "it")
+///
+/// This gives the mentioned ANT structured knowledge rather than raw chat noise.
+fn build_conversation_context(
+    bot_name: &str,
+    history: &crate::history::SharedHistory,
+    registry: &BotRegistry,
+) -> String {
+    let mut sections = Vec::new();
+
+    // 1. Get recent messages to extract discussion topics.
+    let recent_text = {
+        let mut store = match history.lock() {
+            Ok(s) => s,
+            Err(_) => return String::new(),
+        };
+        let messages = store.get_history(bot_name);
+        if messages.is_empty() {
+            return String::new();
+        }
+
+        // Collect last few messages as a topic seed.
+        let mut text = String::new();
+        for msg in messages.iter().rev().take(6) {
+            if text.len() > 1500 { break; }
+            text.push_str(&msg.text);
+            text.push('\n');
+        }
+        text
+    };
+
+    // 2. Query the knowledge graph for relevant subgraph.
+    // Use the ANT's working_dir to find its memory directory.
+    let graph_context = {
+        let rt = tokio::runtime::Handle::current();
+        let bots = rt.block_on(registry.bots.read());
+        if let Some(handle) = bots.get(bot_name) {
+            let memory_dir = handle.working_dir.join("memory");
+            let store = crate::store::live::LiveKnowledgeStore::new(memory_dir);
+            use crate::store::KnowledgeStore;
+            let rendered = store.render_for_prompt(&recent_text, 3000);
+            if rendered.trim().is_empty() { None } else { Some(rendered) }
+        } else {
+            None
+        }
+    };
+
+    if let Some(kg) = graph_context {
+        sections.push(format!(
+            "Here is what {} currently knows about the topics being discussed \
+             (from their knowledge graph, with confidence levels):\n\n{}",
+            bot_name, kg
+        ));
+    }
+
+    // 3. Brief conversation summary — just the last 3 exchanges for pronoun resolution.
+    let brief_summary = {
+        let mut store = match history.lock() {
+            Ok(s) => s,
+            Err(_) => return sections.join("\n\n"),
+        };
+        let messages = store.get_history(bot_name);
+        let mut lines = Vec::new();
+        let mut chars = 0;
+        for msg in messages.iter().rev().take(4) {
+            let prefix = if msg.role == "user" { "User" } else { bot_name };
+            let text = if msg.text.len() > 200 {
+                let end = msg.text.floor_char_boundary(200);
+                format!("{}...", &msg.text[..end])
+            } else {
+                msg.text.clone()
+            };
+            let line = format!("{}: {}", prefix, text);
+            chars += line.len();
+            if chars > 800 && !lines.is_empty() { break; }
+            lines.push(line);
+        }
+        lines.reverse();
+        lines
+    };
+
+    if !brief_summary.is_empty() {
+        sections.push(format!(
+            "Recent conversation (for context on pronouns like 'this', 'it'):\n{}",
+            brief_summary.join("\n")
+        ));
+    }
+
+    sections.join("\n\n")
 }
 
 /// Extract @mentions from a message. Returns (ant_id, question) pairs.
