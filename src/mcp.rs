@@ -24,15 +24,6 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
 
-    let init_response = serde_json::json!({
-        "jsonrpc": "2.0",
-        "result": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": { "tools": {} },
-            "serverInfo": { "name": "anthill-graph", "version": env!("CARGO_PKG_VERSION") }
-        }
-    });
-
     let mut line = String::new();
     loop {
         line.clear();
@@ -53,7 +44,15 @@ pub fn run_mcp_server(memory_dir: PathBuf) {
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
         let response = match method {
-            "initialize" => init_response.clone(),
+            "initialize" => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "serverInfo": { "name": "anthill-graph", "version": env!("CARGO_PKG_VERSION") }
+                }
+            }),
             "tools/list" => {
                 serde_json::json!({
                     "jsonrpc": "2.0",
