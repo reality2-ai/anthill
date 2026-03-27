@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANTHILL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Barlow+Condensed:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #0a0c10;
+  --bg: #0f1117;
+  --bg-raised: #161922;
+  --bg-hover: #1c2030;
+  --border: #252a3a;
+  --border-active: #3a4260;
+  --text: #c8cdd8;
+  --text-dim: #6b7394;
+  --text-bright: #e8ecf4;
+  --accent: #f0853a;
+  --accent-dim: #f0853a44;
+  --accent-glow: #f0853a22;
+  --green: #4ade80;
+  --green-dim: #4ade8044;
+  --red: #f87171;
+  --blue: #60a5fa;
+  --yellow: #fbbf24;
+  --mono: 'JetBrains Mono', monospace;
+  --display: 'Barlow Condensed', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--accent-dim); color: var(--text-bright); }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-active); }
+
+body {
+  font-family: var(--mono);
+  background: var(--bg-deep);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ── Layout ───────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-columns: 260px 1fr 0px;
+  grid-template-rows: 44px 1fr;
+  height: 100vh;
+  transition: grid-template-columns 0.3s ease;
+}
+#app.knowledge-open {
+  grid-template-columns: 260px 1fr 300px;
+}
+
+/* ── Top bar ──────────────────────────────────────────── */
+#topbar {
+  grid-column: 1 / -1;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  z-index: 10;
+}
+#topbar h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 3px;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+#topbar .sep { width: 1px; height: 20px; background: var(--border); }
+#topbar .info {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 300;
+}
+#topbar .info span { color: var(--text); font-weight: 500; }
+.spacer { flex: 1; }
+#btn-knowledge {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#btn-knowledge:hover { border-color: var(--accent); color: var(--accent); }
+#btn-knowledge.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+/* ── Sidebar ──────────────────────────────────────────── */
+#sidebar {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-header {
+  padding: 12px 14px 8px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+#ant-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+.ant-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  gap: 8px;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+  margin-bottom: 2px;
+}
+.ant-item:hover { background: var(--bg-hover); }
+.ant-item.selected { background: var(--bg-raised); border-color: var(--border-active); }
+.ant-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px var(--green-dim);
+}
+.ant-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ant-class {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 300;
+}
+.ant-delete {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  transition: opacity 0.15s;
+}
+.ant-item:hover .ant-delete { opacity: 0.6; }
+.ant-delete:hover { opacity: 1 !important; }
+
+/* Create form */
+#create-form {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+}
+#create-name {
+  flex: 1;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 3px;
+  outline: none;
+}
+#create-name:focus { border-color: var(--accent); }
+#create-name::placeholder { color: var(--text-dim); }
+#btn-create {
+  background: var(--accent);
+  border: none;
+  color: var(--bg-deep);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 6px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: opacity 0.2s;
+}
+#btn-create:hover { opacity: 0.85; }
+
+/* ── Chat ─────────────────────────────────────────────── */
+#chat {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+#chat-header {
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  min-height: 48px;
+}
+#chat-ant-name {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text-bright);
+  letter-spacing: 1px;
+}
+#chat-status {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+#chat-status.idle { background: var(--green-dim); color: var(--green); }
+#chat-status.thinking { background: var(--accent-dim); color: var(--accent); animation: pulse 1.5s ease infinite; }
+#chat-status.disconnected { background: var(--border); color: var(--text-dim); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+#chat-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-dim);
+}
+#chat-empty .icon { font-size: 48px; opacity: 0.15; }
+#chat-empty p { font-size: 12px; }
+
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.msg {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  animation: msgIn 0.2s ease;
+}
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.msg.user {
+  align-self: flex-end;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-bright);
+}
+.msg.ant {
+  align-self: flex-start;
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+}
+.msg.system {
+  align-self: center;
+  max-width: 100%;
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 4px 0;
+  text-align: center;
+}
+.msg .meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  font-weight: 300;
+}
+
+#input-bar {
+  padding: 12px 20px;
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+#prompt {
+  flex: 1;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  color: var(--text-bright);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: 4px;
+  resize: none;
+  height: 44px;
+  max-height: 120px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+#prompt:focus { border-color: var(--accent); }
+#prompt::placeholder { color: var(--text-dim); }
+#prompt:disabled { opacity: 0.4; }
+#btn-send {
+  background: var(--accent);
+  border: none;
+  color: var(--bg-deep);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 0 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: opacity 0.2s;
+}
+#btn-send:hover { opacity: 0.85; }
+#btn-send:disabled { opacity: 0.3; cursor: default; }
+
+/* ── Knowledge panel ──────────────────────────────────── */
+#knowledge {
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+  display: none;
+}
+#app.knowledge-open #knowledge { display: block; }
+.k-header {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+.k-stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.k-stat-label { color: var(--text-dim); font-size: 11px; }
+.k-stat-value { color: var(--text-bright); font-weight: 500; font-size: 13px; }
+#btn-refresh-knowledge {
+  margin-top: 16px;
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#btn-refresh-knowledge:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="topbar">
+    <h1>Anthill</h1>
+    <div class="sep"></div>
+    <div class="info">plugins: <span id="plugin-count">0</span></div>
+    <div class="info">sentants: <span id="sentant-count">0</span></div>
+    <div class="spacer"></div>
+    <button id="btn-knowledge" onclick="toggleKnowledge()">KNOWLEDGE</button>
+  </div>
+
+  <div id="sidebar">
+    <div class="sidebar-header">Sentants</div>
+    <div id="ant-list"></div>
+    <div id="create-form">
+      <input id="create-name" type="text" placeholder="new ant name..." onkeydown="if(event.key==='Enter')createAnt()">
+      <button id="btn-create" onclick="createAnt()">+</button>
+    </div>
+  </div>
+
+  <div id="chat">
+    <div id="chat-header">
+      <span id="chat-ant-name">Select an ANT</span>
+      <span id="chat-status" class="disconnected">no ant</span>
+    </div>
+    <div id="chat-empty">
+      <div class="icon">&#x1f41c;</div>
+      <p>Select or create an ANT to start</p>
+    </div>
+    <div id="messages" style="display:none"></div>
+    <div id="input-bar" style="display:none">
+      <textarea id="prompt" placeholder="Type a message..." onkeydown="onKey(event)" disabled></textarea>
+      <button id="btn-send" onclick="sendPrompt()" disabled>SEND</button>
+    </div>
+  </div>
+
+  <div id="knowledge">
+    <div class="k-header">Knowledge Graph</div>
+    <div class="k-stat"><span class="k-stat-label">nodes</span><span class="k-stat-value" id="k-nodes">0</span></div>
+    <div class="k-stat"><span class="k-stat-label">edges</span><span class="k-stat-value" id="k-edges">0</span></div>
+    <div class="k-stat"><span class="k-stat-label">avg confidence</span><span class="k-stat-value" id="k-confidence">0.000</span></div>
+    <button id="btn-refresh-knowledge" onclick="refreshKnowledge()">refresh stats</button>
+  </div>
+</div>
+
+<script src="/phoenix.min.js"></script>
+<script>
+const GQL = '/graphql';
+let socket, channel, selectedAnt = null;
+
+// ── GraphQL helper ───────────────────────────────────
+async function gql(query, variables) {
+  const resp = await fetch(GQL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query, variables})
+  });
+  const json = await resp.json();
+  if (json.errors) console.error('GQL errors:', json.errors);
+  return json.data;
+}
+
+// ── Sentant list ─────────────────────────────────────
+async function loadSentants() {
+  const data = await gql('{ sentants { id name class pluginNames } plugins }');
+  const list = document.getElementById('ant-list');
+  const sentants = data.sentants || [];
+  const plugins = data.plugins || [];
+
+  document.getElementById('sentant-count').textContent = sentants.length;
+  document.getElementById('plugin-count').textContent = plugins.length;
+
+  list.innerHTML = sentants.map(s => `
+    <div class="ant-item ${selectedAnt && selectedAnt.id === s.id ? 'selected' : ''}" onclick="selectAnt('${s.id}')">
+      <div class="ant-dot"></div>
+      <div style="flex:1;min-width:0">
+        <div class="ant-name">${esc(s.name)}</div>
+        <div class="ant-class">${esc(s.class || '')}</div>
+      </div>
+      <button class="ant-delete" onclick="event.stopPropagation();deleteAnt('${s.id}')" title="unload">&times;</button>
+    </div>
+  `).join('');
+}
+
+// ── Create ANT ───────────────────────────────────────
+async function createAnt() {
+  const input = document.getElementById('create-name');
+  const name = input.value.trim();
+  if (!name) return;
+  input.value = '';
+
+  const data = await gql(`mutation($n:String!){ createAnt(name:$n){ success sentant { id name class } errors { message } } }`, {n: name});
+  if (data.createAnt.success) {
+    await loadSentants();
+    selectAnt(data.createAnt.sentant.id);
+  } else {
+    addMsg('Failed: ' + data.createAnt.errors.map(e=>e.message).join(', '), 'system');
+  }
+}
+
+// ── Delete ANT ───────────────────────────────────────
+async function deleteAnt(id) {
+  await gql(`mutation($id:ID!){ sentantUnload(id:$id){ success } }`, {id});
+  if (selectedAnt && selectedAnt.id === id) {
+    disconnectChannel();
+    selectedAnt = null;
+    showEmpty();
+  }
+  loadSentants();
+}
+
+// ── Select ANT ───────────────────────────────────────
+async function selectAnt(id) {
+  const data = await gql(`query($id:ID!){ sentant(id:$id){ id name class description pluginNames } }`, {id});
+  if (!data.sentant) return;
+  selectedAnt = data.sentant;
+  loadSentants();
+  showChat();
+  connectChannel(id);
+}
+
+// ── Channel ──────────────────────────────────────────
+function connectChannel(sentantId) {
+  disconnectChannel();
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  socket = new Phoenix.Socket(`${proto}://${location.host}/ws`, {});
+  socket.connect();
+
+  channel = socket.channel('sentant:' + sentantId, {});
+  channel.join()
+    .receive('ok', resp => {
+      setStatus('idle');
+      addMsg(`Connected to ${resp.name || sentantId}`, 'system');
+      document.getElementById('prompt').disabled = false;
+      document.getElementById('btn-send').disabled = false;
+    })
+    .receive('error', resp => {
+      addMsg('Join failed: ' + JSON.stringify(resp), 'system');
+      setStatus('disconnected');
+    });
+
+  channel.on('history', payload => {
+    // Replay chat history on join
+    const msgs = payload.messages || [];
+    for (const m of msgs) {
+      addMsg(m.text, m.role === 'user' ? 'user' : 'ant');
+    }
+  });
+
+  channel.on('response', payload => {
+    addMsg(payload.output, 'ant', payload.backend);
+    processQueue();
+  });
+
+  channel.on('status', payload => {
+    setStatus(payload.state);
+  });
+
+  channel.on('pong', () => {
+    addMsg('pong', 'system');
+  });
+
+  channel.on('knowledge', payload => {
+    updateKnowledge(payload);
+  });
+
+  channel.on('event', payload => {
+    // Show other events as system messages
+    if (payload.event !== 'response' && payload.event !== 'pong') {
+      addMsg(`[${payload.event}] ${JSON.stringify(payload.parameters || {}).slice(0,200)}`, 'system');
+    }
+  });
+
+  channel.on('error', payload => {
+    addMsg('Error: ' + (payload.message || JSON.stringify(payload)), 'system');
+    processQueue();
+  });
+}
+
+function disconnectChannel() {
+  if (channel) channel.leave();
+  if (socket) socket.disconnect();
+  channel = null;
+  busy = false;
+  promptQueue = [];
+  socket = null;
+  document.getElementById('prompt').disabled = true;
+  document.getElementById('btn-send').disabled = true;
+  setStatus('disconnected');
+}
+
+// ── Send prompt (with client-side queuing) ───────────
+let busy = false;
+let promptQueue = [];
+
+function sendPrompt() {
+  const el = document.getElementById('prompt');
+  const text = el.value.trim();
+  if (!text || !channel) return;
+  addMsg(text, 'user');
+  el.value = '';
+  el.style.height = '44px';
+
+  if (busy) {
+    promptQueue.push(text);
+    addMsg(`Queued (${promptQueue.length} waiting)`, 'system');
+  } else {
+    busy = true;
+    channel.push('prompt', {text});
+    setStatus('thinking');
+  }
+}
+
+function processQueue() {
+  if (promptQueue.length > 0 && channel) {
+    const next = promptQueue.shift();
+    busy = true;
+    channel.push('prompt', {text: next});
+    setStatus('thinking');
+  } else {
+    busy = false;
+    setStatus('idle');
+  }
+}
+
+function onKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendPrompt();
+  }
+  // Auto-resize
+  setTimeout(() => {
+    e.target.style.height = '44px';
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+  }, 0);
+}
+
+// ── Knowledge ────────────────────────────────────────
+function toggleKnowledge() {
+  const app = document.getElementById('app');
+  const btn = document.getElementById('btn-knowledge');
+  app.classList.toggle('knowledge-open');
+  btn.classList.toggle('active');
+  if (app.classList.contains('knowledge-open') && selectedAnt) {
+    refreshKnowledge();
+  }
+}
+
+function refreshKnowledge() {
+  if (!channel || !selectedAnt) return;
+  channel.push('knowledge_stats', {});
+}
+
+function updateKnowledge(data) {
+  document.getElementById('k-nodes').textContent = data.node_count ?? data.total_nodes ?? 0;
+  document.getElementById('k-edges').textContent = data.edge_count ?? data.total_edges ?? 0;
+  document.getElementById('k-confidence').textContent = (data.avg_confidence ?? 0).toFixed(3);
+}
+
+// ── UI helpers ───────────────────────────────────────
+function showChat() {
+  document.getElementById('chat-empty').style.display = 'none';
+  document.getElementById('messages').style.display = 'flex';
+  document.getElementById('input-bar').style.display = 'flex';
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('chat-ant-name').textContent = selectedAnt ? selectedAnt.name : 'Select an ANT';
+}
+
+function showEmpty() {
+  document.getElementById('chat-empty').style.display = 'flex';
+  document.getElementById('messages').style.display = 'none';
+  document.getElementById('input-bar').style.display = 'none';
+  document.getElementById('chat-ant-name').textContent = 'Select an ANT';
+  setStatus('disconnected');
+}
+
+function addMsg(text, cls, meta) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.textContent = text;
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function setStatus(state) {
+  const el = document.getElementById('chat-status');
+  el.className = state;
+  el.textContent = state;
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── Init ─────────────────────────────────────────────
+loadSentants();
+setInterval(loadSentants, 10000);
+</script>
+</body>
+</html>
