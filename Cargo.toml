@@ -11,13 +11,13 @@ name = "anthill"
 path = "src/main.rs"
 
 [dependencies]
-# Vendored R2 crates
-r2-engine = { path = "crates/r2-engine", features = ["alloc", "std"] }
-r2-wire   = { path = "crates/r2-wire" }
-r2-fnv    = { path = "crates/r2-fnv" }
-r2-cbor   = { path = "crates/r2-cbor" }
-r2-trust  = { path = "crates/r2-trust", features = ["std"] }
-r2-transport = { path = "crates/r2-transport", features = ["std"] }
+# R2 crates (from r2-core, single source of truth)
+r2-engine = { path = "../r2-core/crates/r2-engine", features = ["alloc", "std"] }
+r2-wire   = { path = "../r2-core/crates/r2-wire", features = ["alloc"] }
+r2-fnv    = { path = "../r2-core/crates/r2-fnv" }
+r2-cbor   = { path = "../r2-core/crates/r2-cbor" }
+r2-trust  = { path = "../r2-core/crates/r2-trust", features = ["std"] }
+r2-transport = { path = "../r2-core/crates/r2-transport", features = ["std"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -81,16 +81,4 @@ libc = "0.2"
 anyhow = "1"
 
 [workspace]
-members = [
-    ".",
-    "crates/r2-engine",
-    "crates/r2-wire",
-    "crates/r2-fnv",
-    "crates/r2-cbor",
-    "crates/r2-trust",
-    "crates/r2-transport",
-]
-
-[workspace.package]
-edition = "2021"
-license = "MIT OR Apache-2.0"
+members = ["."]

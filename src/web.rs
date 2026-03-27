@@ -1739,8 +1739,43 @@ async fn handle_ws(
                                 let cid = chat_id.unwrap_or(0);
                                 let handled = handle_web_command(
                                     registry, &bot, cid, &message,
+                                    &state.ant_bus, &state.history,
                                 ).await;
                                 if !handled {
+                                    // Check for @mentions before sending to AI worker.
+                                    let mentions = extract_mentions(&message, registry).await;
+                                    if !mentions.is_empty() {
+                                        let context = build_conversation_context(&bot, &state.history, registry);
+                                        for (ant_id, question) in &mentions {
+                                            let sent = state.ant_bus.ask(
+                                                &bot, ant_id, cid,
+                                                question.clone(), context.clone(),
+                                            ).await;
+                                            let display_name = {
+                                                let bots = registry.bots.read().await;
+                                                bots.get(ant_id).map(|h| h.display_name.clone()).unwrap_or_else(|| ant_id.clone())
+                                            };
+                                            if sent {
+                                                let _ = registry.global_tx.send(crate::registry::WsEvent::Message {
+                                                    bot: bot.clone(), chat_id: cid,
+                                                    text: format!("Asking **@{}**...", display_name),
+                                                    task_id: 0,
+                                                });
+                                            } else {
+                                                let _ = registry.global_tx.send(crate::registry::WsEvent::Message {
+                                                    bot: bot.clone(), chat_id: cid,
+                                                    text: format!("@{} is not available.", display_name),
+                                                    task_id: 0,
+                                                });
+                                            }
+                                        }
+                                        // If only @mentions with no other text, don't send to current ANT.
+                                        let stripped = strip_mentions(&message).trim().to_string();
+                                        if stripped.is_empty() {
+                                            continue;
+                                        }
+                                    }
+
                                     // Regular message → dispatch to AI worker.
                                     let sent = registry.send_message(&bot, cid, message).await;
                                     if !sent {
@@ -1828,6 +1863,8 @@ async fn handle_web_command(
     bot_name: &str,
     chat_id: i64,
     message: &str,
+    ant_bus: &crate::ant_bus::AntBus,
+    history: &crate::history::SharedHistory,
 ) -> bool {
     let trimmed = message.trim();
     let bots = registry.bots.read().await;
@@ -2186,19 +2223,24 @@ async fn handle_web_command(
             let rest = s.strip_prefix("/ask ").unwrap_or("").trim();
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
-                Some("Usage: /ask <ant-name> <question>\nExample: /ask Gaea what do you know about circular economy?\n\nUse /ants to see available ANTs.".into())
+                drop(bots);
+                Some("Usage: /ask <ant-name> <question>\nExample: /ask Gaea what do you know about circular economy?\n\nOr use @Name in your message to mention an ANT directly.".into())
             } else {
                 let target_ant = parts[0].to_string();
                 let question = parts[1].to_string();
                 drop(bots);
 
-                // Send the question to the target ANT's AI worker.
-                // The target ANT will reason about it using its own expertise.
-                // When the response is ready, it'll be forwarded back to this chat.
-                let sent = registry.ask_ant(bot_name, &target_ant, chat_id, question.clone()).await;
+                // Build context from knowledge graph + recent conversation.
+                let context = build_conversation_context(bot_name, history, registry);
+
+                // Route through AntBus (R2 event model).
+                let sent = ant_bus.ask(
+                    bot_name, &target_ant, chat_id,
+                    question.clone(), context,
+                ).await;
 
                 if sent {
-                    Some(format!("Asking **{}** about: _{}_\n\nTheir response will appear here when ready.", target_ant, question))
+                    Some(format!("Asking **@{}**: _{}_\n\nTheir response will appear here when ready.", target_ant, question))
                 } else {
                     Some(format!("ANT '{}' not found or not running. Use /ants to see available ANTs.", target_ant))
                 }
