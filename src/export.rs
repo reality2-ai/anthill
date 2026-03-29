@@ -570,10 +570,10 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         raw_insights = raw_insights,
     );
 
-    // Cap prompt size. Claude Code has a 1M token context window, so we can
-    // be generous. 100000 chars ~= 25000 tokens — plenty of room for citations
-    // and data while leaving space for the AI's response.
-    let max_prompt_chars = 100000;
+    // Cap prompt size. Keep it under 20K chars (~5K tokens) for fast response.
+    // The raw insights are already a structured summary — no need to send
+    // the full graph data. Citations get priority (first in prompt).
+    let max_prompt_chars = 20000;
     let prompt = if prompt.len() > max_prompt_chars {
         let truncated = &prompt[..prompt[..max_prompt_chars]
             .rfind('\n')
@@ -583,8 +583,10 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         prompt
     };
 
+    eprintln!("  [export] Starting AI polish (prompt: {} chars)...", prompt.len());
+
     // Try claude CLI directly — pipe prompt via stdin to avoid command-line length limits.
-    // Timeout after 120 seconds to avoid hanging indefinitely.
+    // Timeout after 60 seconds to avoid hanging indefinitely.
     let mut child = match std::process::Command::new("claude")
         .args(["-p", "--max-turns", "1"])
         .stdin(std::process::Stdio::piped())
@@ -606,7 +608,7 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
     }
 
     // Wait with a timeout — kill the process if it takes too long.
-    let timeout = std::time::Duration::from_secs(120);
+    let timeout = std::time::Duration::from_secs(60);
     let start = std::time::Instant::now();
     loop {
         match child.try_wait() {
@@ -641,6 +643,224 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
 
     // Fallback: return raw insights unchanged.
     raw_insights.to_string()
+}
+
+/// Map-reduce AI summary: summarise each graph individually, then combine.
+///
+/// Phase 1 (map): For each topic graph, send a small prompt with its nodes,
+///   edges, and relevant citations. Get a 2-3 paragraph summary back.
+/// Phase 2 (reduce): Send all per-graph summaries + citations to produce
+///   the final integrated narrative.
+fn ai_map_reduce_summary(
+    all_data: &[serde_json::Value],
+    insights: &GraphInsights,
+    ant_name: &str,
+    guidance: Option<&str>,
+) -> String {
+    let has_citations = !insights.all_citations.is_empty();
+
+    // Build citation lookup: cite_id → formatted citation line.
+    let mut cite_lookup: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for cite in &insights.all_citations {
+        let line = format!(
+            "[{}] {} — {}{}{}",
+            cite.cite_id,
+            if cite.title.is_empty() { &cite.url } else { &cite.title },
+            if cite.author.is_empty() { String::new() } else { format!("by {}. ", cite.author) },
+            if cite.date.is_empty() { String::new() } else { format!("({}). ", cite.date) },
+            cite.url,
+        );
+        cite_lookup.insert(cite.cite_id.clone(), line);
+    }
+
+    // Phase 1: Summarise each graph individually.
+    eprintln!("  [export] Phase 1: summarising {} graphs individually...", all_data.len());
+    let mut graph_summaries: Vec<(String, String)> = Vec::new();
+
+    for graph_data in all_data {
+        let name = graph_data.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+        let data = match graph_data.get("data") {
+            Some(d) => d,
+            None => continue,
+        };
+
+        // Build a concise description of this graph's content.
+        let mut graph_text = format!("Topic: {}\n", name.replace('-', " "));
+
+        // Add nodes with summaries.
+        if let Some(nodes) = data.get("nodes").and_then(|n| n.as_array()) {
+            graph_text.push_str(&format!("{} concepts:\n", nodes.len()));
+            for node in nodes.iter().take(30) {
+                let label = node.get("label").and_then(|l| l.as_str()).unwrap_or("");
+                let kind = node.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+                let summary = node.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                let conf = node.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.5);
+                let short_summary = if summary.len() > 100 { &summary[..100] } else { summary };
+                graph_text.push_str(&format!("  {} ({}; {:.0}%): {}\n", label, kind, conf * 100.0, short_summary));
+            }
+            if nodes.len() > 30 {
+                graph_text.push_str(&format!("  [... {} more]\n", nodes.len() - 30));
+            }
+        }
+
+        // Add key relationships.
+        if let Some(links) = data.get("links").and_then(|l| l.as_array()) {
+            graph_text.push_str(&format!("\n{} relationships (strongest):\n", links.len()));
+            // Sort by confidence descending.
+            let mut sorted_links: Vec<&serde_json::Value> = links.iter().collect();
+            sorted_links.sort_by(|a, b| {
+                let ca = a.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.0);
+                let cb = b.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.0);
+                cb.partial_cmp(&ca).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for link in sorted_links.iter().take(20) {
+                let rel = link.get("relation").and_then(|r| r.as_str()).unwrap_or("");
+                let conf = link.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.0);
+                let source = link.get("source").and_then(|s| s.as_u64()).unwrap_or(0);
+                let target = link.get("target").and_then(|t| t.as_u64()).unwrap_or(0);
+                // Resolve node labels from indices.
+                let nodes = data.get("nodes").and_then(|n| n.as_array());
+                let from_label = nodes.and_then(|ns| ns.get(source as usize))
+                    .and_then(|n| n.get("label")).and_then(|l| l.as_str()).unwrap_or("?");
+                let to_label = nodes.and_then(|ns| ns.get(target as usize))
+                    .and_then(|n| n.get("label")).and_then(|l| l.as_str()).unwrap_or("?");
+                graph_text.push_str(&format!("  {} → {} → {} ({:.0}%)\n", from_label, rel, to_label, conf * 100.0));
+
+                // Include citations from this edge.
+                if let Some(cites) = link.get("citations").and_then(|c| c.as_array()) {
+                    for cite in cites {
+                        if let Some(cite_id) = cite.get("cite_id").and_then(|c| c.as_str()) {
+                            if let Some(cite_line) = cite_lookup.get(cite_id) {
+                                graph_text.push_str(&format!("    Source: {}\n", cite_line));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Call Claude to summarise this graph.
+        let prompt = format!(
+            "Summarise the following knowledge graph topic in 2-3 paragraphs of flowing prose. \
+             Include specific facts and confidence levels. If citation codes [cite-xxxx] appear, \
+             include them inline after claims they support. Write in third person.\n\n{}",
+            graph_text
+        );
+
+        eprintln!("  [export]   Summarising '{}' ({} chars)...", name, prompt.len());
+        let summary = ai_call_with_timeout(&prompt, 30);
+
+        if !summary.is_empty() && summary.len() > 50 {
+            graph_summaries.push((name.to_string(), summary));
+            eprintln!("  [export]   '{}' done ({} chars)", name, graph_summaries.last().unwrap().1.len());
+        } else {
+            // Fallback: use the raw text.
+            graph_summaries.push((name.to_string(), graph_text));
+            eprintln!("  [export]   '{}' fell back to raw data", name);
+        }
+    }
+
+    // Phase 2: Combine all summaries into a final narrative.
+    eprintln!("  [export] Phase 2: combining {} graph summaries into final narrative...", graph_summaries.len());
+
+    let user_prompt = guidance.unwrap_or(
+        "Write an insightful analytical report that synthesises these findings into \
+         a cohesive narrative. Draw connections between topics. Highlight what is \
+         well-established, what needs investigation, and surprising connections."
+    );
+
+    let mut combined = format!(
+        "You are writing a knowledge report for '{}'. Below are summaries of each topic \
+         graph. Synthesise them into a single flowing document with ## headings.\n\
+         {}\n\n\
+         User's guidance: {}\n\n\
+         IMPORTANT: Include [cite-xxxx] codes inline wherever they appear in the summaries.\n\n",
+        ant_name,
+        if has_citations {
+            "Include all [cite-xxxx] citation codes from the summaries. Do not invent new ones."
+        } else {
+            "No citation codes are available."
+        },
+        user_prompt,
+    );
+
+    for (name, summary) in &graph_summaries {
+        combined.push_str(&format!("=== {} ===\n{}\n\n", name.replace('-', " "), summary));
+    }
+
+    // Add strongest/weakest beliefs for the reduce phase.
+    combined.push_str("=== Cross-cutting insights ===\n");
+    combined.push_str("Strongest beliefs:\n");
+    for (from, to, rel, conf) in insights.strongest_beliefs.iter().take(7) {
+        combined.push_str(&format!("  {} {} {} ({:.0}%)\n", from, rel, to, conf * 100.0));
+    }
+    combined.push_str("Weakest beliefs:\n");
+    for (from, to, rel, conf) in insights.weakest_beliefs.iter().take(5) {
+        combined.push_str(&format!("  {} {} {} ({:.0}%)\n", from, rel, to, conf * 100.0));
+    }
+
+    eprintln!("  [export]   Final prompt: {} chars", combined.len());
+    let final_narrative = ai_call_with_timeout(&combined, 60);
+
+    if !final_narrative.is_empty() && final_narrative.len() > 100 {
+        eprintln!("  [export] Final narrative: {} chars", final_narrative.len());
+        final_narrative
+    } else {
+        // Fallback: concatenate the individual summaries.
+        eprintln!("  [export] Final AI call failed — using concatenated summaries");
+        let mut fallback = format!("# {} — Knowledge Report\n\n", ant_name);
+        for (name, summary) in &graph_summaries {
+            fallback.push_str(&format!("## {}\n\n{}\n\n", name.replace('-', " "), summary));
+        }
+        fallback
+    }
+}
+
+/// Call claude -p with a timeout. Returns empty string on failure.
+fn ai_call_with_timeout(prompt: &str, timeout_secs: u64) -> String {
+    let mut child = match std::process::Command::new("claude")
+        .args(["-p", "--max-turns", "1"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [export] Failed to spawn claude: {}", e);
+            return String::new();
+        }
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(prompt.as_bytes());
+    }
+
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                if let Ok(output) = child.wait_with_output() {
+                    if output.status.success() {
+                        return String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    }
+                }
+                return String::new();
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    eprintln!("  [export] Claude timed out after {}s", timeout_secs);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return String::new();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(_) => return String::new(),
+        }
+    }
 }
 
 /// Post-process AI text to renumber citation codes [cite-xxxx] to [1], [2]...
@@ -958,8 +1178,16 @@ fn generate_export_html(
         raw_text.push_str(&format!("  {}: {}\n", label, short));
     }
 
-    // Ask AI to polish into readable prose.
-    let polished = ai_polish_summary(&raw_text, ant_name, guidance);
+    // AI narrative: map-reduce strategy.
+    // 1. Summarise each graph individually (small, fast calls in parallel-ish)
+    // 2. Combine summaries + citations into a final narrative
+    let skip_ai = std::env::var("ANTHILL_SKIP_AI_EXPORT").unwrap_or_default() == "1";
+    let polished = if skip_ai {
+        eprintln!("  [export] Skipping AI polish (ANTHILL_SKIP_AI_EXPORT=1)");
+        raw_text.clone()
+    } else {
+        ai_map_reduce_summary(all_data, &insights, ant_name, guidance)
+    };
     let mut ordered_refs: Vec<CollectedCitation> = Vec::new();
     let insights_html = if polished != raw_text {
         // Post-process: renumber cite-xxxx codes to [1], [2]... in order of appearance.
