@@ -72,8 +72,17 @@ pub enum WsEvent {
         bot: String,
         /// Which graph changed: "meta", or a topic name like "anthill".
         graph: String,
-        /// What caused the update: "rumination", "consolidation", "user".
+        /// What caused the update: "rumination", "consolidation", "user", "compaction".
         source: String,
+    },
+    /// Chat history was auto-compacted into the conversation graph.
+    #[serde(rename = "history_compacted")]
+    HistoryCompacted {
+        bot: String,
+        /// How many messages were compacted.
+        count: usize,
+        /// Which conversation graph to visualize inline.
+        graph_name: String,
     },
 }
 

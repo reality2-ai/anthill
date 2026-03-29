@@ -1079,6 +1079,7 @@ async fn compact_history(
                 text: format!("{} earlier messages compacted to knowledge graph.", compacted),
                 task_id: 0,
                 timestamp: crate::trust::now_secs(),
+                graph_ref: Some(format!("conversation-{}", id)),
             }];
             new_msgs.extend(kept);
             h.replace_history(&id, new_msgs);

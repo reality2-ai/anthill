@@ -11,12 +11,16 @@ use std::sync::{Arc, Mutex};
 /// A single chat message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role: String, // "user" or "bot"
+    pub role: String, // "user", "bot", or "system"
     pub text: String,
     #[serde(default)]
     pub task_id: u32,
     #[serde(default)]
     pub timestamp: u64,
+    /// If set, this message represents compacted history with an inline graph.
+    /// Value is the graph name, e.g. "conversation-saas_vs_ai".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_ref: Option<String>,
 }
 
 /// Per-bot chat history, backed by a file.
@@ -136,6 +140,47 @@ impl HistoryStore {
         if let Some(h) = self.histories.get_mut(bot_name) {
             h.messages = msgs;
         }
+    }
+
+    /// Compact oldest messages, keeping the most recent `keep_recent`.
+    /// Returns the removed messages (for entity extraction).
+    /// Inserts a system message with `graph_ref` pointing to the conversation graph.
+    pub fn compact_oldest(
+        &mut self,
+        bot_name: &str,
+        keep_recent: usize,
+        graph_name: &str,
+    ) -> Vec<ChatMessage> {
+        // Ensure loaded.
+        if !self.histories.contains_key(bot_name) {
+            let path = self.base_dir.join(format!("{}.jsonl", bot_name));
+            self.histories
+                .insert(bot_name.to_string(), BotHistory::load(&path));
+        }
+        let msgs = match self.histories.get(bot_name) {
+            Some(h) => h.messages.clone(),
+            None => return Vec::new(),
+        };
+        if msgs.len() <= keep_recent {
+            return Vec::new();
+        }
+        let split_at = msgs.len() - keep_recent;
+        let evicted: Vec<ChatMessage> = msgs[..split_at].to_vec();
+        let kept: Vec<ChatMessage> = msgs[split_at..].to_vec();
+
+        let mut new_msgs = vec![ChatMessage {
+            role: "system".into(),
+            text: format!(
+                "{} earlier messages compacted to conversation graph.",
+                evicted.len()
+            ),
+            task_id: 0,
+            timestamp: crate::web::now_secs(),
+            graph_ref: Some(graph_name.to_string()),
+        }];
+        new_msgs.extend(kept);
+        self.replace_history(bot_name, new_msgs);
+        evicted
     }
 
     /// Get all history for all bots (for snapshot).

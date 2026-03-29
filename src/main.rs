@@ -12,6 +12,7 @@ mod bot;
 mod ai_worker;
 #[allow(dead_code)]
 mod backends;
+mod compaction;
 mod config;
 mod dateutil;
 mod epistemic;

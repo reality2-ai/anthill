@@ -199,6 +199,32 @@ impl LiveKnowledgeStore {
         &self.memory_dir
     }
 
+    /// Remove nodes by label. Returns how many were removed.
+    /// Used by conversation graph cleanup to remove duplicates and noise.
+    pub fn remove_nodes(&self, graph: &str, labels: &[String]) -> StoreResult<u32> {
+        if labels.is_empty() { return Ok(0); }
+        self.with_graph_mut(graph, |kg| {
+            let mut removed = 0u32;
+            let labels_lower: Vec<String> = labels.iter().map(|l| l.to_lowercase()).collect();
+            // Find node indices to remove.
+            let to_remove: Vec<petgraph::graph::NodeIndex> = kg.graph.node_indices()
+                .filter(|&idx| {
+                    let label = kg.graph[idx].label.to_lowercase();
+                    labels_lower.contains(&label)
+                })
+                .collect();
+            // Remove in reverse order to avoid index invalidation (StableGraph handles this).
+            for idx in to_remove {
+                kg.graph.remove_node(idx);
+                removed += 1;
+            }
+            if removed > 0 {
+                kg.rebuild_index();
+            }
+            Ok(removed)
+        })
+    }
+
     /// Add an edge by NodeId (for synthesis and other internal operations).
     pub fn add_edge_by_id(&self, graph: &str, from: NodeId, to: NodeId, edge: crate::knowledge::KnowledgeEdge) -> StoreResult<EdgeId> {
         self.with_graph_mut(graph, |kg| {

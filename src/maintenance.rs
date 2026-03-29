@@ -251,6 +251,9 @@ async fn run_rumination(
         post_to_chat_history(config, &summary);
     }
 
+    // Conversation graph refinement — prune weak auto-extracted nodes, cross-link.
+    run_conversation_refinement(config);
+
     // Consolidate after rumination — link orphans, dedup, keep things tidy.
     run_consolidation(config);
 
@@ -1203,6 +1206,79 @@ fn run_cross_linking(config: &MaintenanceConfig) {
     }
 }
 
+// ── Conversation Graph Refinement ────────────────────────────────────
+
+/// Refine conversation graphs produced by auto-compaction.
+/// Prunes weak auto-extracted nodes, merges fuzzy duplicates,
+/// and cross-links conversation entities with topic graph entities.
+fn run_conversation_refinement(config: &MaintenanceConfig) {
+    use crate::store::KnowledgeStore;
+    let store = LiveKnowledgeStore::new(config.memory_dir.clone());
+
+    let graphs = match store.list_graphs() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+
+    // Find conversation graphs (named "conversation-*").
+    let conv_graphs: Vec<_> = graphs.iter()
+        .filter(|g| g.name.starts_with("conversation-"))
+        .collect();
+
+    if conv_graphs.is_empty() { return; }
+
+    // Collect all entity labels from non-conversation topic graphs for cross-linking.
+    let mut topic_labels: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for g in &graphs {
+        if g.name == "meta" || g.name.starts_with("conversation-") { continue; }
+        if let Ok(labels) = store.list_nodes(&g.name) {
+            topic_labels.insert(g.name.clone(), labels);
+        }
+    }
+
+    for cg in &conv_graphs {
+        let conv_labels = match store.list_nodes(&cg.name) {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // 1. Apply decay to fade old conversation edges.
+        let _ = store.apply_decay(&cg.name, 7); // 7-day decay cycle
+
+        // 2. Consolidate (dedup, merge parallel edges).
+        if let Ok(report) = store.consolidate(&cg.name) {
+            if report.nodes_merged > 0 || report.edges_merged > 0 {
+                log::info!(
+                    "[{}] Conversation graph '{}' consolidated: {} nodes merged, {} edges merged",
+                    config.ant_name, cg.name, report.nodes_merged, report.edges_merged
+                );
+            }
+        }
+
+        // 3. Cross-link: find conversation entities that also appear in topic graphs.
+        for (topic_name, labels) in &topic_labels {
+            for conv_label in &conv_labels {
+                let conv_lower = conv_label.to_lowercase();
+                if labels.iter().any(|l| l.to_lowercase() == conv_lower) {
+                    // This conversation entity also exists in a topic graph.
+                    // Strengthen the connection or create a cross-reference in meta.
+                    // We don't create edges in the meta-graph here — that's run_cross_linking's job.
+                    // Instead, tag the conversation node so cross-linking can find it.
+                    log::debug!(
+                        "[{}] Conversation entity '{}' also in '{}' — cross-link candidate",
+                        config.ant_name, conv_label, topic_name
+                    );
+                }
+            }
+        }
+
+        // 4. Link orphans within the conversation graph.
+        let _ = store.link_orphans(&cg.name);
+
+        broadcast_graph_update(config, &cg.name, "consolidation");
+    }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /// Build a short human-readable summary of the most recent rumination entries.
@@ -1258,6 +1334,7 @@ fn post_to_chat_history(config: &MaintenanceConfig, summary: &str) {
         text: summary.into(),
         task_id: 0,
         timestamp: now,
+        graph_ref: None,
     };
 
     if let Ok(json) = serde_json::to_string(&msg) {

@@ -856,6 +856,7 @@ pub async fn ai_worker_loop(
         let is_analytical = req.message.starts_with("/analyse ")
             || req.message == "/reflect"
             || req.message == "/compact-chat"
+            || req.message == "/refine-conversation"
             || req.message.starts_with("/specify ")
             || req.message.starts_with("/test-vectors ");
 
@@ -865,6 +866,12 @@ pub async fn ai_worker_loop(
             build_reflect_message(&knowledge_file)
         } else if req.message == "/compact-chat" {
             build_compact_chat_message(&config.memory_dir, &episodes_file, req.chat_id)
+        } else if req.message == "/refine-conversation" {
+            // Pre-cleanup: remove conversation graph nodes that exist in topic graphs.
+            let cleanup_summary = crate::compaction::pre_cleanup_conversation_graph(
+                &config.memory_dir, &bot_name,
+            );
+            build_refine_conversation_message(&bot_name, &cleanup_summary)
         } else if let Some(path) = req.message.strip_prefix("/specify ") {
             build_specify_message(path.trim(), &config.working_dir)
         } else if let Some(path) = req.message.strip_prefix("/test-vectors ") {
@@ -2068,6 +2075,57 @@ RECENT EPISODES:
         user_mem_path = user_mem_path.display(),
         user_memory = slice_safe(&user_memory, 4000),
         episodes = slice_safe(&episodes, 2000),
+    )
+}
+
+/// Build the message for /refine-conversation — thematic analysis of the conversation graph.
+///
+/// Strategy: remove any nodes that already exist in topic graphs (they belong there),
+/// remove noise, then thematically analyse what's left to produce a small, clean graph
+/// of conversation-specific content (decisions, questions, discussion threads).
+fn build_refine_conversation_message(bot_name: &str, cleanup_summary: &str) -> String {
+    let graph_name = format!("conversation-{}", bot_name);
+    format!(
+r#"CONVERSATION GRAPH REFINEMENT
+
+The conversation graph "{graph_name}" has been pre-cleaned by removing nodes that already
+exist in topic graphs and obvious noise. Here's what was done:
+
+{cleanup_summary}
+
+Your job: thematically analyse what remains and build a clean, small graph.
+
+STEP 1 — SURVEY what's left:
+  Use graph_query_about on "{graph_name}" with entity="" and depth=1 to see surviving nodes.
+  Pay special attention to "turn-*" nodes — read their summaries, they capture what was discussed.
+
+STEP 2 — THEMATIC ANALYSIS of turn summaries and surviving nodes:
+  Identify:
+  - Decisions made ("we decided to...", "let's use...", "switched to...")
+  - Questions explored ("how does...", "what if...", "is this...")
+  - Problems encountered ("doesn't work", "error", "issue with...")
+  - Key discussion threads unique to this conversation
+
+  Create 5-15 well-categorised nodes using graph_add_node:
+  - kind: decision, event, problem, open_question, concept, fact
+  - summary: clear, specific description
+  - tags: relevant keywords
+
+STEP 3 — CONNECT with meaningful edges using graph_add_edge:
+  - led_to, resolved_by, raised_question, decided, blocked_by, etc.
+  - basis: "observed" (you saw it in the conversation)
+
+STEP 4 — CLEANUP turn summaries:
+  Once you've extracted themes from the turn-* nodes, contradict their edges
+  so they fade — the thematic nodes replace them.
+
+  Ensure the hub node "conversation-{bot_name}" links to each theme/decision node.
+
+Goal: 5-15 clean nodes representing what was UNIQUE to this conversation.
+Report: nodes removed, nodes created, themes identified."#,
+        graph_name = graph_name,
+        cleanup_summary = cleanup_summary,
+        bot_name = bot_name,
     )
 }
 

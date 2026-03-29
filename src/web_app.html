@@ -815,6 +815,16 @@
     </div>
   </div>
   <div id="no-bot">Select an ANT from the sidebar to start chatting</div>
+  <div id="conv-graph-panel" style="display:none;height:220px;min-height:220px;position:relative;border-bottom:1px solid var(--border)">
+    <div id="conv-graph-container" style="width:100%;height:100%"></div>
+    <div id="conv-graph-overlay" style="position:absolute;bottom:0;left:0;right:0;padding:6px 16px;background:linear-gradient(transparent,var(--surface));display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-dim);pointer-events:none">
+      <span id="conv-graph-label"></span>
+      <div style="pointer-events:auto;display:flex;gap:6px">
+        <button onclick="refineConversationGraph()" id="conv-graph-refine-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border-light);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer" title="Thematic analysis to clean up and organise the conversation graph">Refine</button>
+        <button onclick="const s=document.getElementById('graph-selector');if(s){s.value=this.dataset.graph;};switchTab('graph');loadGraph(this.dataset.graph)" id="conv-graph-fullbtn" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Full graph</button>
+      </div>
+    </div>
+  </div>
   <div id="chat" style="display:none"></div>
   <div id="files-panel" style="display:none">
     <div id="files-breadcrumb" style="padding:8px 16px;font-size:13px;color:var(--text-dim);border-bottom:1px solid var(--border)"></div>
@@ -1185,6 +1195,9 @@ function handleEvent(msg) {
       renderTasks();
       renderBotList();
       if (currentTab === 'workers') renderWorkers();
+      // Re-enable refine button if it was disabled.
+      { const btn = document.getElementById('conv-graph-refine-btn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Refine'; } }
       break;
 
     case 'task_error':
@@ -1218,6 +1231,34 @@ function handleEvent(msg) {
           console.log('Live graph refresh:', msg.graph, 'source:', msg.source);
           loadGraph(currentGraph);
         }
+      }
+      // Refresh inline graph if compaction updated it.
+      if (msg.source === 'compaction' && state.activeBot === msg.bot && inlineGraphData) {
+        const container = document.querySelector('.compacted-graph-wrapper [id^="inline-graph-"]');
+        if (container) renderInlineGraph(container, inlineGraphData.graphName);
+      }
+      break;
+
+    case 'history_compacted':
+      // Server auto-compacted old messages — update local state.
+      if (state.messages[msg.bot]) {
+        // Reload history from server snapshot on next render.
+        // For now, insert a system message with graph_ref if not already present.
+        const botMsgs = state.messages[msg.bot];
+        const hasGraphRef = botMsgs.some(m => m.role === 'system' && m.graph_ref);
+        if (!hasGraphRef) {
+          // Trim old messages and insert compaction banner.
+          const kept = botMsgs.slice(-(Math.min(6, botMsgs.length)));
+          state.messages[msg.bot] = [
+            { role: 'system', text: `${msg.count} earlier messages compacted to conversation graph.`, graph_ref: msg.graph_name },
+            ...kept,
+          ];
+        } else {
+          // Update existing compaction banner count.
+          const banner = botMsgs.find(m => m.role === 'system' && m.graph_ref);
+          if (banner) banner.text = `${msg.count} earlier messages compacted to conversation graph.`;
+        }
+        if (msg.bot === state.activeBot) renderChat();
       }
       break;
 
@@ -1849,6 +1890,20 @@ function compactChat() {
   authFetch('/api/ants/' + state.activeBot + '/compact-history', { method: 'POST' }).catch(() => {});
 }
 
+function refineConversationGraph() {
+  if (!state.activeBot || !state.ws) return;
+  const btn = document.getElementById('conv-graph-refine-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Refining...'; }
+
+  wsSendSigned({
+    type: 'chat',
+    bot: state.activeBot,
+    message: '/refine-conversation',
+  });
+
+  showTyping(state.activeBot);
+}
+
 function sendMessage() {
   const input = document.getElementById('input');
   const text = input.value.trim();
@@ -1942,10 +1997,28 @@ async function loadEngineBadge(botId) {
   }
 }
 
+// Track inline graph instance for cleanup.
+let inlineGraphInstance = null;
+let inlineGraphData = null;
+
 function renderChat(forceScroll) {
   const chat = document.getElementById('chat');
   const msgs = state.messages[state.activeBot] || [];
+
+  // Destroy previous inline graph instance.
+  if (inlineGraphInstance) {
+    inlineGraphInstance._destructor && inlineGraphInstance._destructor();
+    inlineGraphInstance = null;
+  }
+
   chat.innerHTML = msgs.map((m, i) => {
+    if (m.role === 'system' && m.graph_ref) {
+      // Compacted messages — just show a small text banner in chat.
+      // The graph is rendered in the fixed panel above.
+      return `<div style="text-align:center;padding:8px 16px;margin:4px 0;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--text-dim)">
+        ${escapeHtml(m.text)}
+      </div>`;
+    }
     if (m.role === 'system') {
       return `<div style="text-align:center;padding:12px 20px;margin:8px 0;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text-dim);cursor:pointer" onclick="switchTab('graph')">
         ${formatMarkdown(m.text)}
@@ -1960,6 +2033,25 @@ function renderChat(forceScroll) {
 
   addCopyButtons();
 
+  // Show/hide the conversation graph panel above the chat.
+  const graphMsg = msgs.find(m => m.role === 'system' && m.graph_ref);
+  const convPanel = document.getElementById('conv-graph-panel');
+  if (graphMsg && convPanel) {
+    convPanel.style.display = 'block';
+    document.getElementById('conv-graph-label').textContent = graphMsg.text;
+    const fullBtn = document.getElementById('conv-graph-fullbtn');
+    if (fullBtn) fullBtn.dataset.graph = graphMsg.graph_ref;
+    // Only re-render if graph name changed or not yet rendered.
+    if (!inlineGraphData || inlineGraphData.graphName !== graphMsg.graph_ref) {
+      const container = document.getElementById('conv-graph-container');
+      if (container) {
+        requestAnimationFrame(() => renderInlineGraph(container, graphMsg.graph_ref));
+      }
+    }
+  } else if (convPanel) {
+    convPanel.style.display = 'none';
+  }
+
   // Always scroll to bottom when switching bots or opening a chat.
   // Only auto-scroll on new messages if the user is near the bottom (within 150px).
   const isNearBottom = forceScroll || (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 150;
@@ -1969,6 +2061,65 @@ function renderChat(forceScroll) {
 
   // Update the tasks panel to show/hide typing indicator.
   renderTasks();
+}
+
+/// Render a lightweight inline 2D force graph in the given container.
+async function renderInlineGraph(container, graphName) {
+  try {
+    console.log('renderInlineGraph:', graphName, 'container:', container.clientWidth, 'x', container.clientHeight);
+    const resp = await authFetch(`/api/ants/${state.activeBot}/graph?name=${encodeURIComponent(graphName)}`);
+    if (!resp.ok) { console.warn('Graph fetch failed:', resp.status); return; }
+    const data = await resp.json();
+    console.log('Graph data:', data.nodes?.length, 'nodes,', data.links?.length, 'links');
+    if (!data.nodes || data.nodes.length === 0) return;
+
+    // Cache for refresh.
+    inlineGraphData = { graphName, data };
+
+    // Use 2D ForceGraph for lightweight inline rendering.
+    if (typeof ForceGraph === 'undefined') { console.warn('ForceGraph 2D not loaded'); return; }
+
+    const NODE_COLORS = {
+      person: '#e06c75', project: '#98c379', tool: '#e5c07b', concept: '#61afef',
+      decision: '#c678dd', server: '#e06c9f', event: '#d19a66', fact: '#abb2bf',
+      problem: '#be5046', theory: '#56b6c2',
+    };
+
+    const w = container.clientWidth || 800;
+    const h = container.clientHeight || 220;
+    console.log('Creating ForceGraph 2D:', w, 'x', h);
+
+    inlineGraphInstance = ForceGraph()(container)
+      .graphData(data)
+      .nodeLabel(n => `${n.label} (${n.kind})`)
+      .nodeColor(n => {
+        const base = NODE_COLORS[n.kind] || '#abb2bf';
+        const alpha = Math.max(0.4, Math.min(1.0, (n.confidence || 0.5) + 0.2));
+        const r = parseInt(base.slice(1,3), 16);
+        const g = parseInt(base.slice(3,5), 16);
+        const b = parseInt(base.slice(5,7), 16);
+        return `rgba(${r},${g},${b},${alpha})`;
+      })
+      .nodeVal(n => n.is_hub ? 5 : 2)
+      .linkLabel(l => l.relation)
+      .linkColor(l => {
+        const c = l.confidence || 0.5;
+        if (c >= 0.7) return 'rgba(152,195,121,0.6)';
+        if (c >= 0.4) return 'rgba(229,192,123,0.6)';
+        return 'rgba(224,108,117,0.6)';
+      })
+      .linkWidth(l => Math.max(0.5, (l.confidence || 0.5) * 1.5))
+      .linkDirectionalArrowLength(4)
+      .width(w)
+      .height(h)
+      .warmupTicks(50)
+      .cooldownTime(2000)
+      .backgroundColor('#1a1a2e');
+
+    console.log('ForceGraph 2D created, children:', container.children.length);
+  } catch (e) {
+    console.warn('Inline graph render failed:', e);
+  }
 }
 
 function renderTasks() {
@@ -2154,9 +2305,13 @@ function switchTab(tab) {
   document.getElementById('tab-graph').className = tab === 'graph' ? 'tab active' : 'tab';
   document.getElementById('chat').style.display = tab === 'chat' ? 'flex' : 'none';
   document.getElementById('input-area').style.display = tab === 'chat' ? 'flex' : 'none';
+  // Conv graph panel is only visible on chat tab — renderChat controls show/hide based on data.
+  const convPanel = document.getElementById('conv-graph-panel');
+  if (convPanel && tab !== 'chat') convPanel.style.display = 'none';
   document.getElementById('workers-panel').style.display = tab === 'workers' ? 'flex' : 'none';
   document.getElementById('files-panel').style.display = tab === 'files' ? 'flex' : 'none';
   document.getElementById('graph-panel').style.display = tab === 'graph' ? 'flex' : 'none';
+  if (tab === 'chat' && state.activeBot) renderChat();
   if (tab === 'files' && state.activeBot) loadFiles('');
   if (tab === 'workers') renderWorkers();
   if (tab === 'graph' && state.activeBot) {

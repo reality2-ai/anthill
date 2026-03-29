@@ -173,9 +173,31 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
     let history_dir = config_dir.join("history");
     let history = crate::history::create_history_store(history_dir);
 
+    // Build memory directory map for auto-compaction.
+    // Maps bot_name → resolved memory_dir path.
+    let mut memory_dirs: std::collections::HashMap<String, std::path::PathBuf> = std::collections::HashMap::new();
+    for (dir_name, config_path) in &ant_configs {
+        if let Ok(cfg) = Config::load(config_path) {
+            let working = cfg.claude.working_dir
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| ants_dir.join(dir_name).join("working"));
+            let mem_dir = working.join(&cfg.claude.memory_dir);
+            memory_dirs.insert(dir_name.clone(), mem_dir);
+        }
+    }
+    let memory_dirs = Arc::new(memory_dirs);
+
     // Spawn history recorder — listens to all bot events and persists messages.
+    // Also handles auto-compaction: after recording a bot message, if history
+    // exceeds the threshold, extract entities into the conversation graph.
     let history_recorder = history.clone();
     let mut history_rx = registry.global_tx.subscribe();
+    let compaction_event_tx = registry.global_tx.clone();
+    let compaction_memory_dirs = Arc::clone(&memory_dirs);
+
+    /// Maximum messages to keep in chat history (3 user+bot pairs = 6).
+    const COMPACTION_KEEP: usize = 6;
+
     tokio::spawn(async move {
         loop {
             match history_rx.recv().await {
@@ -186,7 +208,85 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                             text: text.clone(),
                             task_id,
                             timestamp: crate::web::now_secs(),
+                            graph_ref: None,
                         });
+
+                        // Auto-compact if history exceeds threshold.
+                        let msg_count = h.get_history(bot).len();
+                        if msg_count > COMPACTION_KEEP {
+                            let graph_name = format!("conversation-{}", bot);
+                            let evicted = h.compact_oldest(bot, COMPACTION_KEEP, &graph_name);
+
+                            if !evicted.is_empty() {
+                                // Build a turn summary and add it to the conversation graph.
+                                if let Some(mem_dir) = compaction_memory_dirs.get(bot.as_str()) {
+                                    use crate::store::KnowledgeStore;
+
+                                    let store = crate::store::live::LiveKnowledgeStore::new(mem_dir.clone());
+                                    let result = crate::compaction::summarise_turn(&evicted);
+
+                                    // Ensure conversation hub node exists.
+                                    let hub_label = format!("conversation-{}", bot);
+                                    if store.get_node(&graph_name, &hub_label).is_err() {
+                                        if let Ok(node) = crate::store::ValidatedNode::new(
+                                            &hub_label,
+                                            "concept",
+                                            "Conversation history hub",
+                                            vec!["hub".into(), "conversation".into()],
+                                        ) {
+                                            let _ = store.add_node(&graph_name, node);
+                                        }
+                                    }
+
+                                    // Add a turn summary node linked to the hub.
+                                    let turn_label = format!(
+                                        "turn-{}",
+                                        crate::web::now_secs()
+                                    );
+                                    if let Ok(node) = crate::store::ValidatedNode::new(
+                                        &turn_label,
+                                        "event",
+                                        &result.summary,
+                                        vec!["turn-summary".into()],
+                                    ) {
+                                        let _ = store.add_node(&graph_name, node);
+                                    }
+                                    if let Ok(edge) = crate::store::ValidatedEdge::new(
+                                        &hub_label, &turn_label, "contains_turn",
+                                        &result.summary, "observed", "temporal",
+                                        "conversation", 0.0,
+                                    ) {
+                                        let _ = store.add_edge(&graph_name, edge);
+                                    }
+
+                                    log::info!(
+                                        "[{}] Auto-compacted {} messages → turn summary: {}",
+                                        bot, evicted.len(),
+                                        if result.summary.len() > 80 {
+                                            format!("{}...", &result.summary[..80])
+                                        } else {
+                                            result.summary
+                                        }
+                                    );
+                                }
+
+                                // Broadcast events.
+                                let _ = compaction_event_tx.send(
+                                    crate::registry::WsEvent::GraphUpdated {
+                                        bot: bot.clone(),
+                                        graph: graph_name.clone(),
+                                        source: "compaction".into(),
+                                    },
+                                );
+                                let _ = compaction_event_tx.send(
+                                    crate::registry::WsEvent::HistoryCompacted {
+                                        bot: bot.clone(),
+                                        count: evicted.len(),
+                                        graph_name,
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
                 Ok(crate::registry::WsEvent::UserMessage { ref bot, ref text, .. }) => {
@@ -196,6 +296,7 @@ pub async fn run_supervisor(config_dir: &Path) -> anyhow::Result<()> {
                             text: text.clone(),
                             task_id: 0,
                             timestamp: crate::web::now_secs(),
+                            graph_ref: None,
                         });
                     }
                 }

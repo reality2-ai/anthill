@@ -583,20 +583,60 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         prompt
     };
 
-    // Try claude CLI directly.
-    let output = std::process::Command::new("claude")
+    // Try claude CLI directly — pipe prompt via stdin to avoid command-line length limits.
+    // Timeout after 120 seconds to avoid hanging indefinitely.
+    let mut child = match std::process::Command::new("claude")
         .args(["-p", "--max-turns", "1"])
-        .arg(&prompt)
-        .output();
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  [export] Failed to spawn claude: {}", e);
+            return raw_insights.to_string();
+        }
+    };
 
-    match output {
-        Ok(o) if o.status.success() => {
-            let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if text.len() > 100 {
-                return text;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(prompt.as_bytes());
+        // stdin is dropped here, closing the pipe
+    }
+
+    // Wait with a timeout — kill the process if it takes too long.
+    let timeout = std::time::Duration::from_secs(120);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                // Process finished — read output.
+                if let Ok(output) = child.wait_with_output() {
+                    if output.status.success() {
+                        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if text.len() > 100 {
+                            return text;
+                        }
+                    }
+                }
+                break;
+            }
+            Ok(None) => {
+                // Still running — check timeout.
+                if start.elapsed() > timeout {
+                    eprintln!("  [export] Claude timed out after {}s — using raw insights", timeout.as_secs());
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(e) => {
+                eprintln!("  [export] Error waiting for claude: {}", e);
+                break;
             }
         }
-        _ => {}
     }
 
     // Fallback: return raw insights unchanged.
@@ -708,9 +748,14 @@ pub fn export_ant_graphs(
     let mut all_data = Vec::new();
 
     for g in &graphs {
-        // Skip the citations graph in "export all" — it's an internal index,
-        // not a topic. Citations are already attached to edges in topic graphs.
-        if g.name == "citations" || g.name == "uncategorised" {
+        // Skip internal/auxiliary graphs in "export all":
+        // - citations: internal index, citations are already on edges
+        // - uncategorised: cleanup holding pen
+        // - conversation-*: auto-extracted conversation history, not curated knowledge
+        if g.name == "citations"
+            || g.name == "uncategorised"
+            || g.name.starts_with("conversation-")
+        {
             continue;
         }
         if let Ok(viz) = store.to_visualization(&g.name) {
