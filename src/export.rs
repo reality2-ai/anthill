@@ -583,20 +583,65 @@ fn ai_polish_summary(raw_insights: &str, ant_name: &str, guidance: Option<&str>)
         prompt
     };
 
-    // Try claude CLI directly.
-    let output = std::process::Command::new("claude")
+    // Try claude CLI directly, piping the prompt via stdin for large inputs.
+    use std::io::Write;
+    let mut child = match std::process::Command::new("claude")
         .args(["-p", "--max-turns", "1"])
-        .arg(&prompt)
-        .output();
+        .arg("--output-format").arg("text")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Failed to spawn claude for export summary: {}", e);
+            return raw_insights.to_string();
+        }
+    };
 
-    match output {
-        Ok(o) if o.status.success() => {
-            let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if text.len() > 100 {
-                return text;
+    // Write prompt to stdin and close it.
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(prompt.as_bytes());
+        // stdin is dropped here, closing the pipe.
+    }
+
+    // Wait with a 5-minute timeout.
+    let timeout = std::time::Duration::from_secs(300);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    let text = child.stdout.take()
+                        .and_then(|mut o| {
+                            let mut buf = String::new();
+                            std::io::Read::read_to_string(&mut o, &mut buf).ok()?;
+                            Some(buf)
+                        })
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    if text.len() > 100 {
+                        return text;
+                    }
+                }
+                break;
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    log::warn!("Claude export summary timed out after {}s — killing", timeout.as_secs());
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(e) => {
+                log::warn!("Error waiting for claude export process: {}", e);
+                break;
             }
         }
-        _ => {}
     }
 
     // Fallback: return raw insights unchanged.
