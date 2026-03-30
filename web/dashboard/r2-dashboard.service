@@ -1,0 +1,14 @@
+[Unit]
+Description=Anthill Spec Confidence Dashboard
+After=network-online.target
+
+[Service]
+User=roycdavies
+WorkingDirectory=/mnt/data/Development/R2/anthill/web/dashboard
+ExecStart=/usr/bin/python3 server.py --port 8081
+Restart=always
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

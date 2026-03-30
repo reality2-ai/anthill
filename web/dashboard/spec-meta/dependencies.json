@@ -1,0 +1,122 @@
+{
+  "ANTHILL-INTRO": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-INTRO.md",
+    "depends_on": ["R2-WIRE", "R2-SENTANT", "R2-TRUST"],
+    "depended_by": []
+  },
+  "ANTHILL-SENTANT": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-SENTANT.md",
+    "depends_on": ["R2-SENTANT", "R2-WIRE", "R2-TRUST", "R2-DEF", "R2-PLUGIN"],
+    "depended_by": ["ANTHILL-KNOWLEDGE", "ANTHILL-WORKER", "ANTHILL-CHAT", "ANTHILL-COLONY", "ANTHILL-COMMS"]
+  },
+  "ANTHILL-KNOWLEDGE": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-KNOWLEDGE.md",
+    "depends_on": ["ANTHILL-SENTANT", "R2-CBOR", "R2-KNOWLEDGE"],
+    "depended_by": ["ANTHILL-THURISAZ", "ANTHILL-RUMINATION", "ANTHILL-GRAPH-UX", "ANTHILL-REPORTS", "ANTHILL-EXPORT"]
+  },
+  "ANTHILL-THURISAZ": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-THURISAZ.md",
+    "depends_on": ["ANTHILL-KNOWLEDGE", "TH-WEAVE", "TH-REP"],
+    "depended_by": ["ANTHILL-RUMINATION", "ANTHILL-EXPORT"]
+  },
+  "ANTHILL-WORKER": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-WORKER.md",
+    "depends_on": ["ANTHILL-SENTANT", "R2-PLUGIN"],
+    "depended_by": ["ANTHILL-CHAT", "ANTHILL-RUMINATION", "ANTHILL-THEMATIC", "ANTHILL-WORKERS-UX"]
+  },
+  "ANTHILL-CHAT": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-CHAT.md",
+    "depends_on": ["ANTHILL-SENTANT", "ANTHILL-WORKER"],
+    "depended_by": ["ANTHILL-DASHBOARD", "ANTHILL-CHANNELS"]
+  },
+  "ANTHILL-COLONY": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-COLONY.md",
+    "depends_on": ["ANTHILL-SENTANT", "ANTHILL-TRUST"],
+    "depended_by": ["ANTHILL-COMMS", "ANTHILL-FEDERATION"]
+  },
+  "ANTHILL-TRUST": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-TRUST.md",
+    "depends_on": ["R2-TRUST", "R2-PROVISION"],
+    "depended_by": ["ANTHILL-COLONY", "ANTHILL-ONBOARDING", "ANTHILL-CHANNELS"]
+  },
+  "ANTHILL-RUMINATION": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-RUMINATION.md",
+    "depends_on": ["ANTHILL-KNOWLEDGE", "ANTHILL-THURISAZ", "ANTHILL-WORKER"],
+    "depended_by": []
+  },
+  "ANTHILL-COMMS": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-COMMS.md",
+    "depends_on": ["ANTHILL-SENTANT", "ANTHILL-COLONY"],
+    "depended_by": ["ANTHILL-FEDERATION"]
+  },
+  "ANTHILL-DASHBOARD": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-DASHBOARD.md",
+    "depends_on": ["ANTHILL-CHAT", "ANTHILL-SENTANT", "ANTHILL-TRUST"],
+    "depended_by": ["ANTHILL-GRAPH-UX", "ANTHILL-ONBOARDING", "ANTHILL-WORKERS-UX", "ANTHILL-FILES", "ANTHILL-REPORTS"]
+  },
+  "ANTHILL-GRAPH-UX": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-GRAPH-UX.md",
+    "depends_on": ["ANTHILL-KNOWLEDGE", "ANTHILL-DASHBOARD"],
+    "depended_by": []
+  },
+  "ANTHILL-WORKERS-UX": {
+    "version": "0.1",
+    "path": "specs/ANTHILL-WORKERS-UX.md",
+    "depends_on": ["ANTHILL-WORKER", "ANTHILL-DASHBOARD"],
+    "depended_by": []
+  },
+  "ANTHILL-FEDERATION": {
+    "version": "",
+    "path": "specs/ANTHILL-FEDERATION.md",
+    "depends_on": ["ANTHILL-COLONY", "ANTHILL-TRUST", "R2-INTERNET", "R2-TRANSPORT"],
+    "depended_by": []
+  },
+  "ANTHILL-ONBOARDING": {
+    "version": "",
+    "path": "specs/ANTHILL-ONBOARDING.md",
+    "depends_on": ["ANTHILL-TRUST", "ANTHILL-DASHBOARD"],
+    "depended_by": []
+  },
+  "ANTHILL-FILES": {
+    "version": "",
+    "path": "specs/ANTHILL-FILES.md",
+    "depends_on": ["ANTHILL-SENTANT", "ANTHILL-DASHBOARD"],
+    "depended_by": []
+  },
+  "ANTHILL-REPORTS": {
+    "version": "",
+    "path": "specs/ANTHILL-REPORTS.md",
+    "depends_on": ["ANTHILL-KNOWLEDGE", "ANTHILL-DASHBOARD"],
+    "depended_by": []
+  },
+  "ANTHILL-CHANNELS": {
+    "version": "",
+    "path": "specs/ANTHILL-CHANNELS.md",
+    "depends_on": ["ANTHILL-CHAT", "ANTHILL-TRUST"],
+    "depended_by": []
+  },
+  "ANTHILL-THEMATIC": {
+    "version": "",
+    "path": "specs/ANTHILL-THEMATIC.md",
+    "depends_on": ["ANTHILL-KNOWLEDGE", "ANTHILL-WORKER"],
+    "depended_by": []
+  },
+  "ANTHILL-EXPORT": {
+    "version": "",
+    "path": "specs/ANTHILL-EXPORT.md",
+    "depends_on": ["ANTHILL-KNOWLEDGE", "ANTHILL-THURISAZ"],
+    "depended_by": []
+  }
+}

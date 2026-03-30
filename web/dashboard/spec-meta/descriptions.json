@@ -1,0 +1,82 @@
+{
+  "ANTHILL-INTRO": {
+    "title": "Introduction, Vision, and Reading Guide",
+    "conjecture": "Anthill's Popperian reasoning engine architecture, built on R2 sentants, provides a sound foundation for AI agents that earn confidence through surviving refutation."
+  },
+  "ANTHILL-SENTANT": {
+    "title": "ANT Lifecycle, Properties, and Event Model",
+    "conjecture": "An ANT modelled as an IPUCO+D sentant with a conductor FSM, plugin bindings, and a structured working directory provides sufficient abstraction for autonomous AI reasoning."
+  },
+  "ANTHILL-KNOWLEDGE": {
+    "title": "Knowledge Store and Graph Operations",
+    "conjecture": "A validated knowledge store with CBOR+Git persistence, MCP tool access, and intelligent data reduction (megabytes to ~4KB) enables AI agents to reason effectively within context window constraints."
+  },
+  "ANTHILL-THURISAZ": {
+    "title": "Bayesian Epistemology and Confidence Dynamics",
+    "conjecture": "Log-odds Bayesian updating with 12 evidence types, anti-confirmation bias mechanisms, reputation weighting, and fading foundations produces epistemically sound confidence scores that resist the confirmation bias inherent in AI systems."
+  },
+  "ANTHILL-WORKER": {
+    "title": "AI Worker Supervision and Backend Abstraction",
+    "conjecture": "Supervised subprocess workers with watchdog monitoring, multi-backend fallback, and follow-up queues provide reliable AI inference across heterogeneous backends."
+  },
+  "ANTHILL-CHAT": {
+    "title": "Conversation Model and Command System",
+    "conjecture": "A unified conversation model with slash commands, auto-follow-up, interrupt capability, and cross-channel sync provides a consistent user experience across web, Telegram, and Slack."
+  },
+  "ANTHILL-COLONY": {
+    "title": "Colony Supervisor and ANT Lifecycle",
+    "conjecture": "A supervisor with crash recovery, config reload from disk, and hot-add discovery provides production-grade ANT lifecycle management."
+  },
+  "ANTHILL-TRUST": {
+    "title": "Colony Security and Device Provisioning",
+    "conjecture": "R2-TRUST with Ed25519 colony keys, time-limited join codes, HMAC-signed WebSocket messages, and layered transport security provides defence in depth for AI agent infrastructure."
+  },
+  "ANTHILL-RUMINATION": {
+    "title": "Autonomous Thinking Engine",
+    "conjecture": "A structured 8-phase rumination cycle with synthesis, refutation, competition, and meta-cognition enables ANTs to improve their knowledge autonomously without human prompting."
+  },
+  "ANTHILL-COMMS": {
+    "title": "Inter-ANT Communication",
+    "conjecture": "Filesystem-based inbox/outbox messaging with Socratic discourse protocol, loop detection, and exchange caps enables productive inter-ANT knowledge exchange without infinite agreement loops."
+  },
+  "ANTHILL-DASHBOARD": {
+    "title": "Web Dashboard Interface",
+    "conjecture": "A single-page application with real-time WebSocket updates, responsive design, and PWA support provides effective cross-device access to ANT management and interaction."
+  },
+  "ANTHILL-GRAPH-UX": {
+    "title": "Knowledge Graph Visualisation and Interaction",
+    "conjecture": "Interactive 3D force-directed graph visualisation with right-click editing, scoped queries, and confidence-coded rendering makes the knowledge graph accessible and actionable."
+  },
+  "ANTHILL-WORKERS-UX": {
+    "title": "Task Visibility and Worker Interaction",
+    "conjecture": "Real-time worker cards with progress events, preserved follow-up inputs, and question detection provide sufficient visibility and control over AI task execution."
+  },
+  "ANTHILL-FEDERATION": {
+    "title": "Distributed Deployment",
+    "conjecture": "WebSocket relay between colony nodes with R2-TRUST authentication enables distributed ANT deployment across multiple machines."
+  },
+  "ANTHILL-ONBOARDING": {
+    "title": "Device Provisioning UX",
+    "conjecture": "QR code scanning and text join codes with a creation wizard provide a frictionless path from first visit to first ANT interaction."
+  },
+  "ANTHILL-FILES": {
+    "title": "File Management UX",
+    "conjecture": "Sandboxed per-ANT file browsing with upload, download, and preview provides sufficient file management for AI agent workspaces."
+  },
+  "ANTHILL-REPORTS": {
+    "title": "Report and Export Workflow",
+    "conjecture": "Background report generation with AI narrative, citation renumbering, and self-contained HTML output produces shareable knowledge summaries."
+  },
+  "ANTHILL-CHANNELS": {
+    "title": "Multi-Channel Experience",
+    "conjecture": "Cross-channel message sync with a clear feature parity matrix enables consistent ANT interaction across web, Telegram, and Slack."
+  },
+  "ANTHILL-THEMATIC": {
+    "title": "Analysis Pipelines",
+    "conjecture": "Braun & Clarke thematic analysis methodology applied by AI produces structured knowledge graphs, formal specifications, and test vectors from source material."
+  },
+  "ANTHILL-EXPORT": {
+    "title": "Export Format",
+    "conjecture": "Self-contained HTML with embedded 3D graph, AI-written narrative, and numbered citations produces portable, human-readable knowledge snapshots."
+  }
+}

@@ -1,0 +1,542 @@
+{
+  "ANTHILL-INTRO": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from R2-WIRE, R2-SENTANT, R2-TRUST: -15.0%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "R2-WIRE",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-SENTANT",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-TRUST",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-SENTANT": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from R2-SENTANT, R2-WIRE, R2-TRUST, R2-DEF, R2-PLUGIN: -15.0%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "R2-SENTANT",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-WIRE",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-TRUST",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-DEF",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-PLUGIN",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-TRUST": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from R2-TRUST, R2-PROVISION: -15.0%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "R2-TRUST",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-PROVISION",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-KNOWLEDGE": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-SENTANT, R2-CBOR, R2-KNOWLEDGE: -14.8%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "R2-CBOR",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-KNOWLEDGE",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-WORKER": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-SENTANT, R2-PLUGIN: -14.7%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "R2-PLUGIN",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-COLONY": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-SENTANT, ANTHILL-TRUST: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-TRUST",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-THURISAZ": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-KNOWLEDGE, TH-WEAVE, TH-REP: -14.8%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-KNOWLEDGE",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "TH-WEAVE",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "TH-REP",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-CHAT": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-SENTANT, ANTHILL-WORKER: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-WORKER",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-THEMATIC": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-KNOWLEDGE, ANTHILL-WORKER: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-KNOWLEDGE",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-WORKER",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-COMMS": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-SENTANT, ANTHILL-COLONY: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-COLONY",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-FEDERATION": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-COLONY, ANTHILL-TRUST, R2-INTERNET, R2-TRANSPORT: -14.7%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-COLONY",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-TRUST",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "R2-INTERNET",
+        "dep_confidence": 0.0
+      },
+      {
+        "from": "R2-TRANSPORT",
+        "dep_confidence": 0.0
+      }
+    ]
+  },
+  "ANTHILL-RUMINATION": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-KNOWLEDGE, ANTHILL-THURISAZ, ANTHILL-WORKER: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-KNOWLEDGE",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-THURISAZ",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-WORKER",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-EXPORT": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-KNOWLEDGE, ANTHILL-THURISAZ: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-KNOWLEDGE",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-THURISAZ",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-DASHBOARD": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-CHAT, ANTHILL-SENTANT, ANTHILL-TRUST: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-CHAT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-TRUST",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-CHANNELS": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-CHAT, ANTHILL-TRUST: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-CHAT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-TRUST",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-GRAPH-UX": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-KNOWLEDGE, ANTHILL-DASHBOARD: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-KNOWLEDGE",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-DASHBOARD",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-WORKERS-UX": {
+    "confidence": 0.04,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-WORKER, ANTHILL-DASHBOARD: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-WORKER",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-DASHBOARD",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-ONBOARDING": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-TRUST, ANTHILL-DASHBOARD: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-TRUST",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-DASHBOARD",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-FILES": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-SENTANT, ANTHILL-DASHBOARD: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-SENTANT",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-DASHBOARD",
+        "dep_confidence": 0.04
+      }
+    ]
+  },
+  "ANTHILL-REPORTS": {
+    "confidence": 0.0,
+    "cells": {
+      "reviewed": 0.0,
+      "test_spec": 0.0,
+      "testing": 0.0,
+      "built": 0.0,
+      "integrated": 0.0,
+      "field": 0.0
+    },
+    "penalties": [
+      "Inherited drop from ANTHILL-KNOWLEDGE, ANTHILL-DASHBOARD: -14.4%"
+    ],
+    "needs_attention": true,
+    "inherited_drops": [
+      {
+        "from": "ANTHILL-KNOWLEDGE",
+        "dep_confidence": 0.04
+      },
+      {
+        "from": "ANTHILL-DASHBOARD",
+        "dep_confidence": 0.04
+      }
+    ]
+  }
+}
