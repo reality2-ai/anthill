@@ -13,6 +13,12 @@
 
 ---
 
+> **This implementation has reached its end.** Anthill is being completely rebuilt on [Reality2](https://reality2.ai) (R2) with Elixir/OTP and Rust NIFs — proper OTP supervision, Phoenix channels, GraphQL (Absinthe), and the full R2 sentant architecture. The new implementation will carry forward all the features documented here — Popperian epistemology, Bayesian confidence, rumination, inter-ANT communication, knowledge graph visualisation, citations, and more — but built properly on R2 primitives from the ground up.
+>
+> This codebase remains available as a reference and will continue to work, but active development has moved to the new architecture.
+
+---
+
 ## Building Stronger Ideas
 
 The strongest ideas are not the ones that go unchallenged — they are the ones that have been challenged from every angle and survived. A scientific theory that has withstood decades of attempts to disprove it is far more trustworthy than one that has simply been repeated many times. Diversity of thought is not a threat to strong ideas — it is what makes them strong. When an idea faces genuine adversity — scrutiny from different perspectives, contradiction from independent evidence, competition from rival explanations — and still stands, it has earned something that mere agreement can never provide: **confidence through resilience**.
