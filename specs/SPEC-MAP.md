@@ -2,7 +2,7 @@
 
 **Version:** 0.1 Draft
 **Date:** 2026-03-30
-**Total specs:** 20 planned (13 complete, 7 pending)
+**Total specs:** 20 (all complete)
 
 ---
 
@@ -48,7 +48,7 @@ flowchart TB
 | **[ANTHILL-TRUST](ANTHILL-TRUST.md)** | Trust group security, device provisioning, join codes, HMAC WebSocket | R2-TRUST, R2-PROVISION | ✅ Done |
 | **[ANTHILL-RUMINATION](ANTHILL-RUMINATION.md)** | Autonomous thinking — 9 modes, synthesis, refutation, competition, citations, meta-rumination | ANTHILL-KNOWLEDGE, ANTHILL-THURISAZ, ANTHILL-WORKER | ✅ Done |
 | **[ANTHILL-COMMS](ANTHILL-COMMS.md)** | Inter-ANT communication, colony inbox/outbox, Socratic discourse, loop detection | ANTHILL-SENTANT, ANTHILL-COLONY | ✅ Done |
-| **ANTHILL-FEDERATION** | Distributed deployment, relay protocol, web gateway sentant, multi-node topology | ANTHILL-COLONY, ANTHILL-TRUST, R2-INTERNET, R2-TRANSPORT | 🔲 Pending |
+| **[ANTHILL-FEDERATION](ANTHILL-FEDERATION.md)** | Distributed deployment, relay protocol, web gateway sentant, multi-node topology | ANTHILL-COLONY, ANTHILL-TRUST, R2-INTERNET, R2-TRANSPORT | ✅ Done |
 
 ## User Experience (Priority 2–3)
 
@@ -56,18 +56,18 @@ flowchart TB
 |------|-------------|------------|--------|
 | **[ANTHILL-DASHBOARD](ANTHILL-DASHBOARD.md)** | Web dashboard layout, tabs, responsive design, PWA, theme switching | ANTHILL-CHAT, ANTHILL-SENTANT | ✅ Done |
 | **[ANTHILL-GRAPH-UX](ANTHILL-GRAPH-UX.md)** | Knowledge graph interaction — 3D visualisation, node click/right-click, query bar | ANTHILL-KNOWLEDGE, ANTHILL-DASHBOARD | ✅ Done |
-| **ANTHILL-ONBOARDING** | Device provisioning UX, QR scan, join code, first ANT wizard, /doctor | ANTHILL-TRUST, ANTHILL-DASHBOARD | 🔲 Pending |
+| **[ANTHILL-ONBOARDING](ANTHILL-ONBOARDING.md)** | Device provisioning UX, QR scan, join code, first ANT wizard, /doctor | ANTHILL-TRUST, ANTHILL-DASHBOARD | ✅ Done |
 | **[ANTHILL-WORKERS-UX](ANTHILL-WORKERS-UX.md)** | Task visibility — workers tab, live progress, follow-up input, cancel, questions | ANTHILL-WORKER, ANTHILL-DASHBOARD | ✅ Done |
-| **ANTHILL-FILES** | File management UX — browse, upload, download, preview, sandboxed workspace | ANTHILL-SENTANT, ANTHILL-DASHBOARD | 🔲 Pending |
-| **ANTHILL-REPORTS** | Report/export workflow — scope, guidance, citations, background generation | ANTHILL-KNOWLEDGE, ANTHILL-DASHBOARD | 🔲 Pending |
-| **ANTHILL-CHANNELS** | Multi-channel experience — web, Telegram, Slack consistency, feature parity | ANTHILL-CHAT, ANTHILL-TRUST | 🔲 Pending |
+| **[ANTHILL-FILES](ANTHILL-FILES.md)** | File management UX — browse, upload, download, preview, sandboxed workspace | ANTHILL-SENTANT, ANTHILL-DASHBOARD | ✅ Done |
+| **[ANTHILL-REPORTS](ANTHILL-REPORTS.md)** | Report/export workflow — scope, guidance, citations, background generation | ANTHILL-KNOWLEDGE, ANTHILL-DASHBOARD | ✅ Done |
+| **[ANTHILL-CHANNELS](ANTHILL-CHANNELS.md)** | Multi-channel experience — web, Telegram, Slack consistency, feature parity | ANTHILL-CHAT, ANTHILL-TRUST | ✅ Done |
 
 ## Analysis & Output (Priority 3)
 
 | Spec | Description | Depends on | Status |
 |------|-------------|------------|--------|
-| **ANTHILL-THEMATIC** | Analysis pipelines — Braun & Clarke, /analyse, /specify, /test-vectors | ANTHILL-KNOWLEDGE, ANTHILL-WORKER | 🔲 Pending |
-| **ANTHILL-EXPORT** | Export format — self-contained HTML, 3D graph, AI narrative, citations | ANTHILL-KNOWLEDGE, ANTHILL-THURISAZ | 🔲 Pending |
+| **[ANTHILL-THEMATIC](ANTHILL-THEMATIC.md)** | Analysis pipelines — Braun & Clarke, /analyse, /specify, /test-vectors | ANTHILL-KNOWLEDGE, ANTHILL-WORKER | ✅ Done |
+| **[ANTHILL-EXPORT](ANTHILL-EXPORT.md)** | Export format — self-contained HTML, 3D graph, AI narrative, citations | ANTHILL-KNOWLEDGE, ANTHILL-THURISAZ | ✅ Done |
 
 ---
 
