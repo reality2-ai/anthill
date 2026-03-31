@@ -72,6 +72,13 @@ impl AiBackend for ClaudeCliBackend {
         if !request.working_dir.is_empty() {
             args.push("--add-dir".to_string());
             args.push(request.working_dir.clone());
+            // Explicitly load MCP server config from the working directory.
+            let mcp_settings = std::path::Path::new(&request.working_dir)
+                .join(".claude").join("settings.json");
+            if mcp_settings.exists() {
+                args.push("--settings".to_string());
+                args.push(mcp_settings.to_string_lossy().to_string());
+            }
         }
         args.push("--append-system-prompt".to_string());
         args.push(request.system_prompt.clone());
